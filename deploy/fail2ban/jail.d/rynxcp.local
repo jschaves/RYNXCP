@@ -1,0 +1,8 @@
+[rynxcp-auth]
+enabled = true
+port = http,https
+filter = rynxcp
+logpath = /var/log/rynxcp/auth.log
+maxretry = 5
+findtime = 600
+bantime = 3600

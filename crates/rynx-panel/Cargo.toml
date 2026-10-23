@@ -1,0 +1,22 @@
+[package]
+name = "rynx-panel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2.workspace = true
+hex.workspace = true
+once_cell.workspace = true
+rusqlite.workspace = true
+rynx-core = { path = "../rynx-core" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

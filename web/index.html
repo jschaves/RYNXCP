@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>RYNXCP · Panel de control</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0f14'/%3E%3Cpath d='M16 46V18h14c8 0 13 4.5 13 12 0 5-2.6 8.6-7 10.4L45 46h-9l-7.6-4.8H23V46z' fill='%2357e6a1'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="login" class="login-screen hidden">
+    <div class="login-panel">
+      <div class="brand large">
+        <span class="brand-mark">R</span>
+        <div>
+          <strong>RYNXCP</strong>
+          <small>Control de hosting</small>
+        </div>
+      </div>
+      <form id="login-form" class="stack">
+        <label class="field">
+          <span>Usuario</span>
+          <input name="username" autocomplete="username" required autofocus />
+        </label>
+        <label class="field">
+          <span>Contraseña</span>
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <button class="btn primary wide" type="submit">Entrar</button>
+        <p class="muted small">Sesión protegida con cookies HttpOnly, CSRF y Argon2id.</p>
+      </form>
+    </div>
+  </div>
+
+  <div id="app" class="shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">R</span>
+        <div>
+          <strong>RYNXCP</strong>
+          <small>v0.1</small>
+        </div>
+      </div>
+      <nav id="nav" class="nav"></nav>
+      <div class="sidebar-foot">
+        <span id="mode-badge" class="badge">conectando</span>
+        <span class="muted small">Protocolo CBOR v1</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div id="impersonation" class="impersonation hidden">
+        <span>Estás viendo el panel como <strong id="impersonated-name">—</strong>.</span>
+        <button class="btn tiny" id="stop-impersonation">Volver a mi cuenta</button>
+      </div>
+      <header class="topbar">
+        <div>
+          <h1 id="view-title">Resumen</h1>
+          <p id="view-subtitle" class="muted small"></p>
+        </div>
+        <div class="user-chip">
+          <div class="avatar" id="avatar">?</div>
+          <div class="user-meta">
+            <strong id="user-name">—</strong>
+            <span id="user-role" class="muted small">—</span>
+          </div>
+          <button class="btn ghost tiny" id="logout">Salir</button>
+        </div>
+      </header>
+      <section id="view" class="view" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toasts" class="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+[Unit]
+Description=RYNXCP nightly account backups
+After=network-online.target rynxd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=rynx
+Group=rynx
+ExecStart=/usr/local/bin/rynxctl --config /etc/rynxcp/api.toml backup all

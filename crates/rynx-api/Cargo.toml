@@ -1,0 +1,31 @@
+[package]
+name = "rynx-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rynx-api"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+http.workspace = true
+mime_guess.workspace = true
+rynx-core = { path = "../rynx-core" }
+rynx-panel = { path = "../rynx-panel" }
+rynx-proto = { path = "../rynx-proto" }
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http = { workspace = true, features = ["trace", "fs", "compression-gzip"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

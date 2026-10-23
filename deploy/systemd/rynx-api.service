@@ -1,0 +1,34 @@
+[Unit]
+Description=RYNXCP web API and panel
+Documentation=https://example.invalid/rynxcp
+After=network-online.target rynxd.service
+Wants=network-online.target
+Requires=rynxd.service
+
+[Service]
+Type=simple
+User=rynx
+Group=rynx
+UMask=0027
+ExecStart=/usr/local/bin/rynx-api --config /etc/rynxcp/api.toml
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=16384
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/rynxcp/panel
+ReadOnlyPaths=/etc/rynxcp /usr/share/rynxcp
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

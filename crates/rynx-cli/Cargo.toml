@@ -1,0 +1,20 @@
+[package]
+name = "rynx-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rynxctl"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rynx-api = { path = "../rynx-api" }
+rynx-core = { path = "../rynx-core" }
+rynx-panel = { path = "../rynx-panel" }
+rynx-proto = { path = "../rynx-proto" }
+serde_json.workspace = true
+tokio.workspace = true

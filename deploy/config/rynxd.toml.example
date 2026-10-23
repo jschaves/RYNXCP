@@ -1,0 +1,80 @@
+# RYNXCP daemon configuration (production, Debian/Ubuntu).
+# The daemon runs as root and owns every privileged operation.
+
+socket_path = "/run/rynxcp/rynxd.sock"
+state_dir = "/var/lib/rynxcp/rynxd"
+token_file = "/etc/rynxcp/daemon.token"
+audit_log = "/var/log/rynxcp/audit.log"
+
+# Never enable TCP in production.
+# tcp_listen = "127.0.0.1:7801"
+simulate = false
+
+socket_group = "rynx"
+uid_min = 2000
+uid_max = 60000
+
+home_root = "/home"
+apps_root = "/var/lib/rynxcp/apps"
+app_env_dir = "/etc/rynxcp/apps"
+webroot_root = "/var/www"
+acme_root = "/var/www/_acme"
+certs_root = "/etc/letsencrypt/live"
+certbot_bin = "certbot"
+
+nginx_sites_dir = "/etc/nginx/sites-available/rynxcp"
+nginx_enabled_dir = "/etc/nginx/sites-enabled"
+nginx_test_args = "-t"
+
+php_fpm_root = "/etc/php"
+php_socket_dir = "/run/php"
+
+systemd_dir = "/etc/systemd/system"
+
+# Default ACME contact when the panel does not provide one.
+# tls_email = "admin@example.com"
+
+# ---- backups ----
+backup_dir = "/var/backups/rynxcp"
+backup_retention = 7
+
+# ---- user rules / limits ----
+max_websites_per_account = 50
+max_apps_per_account = 20
+
+# ---- DNS (BIND authoritative zones) ----
+dns_enabled = false
+bind_zones_dir = "/etc/bind/zones"
+bind_conf_file = "/etc/bind/named.conf.rynxcp"
+bind_checkzone_bin = "named-checkzone"
+bind_reload_unit = "bind9"
+# Public nameservers announced in every zone (glue must exist at your registrar).
+dns_nameservers = ["ns1.example.com", "ns2.example.com"]
+default_ipv4 = "203.0.113.10"
+# default_ipv6 = "2001:db8::10"
+
+# ---- mail deliverability (SPF/DKIM/DMARC/MX) ----
+mail_enabled = false
+mail_hostname = "mail.example.com"
+dkim_selector = "mail"
+dkim_key_dir = "/etc/opendkim/keys"
+opendkim_keytable = "/etc/opendkim/KeyTable"
+opendkim_signingtable = "/etc/opendkim/SigningTable"
+
+# ---- databases (MariaDB, local socket) ----
+db_enabled = false
+mysql_bin = "mysql"
+
+# ---- FTP (Pure-FTPd virtual users, chroot per domain) ----
+ftp_enabled = false
+pure_pw_bin = "pure-pw"
+pure_pdb = "/etc/pure-ftpd/pureftpd.pdb"
+pure_passwd = "/etc/pure-ftpd/pureftpd.passwd"
+pure_ftpd_unit = "pure-ftpd"
+ftp_readonly_user = "rynxftp"
+
+# ---- firewall (isolated nftables table) ----
+firewall_enabled = false
+firewall_backend = "nftables"
+firewall_ssh_port = 22
+nft_bin = "nft"

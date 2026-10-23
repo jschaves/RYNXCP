@@ -1,0 +1,570 @@
+//! Deterministic renderers for every artifact owned by RYNXCP.
+//!
+//! Generated files carry a management marker. The daemon only ever deletes or
+//! rewrites files inside its managed roots and only when they carry that
+//! marker or were recorded in its state database.
+
+use std::fmt::Write as _;
+use std::path::Path;
+
+use rynx_proto::{AppSpec, DnsRecordView, PhpPoolSpec, Runtime, TlsMode, WebsiteSpec};
+
+pub const MARKER: &str = "managed-by: RYNXCP";
+
+pub struct NginxContext<'a> {
+    pub domain: &'a str,
+    pub aliases: &'a [String],
+    pub docroot: &'a str,
+    pub runtime: &'a Runtime,
+    pub app_port: Option<u16>,
+    pub php_socket: Option<&'a str>,
+    pub tls: &'a TlsMode,
+    pub cert_dir: Option<&'a Path>,
+    pub acme_root: &'a str,
+}
+
+fn server_names(ctx: &NginxContext<'_>) -> String {
+    let mut names = vec![ctx.domain.to_string()];
+    for alias in ctx.aliases {
+        if !names.iter().any(|n| n == alias) {
+            names.push(alias.clone());
+        }
+    }
+    names.join(" ")
+}
+
+fn proxy_location(port: u16) -> String {
+    format!(
+        "    location / {{\n\
+         \x20       proxy_pass http://127.0.0.1:{port};\n\
+         \x20       proxy_http_version 1.1;\n\
+         \x20       proxy_set_header Host $host;\n\
+         \x20       proxy_set_header X-Real-IP $remote_addr;\n\
+         \x20       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+         \x20       proxy_set_header X-Forwarded-Proto $scheme;\n\
+         \x20       proxy_set_header Upgrade $http_upgrade;\n\
+         \x20       proxy_set_header Connection \"upgrade\";\n\
+         \x20       proxy_read_timeout 300s;\n\
+         \x20       proxy_send_timeout 300s;\n\
+         \x20   }}\n"
+    )
+}
+
+fn common_server_body(ctx: &NginxContext<'_>, out: &mut String) {
+    let _ = writeln!(out, "    root {};", ctx.docroot);
+    let _ = writeln!(out, "    index index.php index.html index.htm;");
+    let _ = writeln!(out, "    client_max_body_size 64m;");
+    let _ = writeln!(out, "    server_tokens off;");
+    let _ = writeln!(out, "    add_header X-Content-Type-Options nosniff always;");
+    let _ = writeln!(out, "    add_header X-Frame-Options SAMEORIGIN always;");
+    let _ = writeln!(
+        out,
+        "    add_header Referrer-Policy strict-origin-when-cross-origin always;"
+    );
+    let _ = writeln!(
+        out,
+        "    add_header Permissions-Policy \"geolocation=(), camera=(), microphone=()\" always;"
+    );
+    let _ = writeln!(out, "    location ^~ /.well-known/acme-challenge/ {{");
+    let _ = writeln!(out, "        root {};", ctx.acme_root);
+    let _ = writeln!(out, "        default_type \"text/plain\";");
+    let _ = writeln!(out, "    }}");
+    let _ = writeln!(out, "    location ~ /\\.(?!well-known) {{ deny all; }}");
+    let _ = writeln!(
+        out,
+        "    location = /favicon.ico {{ log_not_found off; access_log off; }}"
+    );
+
+    match ctx.runtime {
+        Runtime::Static => {
+            let _ = writeln!(out, "    location / {{ try_files $uri $uri/ =404; }}");
+        }
+        Runtime::Php { .. } => {
+            let _ = writeln!(
+                out,
+                "    location / {{ try_files $uri $uri/ /index.php?$query_string; }}"
+            );
+            let socket = ctx.php_socket.unwrap_or("unix:/run/php/php-fpm.sock");
+            let socket = if socket.starts_with("unix:") {
+                socket.to_string()
+            } else {
+                format!("unix:{socket}")
+            };
+            let _ = writeln!(out, "    location ~ \\.php$ {{");
+            let _ = writeln!(out, "        try_files $uri =404;");
+            let _ = writeln!(out, "        include snippets/fastcgi-php.conf;");
+            let _ = writeln!(out, "        fastcgi_pass {socket};");
+            let _ = writeln!(out, "    }}");
+        }
+        _ => {
+            if let Some(port) = ctx.app_port {
+                out.push_str(&proxy_location(port));
+            } else {
+                let _ = writeln!(out, "    location / {{ return 503; }}");
+            }
+        }
+    }
+}
+
+/// Full Nginx virtual host for a website.
+pub fn nginx_site(ctx: &NginxContext<'_>) -> String {
+    let mut out = String::with_capacity(2048);
+    let _ = writeln!(out, "# {MARKER}");
+    let _ = writeln!(out, "# domain: {}", ctx.domain);
+    let names = server_names(ctx);
+
+    let tls_enabled =
+        matches!(ctx.tls, TlsMode::LetsEncrypt | TlsMode::Manual) && ctx.cert_dir.is_some();
+
+    let _ = writeln!(out, "server {{");
+    let _ = writeln!(out, "    listen 80;");
+    let _ = writeln!(out, "    listen [::]:80;");
+    let _ = writeln!(out, "    server_name {names};");
+    let _ = writeln!(
+        out,
+        "    access_log /var/log/nginx/{}.access.log;",
+        ctx.domain
+    );
+    let _ = writeln!(
+        out,
+        "    error_log /var/log/nginx/{}.error.log;",
+        ctx.domain
+    );
+    if tls_enabled {
+        let _ = writeln!(out, "    location ^~ /.well-known/acme-challenge/ {{");
+        let _ = writeln!(out, "        root {};", ctx.acme_root);
+        let _ = writeln!(out, "        default_type \"text/plain\";");
+        let _ = writeln!(out, "    }}");
+        let _ = writeln!(
+            out,
+            "    location / {{ return 301 https://$host$request_uri; }}"
+        );
+    } else {
+        common_server_body(ctx, &mut out);
+    }
+    let _ = writeln!(out, "}}\n");
+
+    if tls_enabled {
+        let cert_dir = ctx.cert_dir.expect("checked above").display();
+        let _ = writeln!(out, "server {{");
+        let _ = writeln!(out, "    listen 443 ssl;");
+        let _ = writeln!(out, "    listen [::]:443 ssl;");
+        let _ = writeln!(out, "    http2 on;");
+        let _ = writeln!(out, "    server_name {names};");
+        let _ = writeln!(out, "    ssl_certificate {cert_dir}/fullchain.pem;");
+        let _ = writeln!(out, "    ssl_certificate_key {cert_dir}/privkey.pem;");
+        let _ = writeln!(out, "    ssl_protocols TLSv1.2 TLSv1.3;");
+        let _ = writeln!(out, "    ssl_prefer_server_ciphers off;");
+        let _ = writeln!(out, "    ssl_session_cache shared:RYNX:10m;");
+        let _ = writeln!(out, "    ssl_session_timeout 1d;");
+        let _ = writeln!(out, "    ssl_session_tickets off;");
+        let _ = writeln!(
+            out,
+            "    add_header Strict-Transport-Security \"max-age=31536000\" always;"
+        );
+        let _ = writeln!(
+            out,
+            "    access_log /var/log/nginx/{}.access.log;",
+            ctx.domain
+        );
+        let _ = writeln!(
+            out,
+            "    error_log /var/log/nginx/{}.error.log;",
+            ctx.domain
+        );
+        common_server_body(ctx, &mut out);
+        let _ = writeln!(out, "}}");
+    }
+
+    out
+}
+
+/// FPM pool for a hosting account. One process pool per account.
+pub fn php_fpm_pool(spec: &PhpPoolSpec, socket: &str, home: &str) -> String {
+    let mut out = String::with_capacity(1024);
+    let _ = writeln!(out, "; {MARKER}");
+    let _ = writeln!(out, "[rynx-{}]", spec.username);
+    let _ = writeln!(out, "user = {}", spec.username);
+    let _ = writeln!(out, "group = {}", spec.username);
+    let _ = writeln!(out, "listen = {socket}");
+    let _ = writeln!(out, "listen.owner = www-data");
+    let _ = writeln!(out, "listen.group = www-data");
+    let _ = writeln!(out, "listen.mode = 0660");
+    let _ = writeln!(out, "pm = {}", spec.process_manager.as_str());
+
+    let children = spec.max_children.max(1);
+    match spec.process_manager {
+        rynx_proto::PhpProcessManager::Dynamic => {
+            let start = (children / 2).max(1);
+            let min_spare = (children / 4).max(1);
+            let max_spare = (children / 2).max(min_spare + 1).min(children);
+            let _ = writeln!(out, "pm.max_children = {children}");
+            let _ = writeln!(out, "pm.start_servers = {start}");
+            let _ = writeln!(out, "pm.min_spare_servers = {min_spare}");
+            let _ = writeln!(out, "pm.max_spare_servers = {max_spare}");
+        }
+        rynx_proto::PhpProcessManager::Ondemand => {
+            let _ = writeln!(out, "pm.max_children = {children}");
+            let _ = writeln!(out, "pm.process_idle_timeout = 10s");
+        }
+        rynx_proto::PhpProcessManager::Static => {
+            let _ = writeln!(out, "pm.max_children = {children}");
+        }
+    }
+
+    let _ = writeln!(out, "pm.max_requests = 500");
+    let _ = writeln!(out, "chdir = {home}");
+    let _ = writeln!(out, "catch_workers_output = yes");
+    let _ = writeln!(out, "decorate_workers_output = no");
+    let _ = writeln!(out, "clear_env = yes");
+    let _ = writeln!(out, "security.limit_extensions = .php");
+    let _ = writeln!(
+        out,
+        "php_admin_value[open_basedir] = {home}/:/tmp/:/usr/share/php/"
+    );
+    let _ = writeln!(
+        out,
+        "php_admin_value[memory_limit] = {}M",
+        spec.memory_limit_mb
+    );
+    let _ = writeln!(
+        out,
+        "php_admin_value[upload_max_filesize] = {}M",
+        spec.upload_max_mb
+    );
+    let _ = writeln!(
+        out,
+        "php_admin_value[post_max_size] = {}M",
+        spec.upload_max_mb.saturating_add(2)
+    );
+    let _ = writeln!(
+        out,
+        "php_admin_value[session.save_path] = {home}/.php/sessions"
+    );
+    let _ = writeln!(
+        out,
+        "php_admin_value[error_log] = {home}/logs/php-error.log"
+    );
+    let _ = writeln!(out, "php_admin_flag[log_errors] = on");
+    let _ = writeln!(out, "php_admin_flag[display_errors] = off");
+    let _ = writeln!(out, "php_admin_flag[expose_php] = off");
+    let _ = writeln!(
+        out,
+        "php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,pcntl_exec"
+    );
+    out
+}
+
+fn systemd_escape_arg(value: &str) -> String {
+    if value.is_empty() {
+        return "\"\"".into();
+    }
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./:=@+".contains(c))
+    {
+        return value.to_string();
+    }
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// systemd unit for a managed application (Node, Python, Ruby, Java, .NET, Go).
+pub fn systemd_unit(app: &AppSpec, working_dir: &str, env_file: &str) -> String {
+    let mut out = String::with_capacity(1024);
+    let _ = writeln!(out, "# {MARKER}");
+    let _ = writeln!(
+        out,
+        "[Unit]\nDescription=RYNXCP {engine} application {user}/{name}\nAfter=network-online.target\nWants=network-online.target\n",
+        engine = app.runtime.engine(),
+        user = app.username,
+        name = app.name
+    );
+    let _ = writeln!(out, "[Service]");
+    let _ = writeln!(out, "Type=simple");
+    let _ = writeln!(out, "User={}", app.username);
+    let _ = writeln!(out, "Group={}", app.username);
+    let _ = writeln!(out, "WorkingDirectory={working_dir}");
+    let _ = writeln!(out, "EnvironmentFile=-{env_file}");
+    let _ = writeln!(out, "Environment=PORT={}", app.port);
+    let _ = writeln!(out, "Environment=HOST=127.0.0.1");
+
+    let (program, args) = match &app.runtime {
+        Runtime::Go => (format!("{working_dir}/{}", app.command), &app.args),
+        _ => (app.command.clone(), &app.args),
+    };
+    let mut exec = format!("ExecStart={}", systemd_escape_arg(&program));
+    for arg in args {
+        exec.push(' ');
+        exec.push_str(&systemd_escape_arg(arg));
+    }
+    let _ = writeln!(out, "{exec}");
+    let _ = writeln!(out, "Restart=on-failure");
+    let _ = writeln!(out, "RestartSec=3");
+    let _ = writeln!(out, "KillSignal=SIGTERM");
+    let _ = writeln!(out, "TimeoutStopSec=20");
+    let _ = writeln!(out, "NoNewPrivileges=true");
+    let _ = writeln!(out, "PrivateTmp=true");
+    let _ = writeln!(out, "ProtectSystem=full");
+    let _ = writeln!(out, "ProtectKernelTunables=true");
+    let _ = writeln!(out, "ProtectControlGroups=true");
+    let _ = writeln!(out, "RestrictSUIDSGID=true");
+    let _ = writeln!(out, "LockPersonality=true");
+    let _ = writeln!(out, "ReadWritePaths={working_dir}");
+    let _ = writeln!(out, "\n[Install]\nWantedBy=multi-user.target");
+    out
+}
+
+pub fn app_env_file(app: &AppSpec) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "# {MARKER}");
+    for (key, value) in &app.env {
+        let _ = writeln!(out, "{key}={}", shell_quote_value(value));
+    }
+    out
+}
+
+fn shell_quote_value(value: &str) -> String {
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./:@%+".contains(c))
+    {
+        value.to_string()
+    } else {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+pub fn nginx_filename(domain: &str) -> String {
+    format!("{domain}.conf")
+}
+
+pub fn php_pool_filename(username: &str) -> String {
+    format!("rynx-{username}.conf")
+}
+
+pub fn app_env_filename(username: &str, app: &str) -> String {
+    format!("{username}-{app}.env")
+}
+
+pub fn website_docroot(spec: &WebsiteSpec, home: &str) -> String {
+    format!("{home}/{}", spec.docroot.trim_matches('/'))
+}
+
+fn zone_fqdn(value: &str) -> String {
+    if value.ends_with('.') {
+        value.to_string()
+    } else {
+        format!("{value}.")
+    }
+}
+
+fn txt_chunks(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.is_empty() {
+        return "\"\"".into();
+    }
+    let mut parts = Vec::new();
+    for chunk in chars.chunks(255) {
+        let text: String = chunk.iter().collect();
+        let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+        parts.push(format!("\"{escaped}\""));
+    }
+    parts.join(" ")
+}
+
+/// Render a BIND zone file. The SOA and NS records are derived from the
+/// configured public nameservers; every other record comes from the state DB.
+pub fn bind_zone(
+    domain: &str,
+    records: &[DnsRecordView],
+    nameservers: &[String],
+    serial: u32,
+    default_ttl: u32,
+) -> String {
+    let primary_ns = nameservers
+        .first()
+        .cloned()
+        .unwrap_or_else(|| format!("ns1.{domain}"));
+    let mut out = String::with_capacity(2048);
+    let _ = writeln!(out, "# {MARKER}");
+    let _ = writeln!(out, "$TTL {default_ttl}");
+    let _ = writeln!(
+        out,
+        "@ IN SOA {} hostmaster.{} (",
+        zone_fqdn(&primary_ns),
+        zone_fqdn(domain)
+    );
+    let _ = writeln!(out, "    {serial} ; serial");
+    let _ = writeln!(out, "    3600 ; refresh");
+    let _ = writeln!(out, "    900 ; retry");
+    let _ = writeln!(out, "    1209600 ; expire");
+    let _ = writeln!(out, "    300 ; minimum");
+    let _ = writeln!(out, ")");
+    for ns in nameservers {
+        let _ = writeln!(out, "@ IN NS {}", zone_fqdn(ns));
+    }
+
+    let mut sorted: Vec<&DnsRecordView> = records.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.spec
+            .name
+            .cmp(&b.spec.name)
+            .then_with(|| a.spec.rtype.cmp(&b.spec.rtype))
+            .then_with(|| a.spec.value.cmp(&b.spec.value))
+    });
+
+    for record in sorted {
+        let owner = record.spec.name.as_str();
+        let ttl = record.spec.ttl.max(60);
+        let value = &record.spec.value;
+        match record.spec.rtype.as_str() {
+            "MX" => {
+                let _ = writeln!(
+                    out,
+                    "{owner} {ttl} IN MX {} {}",
+                    record.spec.priority.unwrap_or(10),
+                    zone_fqdn(value)
+                );
+            }
+            "CNAME" | "NS" => {
+                let _ = writeln!(
+                    out,
+                    "{owner} {ttl} IN {} {}",
+                    record.spec.rtype,
+                    zone_fqdn(value)
+                );
+            }
+            "TXT" => {
+                let _ = writeln!(out, "{owner} {ttl} IN TXT {}", txt_chunks(value));
+            }
+            "SRV" => {
+                let parts: Vec<&str> = value.split_whitespace().collect();
+                if parts.len() == 4 {
+                    let _ = writeln!(
+                        out,
+                        "{owner} {ttl} IN SRV {} {} {} {}",
+                        parts[0],
+                        parts[1],
+                        parts[2],
+                        zone_fqdn(parts[3])
+                    );
+                }
+            }
+            "CAA" => {
+                let _ = writeln!(out, "{owner} {ttl} IN CAA {value}");
+            }
+            "A" | "AAAA" => {
+                let _ = writeln!(out, "{owner} {ttl} IN {} {value}", record.spec.rtype);
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+pub fn dkim_txt_record(public_pem: &str) -> String {
+    let body: String = public_pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    format!(
+        "v=DKIM1; k=rsa; p={}",
+        body.replace(char::is_whitespace, "")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rynx_proto::{PhpProcessManager, Runtime};
+    use std::collections::BTreeMap;
+
+    fn ctx<'a>(tls: &'a TlsMode, cert: Option<&'a Path>) -> NginxContext<'a> {
+        NginxContext {
+            domain: "example.com",
+            aliases: &[],
+            docroot: "/home/acme/public_html",
+            runtime: &Runtime::Static,
+            app_port: None,
+            php_socket: None,
+            tls,
+            cert_dir: cert,
+            acme_root: "/var/www/_acme",
+        }
+    }
+
+    #[test]
+    fn static_site_has_no_php_handler() {
+        let tls = TlsMode::Disabled;
+        let conf = nginx_site(&ctx(&tls, None));
+        assert!(conf.contains("server_name example.com;"));
+        assert!(!conf.contains("fastcgi_pass"));
+        assert!(conf.contains(MARKER));
+        assert!(!conf.contains("listen 443"));
+    }
+
+    #[test]
+    fn tls_site_redirects_and_uses_cert() {
+        let tls = TlsMode::LetsEncrypt;
+        let cert = Path::new("/etc/letsencrypt/live/example.com");
+        let conf = nginx_site(&ctx(&tls, Some(cert)));
+        assert!(conf.contains("listen 443 ssl;"));
+        assert!(conf.contains("return 301 https://$host$request_uri;"));
+        assert!(conf.contains("fullchain.pem"));
+        assert!(conf.contains("Strict-Transport-Security"));
+    }
+
+    #[test]
+    fn managed_site_proxies_to_loopback() {
+        let rt = Runtime::Node {
+            version: "22".into(),
+        };
+        let tls = TlsMode::Disabled;
+        let mut c = ctx(&tls, None);
+        c.runtime = &rt;
+        c.app_port = Some(4100);
+        let conf = nginx_site(&c);
+        assert!(conf.contains("proxy_pass http://127.0.0.1:4100;"));
+        assert!(!conf.contains("fastcgi_pass"));
+    }
+
+    #[test]
+    fn php_pool_restricts_functions() {
+        let spec = PhpPoolSpec {
+            username: "acme".into(),
+            version: "8.3".into(),
+            process_manager: PhpProcessManager::Dynamic,
+            max_children: 8,
+            memory_limit_mb: 256,
+            upload_max_mb: 64,
+            enabled: true,
+        };
+        let conf = php_fpm_pool(&spec, "/run/php/php8.3-fpm-acme.sock", "/home/acme");
+        assert!(conf.contains("user = acme"));
+        assert!(conf.contains("open_basedir"));
+        assert!(conf.contains("disable_functions"));
+        assert!(conf.contains("max_children = 8"));
+    }
+
+    #[test]
+    fn systemd_unit_quotes_arguments() {
+        let app = AppSpec {
+            username: "acme".into(),
+            name: "api".into(),
+            runtime: Runtime::Python {
+                version: "3.12".into(),
+            },
+            port: 4100,
+            entrypoint: "app.py".into(),
+            command: "gunicorn".into(),
+            args: vec!["app:app".into(), "--bind=127.0.0.1:4100".into()],
+            env: BTreeMap::new(),
+            enabled: true,
+        };
+        let unit = systemd_unit(&app, "/home/acme/apps/api", "/etc/rynxcp/apps/acme-api.env");
+        assert!(unit.contains("User=acme"));
+        assert!(unit.contains("ExecStart=gunicorn app:app --bind=127.0.0.1:4100"));
+        assert!(unit.contains("NoNewPrivileges=true"));
+    }
+}

@@ -1,0 +1,9 @@
+# Local development configuration (Windows or Linux).
+# Simulation mode renders every artifact inside ./data/daemon/sandbox and
+# never touches the operating system.
+
+simulate = true
+state_dir = "data/daemon"
+token_file = "data/daemon.token"
+audit_log = "data/audit.log"
+tcp_listen = "127.0.0.1:7801"

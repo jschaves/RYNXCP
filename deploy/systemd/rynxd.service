@@ -1,0 +1,22 @@
+[Unit]
+Description=RYNXCP privileged daemon
+Documentation=https://example.invalid/rynxcp
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0027
+ExecStart=/usr/local/bin/rynxd --config /etc/rynxcp/rynxd.toml
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+# The daemon must be able to run useradd, chown and systemctl. It does not
+# expose any network listener in production: it only binds a Unix socket.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

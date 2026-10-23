@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+*.pdb
+.env
+/data
+/sim
+crates/**/state.db
+crates/**/panel.db
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+Thumbs.db
+node_modules
