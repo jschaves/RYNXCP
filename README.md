@@ -32,22 +32,22 @@ reconciliation engine and UI are original.
 
 ```
  browser
-    â”‚  HTTPS + HttpOnly cookie + CSRF
-    â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”        Unix socket 0660 (group rynx)
-â”‚ rynx-api  (user rynx)        â”‚  CBOR  + token + SO_PEERCRED
-â”‚ Â· Axum, sessions, RBAC       â”‚ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ Â· Argon2id, lockout, logs    â”‚                                â”‚
-â”‚ Â· panel.db (separate SQLite) â”‚                                â–¼
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                                                 â”‚ rynxd  (root, no network)     â”‚
-                                                 â”‚ Â· re-validates every request  â”‚
-                                                 â”‚ Â· declarative reconciliation  â”‚
-                                                 â”‚ Â· useradd/chown/systemctl     â”‚
-                                                 â”‚ Â· nginx, php-fpm, bind,       â”‚
-                                                 â”‚   mariadb, pure-ftpd, nft     â”‚
-                                                 â”‚ Â· state.db + audit.log        â”‚
-                                                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+    |  HTTPS + HttpOnly cookie + CSRF
+    v
++------------------------------+        Unix socket 0660 (group rynx)
+| rynx-api  (user rynx)        |  CBOR  + token + SO_PEERCRED
+| - Axum, sessions, RBAC       | -------------------------------+
+| - Argon2id, lockout, logs    |                                |
+| - panel.db (separate SQLite) |                                v
++------------------------------+                 +-------------------------------+
+                                                 | rynxd  (root, no network)     |
+                                                 | - re-validates every request  |
+                                                 | - declarative reconciliation  |
+                                                 | - useradd/chown/systemctl     |
+                                                 | - nginx, php-fpm, bind,       |
+                                                 |   mariadb, pure-ftpd, nft     |
+                                                 | - state.db + audit.log        |
+                                                 +-------------------------------+
 ```
 
 Two databases are separated on purpose:
@@ -88,10 +88,10 @@ Compromising the web API does not grant direct write access to hosting state.
 
 | Runtime | Mechanism | Suggested versions |
 | --- | --- | --- |
-| PHP | Per-account FPM pool, `open_basedir`, dangerous functions disabled | 8.1 â€“ 8.5 |
+| PHP | Per-account FPM pool, `open_basedir`, dangerous functions disabled | 8.1 - 8.5 |
 | Node.js | systemd + reverse proxy | 18, 20, 22, 24 |
-| Python | gunicorn / uvicorn under systemd | 3.10 â€“ 3.13 |
-| Ruby | puma / rackup under systemd | 3.2 â€“ 3.4 |
+| Python | gunicorn / uvicorn under systemd | 3.10 - 3.13 |
+| Ruby | puma / rackup under systemd | 3.2 - 3.4 |
 | Java | `java -jar` under systemd | 11, 17, 21 |
 | .NET | `dotnet App.dll` under systemd | 8, 9 |
 | Go | compiled binary under systemd | n/a |
@@ -100,7 +100,7 @@ Compromising the web API does not grant direct write access to hosting state.
 Each application gets a shell-less user, a validated loopback port, a hardened
 systemd unit, a `0640` environment file and a vhost with security headers.
 
-## DNS and email (SPF Â· DKIM Â· DMARC)
+## DNS and email (SPF / DKIM / DMARC)
 
 With `dns_enabled = true`, every site gets a BIND zone with SOA, NS, A/AAAA, CNAME,
 CAA and email records. With `mail_enabled = true` and `mail_hostname` configured,
@@ -161,11 +161,11 @@ sudo bash deploy/preinstall.sh
 
 It is interactive and asks for:
 
-1. **Panel host** — detected automatically (`hostname -f`, otherwise the public
-   IP) and offered as the default.
-2. **Admin email** — defaults to `admin@<host>` when the host is a domain.
-3. **Admin password** — hidden input, confirmed, minimum 12 characters and at
-   least three character classes; it is never written to the log.
+1. **Panel host** - detected automatically (`hostname -f`, otherwise the public IP)
+   and offered as the default.
+2. **Admin email** - defaults to `admin@<host>` when the host is a domain.
+3. **Admin password** - hidden input, confirmed, minimum 12 characters and at least
+   three character classes; it is never written to the log.
 
 Non-interactive usage:
 
@@ -179,28 +179,27 @@ What it installs and configures:
 - Security updates plus `unattended-upgrades`.
 - **PHP 8.5** from the security-maintained Ondrej (Ubuntu) or Sury (Debian)
   repository, with hardened `php.ini` defaults and OPcache.
-- Nginx, Certbot, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban,
-  nftables, logrotate.
+- Nginx, Certbot, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban, nftables,
+  logrotate.
 - Node.js, Python 3, Ruby, Java, Go and .NET when the distribution provides it.
-- The Rust toolchain when missing, then `cargo build --release` and
-  `deploy/install.sh`.
+- The Rust toolchain when missing, then `cargo build --release` and `deploy/install.sh`.
 - DNS, database, FTP and firewall enabled; the SSH port is detected from
   `sshd_config` and always kept open.
 - A panel virtual host and, for a domain with working DNS, a Let's Encrypt
-  certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays
-  on HTTP and the script explains how to retry.
+  certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
+  HTTP and the script explains how to retry.
 
-The panel is published at `http(s)://<host>` and the administrator is created
-with the email/password you entered. Email DNS (`mail_enabled`) stays disabled
-until a real mail server exists; zones still include SPF/DKIM/DMARC records when
-mail records are provisioned from the UI.
+The panel is published at `http(s)://<host>` and the administrator is created with
+the email/password you entered. Email DNS (`mail_enabled`) stays disabled until a
+real mail server exists; zones still include SPF/DKIM/DMARC records when mail records
+are provisioned from the UI.
 
 ## Installing on Debian/Ubuntu (manual)
 
 Prefer the pre-installer above unless you need full control.
 
-System dependencies. Add the PHP 8.5 repository first (Ondrej PPA on Ubuntu,
-Sury on Debian); the pre-installer does this automatically:
+System dependencies. Add the PHP 8.5 repository first (Ondrej PPA on Ubuntu, Sury on
+Debian); the pre-installer does this automatically:
 
 ```bash
 sudo apt update
@@ -336,18 +335,17 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1   # Windows
 
 ## License
 
-RYNXCP is free software: you can redistribute it and/or modify it under the
-terms of the **GNU Affero General Public License**, version 3 or (at your option)
-any later version. See [LICENSE](LICENSE) for the full text.
+RYNXCP is free software: you can redistribute it and/or modify it under the terms
+of the **GNU Affero General Public License**, version 3 or (at your option) any later
+version. See [LICENSE](LICENSE) for the full text.
 
-The software is provided **“AS IS”, WITHOUT WARRANTY OF ANY KIND**, and the
-authors accept **no liability** for any damage, data loss, service interruption
-or security incident arising from its use. Sections 15 and 16 of the license
-contain the full warranty disclaimer and limitation of liability.
+The software is provided **"AS IS", WITHOUT WARRANTY OF ANY KIND**, and the authors
+accept **no liability** for any damage, data loss, service interruption or security
+incident arising from its use. Sections 15 and 16 of the license contain the full
+warranty disclaimer and limitation of liability.
 
-Because the AGPL applies to network use, if you run a modified version of
-RYNXCP as a service you must offer its complete corresponding source code to
-remote users.
+Because the AGPL applies to network use, if you run a modified version of RYNXCP as
+a service you must offer its complete corresponding source code to remote users.
 
 Copyright (C) 2026 RYNXCP contributors.
 
@@ -358,7 +356,3 @@ Copyright (C) 2026 RYNXCP contributors.
 - Reverse PTR is configured at the IP provider.
 - FTP uses Pure-FTPd's global TLS certificate (explicit FTPS).
 - Multi-node, secondary DNS, remote metrics and 2FA are planned for later versions.
-
-
-
-
