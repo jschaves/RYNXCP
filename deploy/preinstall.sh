@@ -1,0 +1,556 @@
+#!/usr/bin/env bash
+# RYNXCP one-shot pre-installer for Debian/Ubuntu.
+#
+# Installs the full service stack (Nginx, PHP 8.5 from the security-maintained
+# repository, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban, nftables,
+# Node.js, Python, Ruby, Java, Go and .NET when available), builds RYNXCP,
+# installs the panel, asks for the panel host, admin email and password, and
+# publishes the panel behind Nginx with optional Let's Encrypt TLS.
+#
+# Usage:
+#   sudo bash deploy/preinstall.sh
+#   sudo RYNX_ADMIN_PASSWORD='...' bash deploy/preinstall.sh --host panel.example.com --email admin@example.com --yes
+#
+# This script never logs the admin password.
+
+set -Eeuo pipefail
+
+PANEL_USER="admin"
+HOST_ARG=""
+EMAIL_ARG=""
+PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
+ASSUME_YES=0
+NO_TLS=0
+SSH_PORT=""
+DISTRO_ID=""
+DISTRO_CODENAME=""
+PUBLIC_IP=""
+HOST=""
+PANEL_SCHEME="http"
+TLS_OK=0
+LOG="/var/log/rynxcp/preinstall.log"
+
+usage() {
+  cat <<'EOF'
+RYNXCP pre-installer
+
+Options:
+  --host <fqdn|ip>      Panel hostname or public IP. Auto-detected and offered
+                        as the default when omitted.
+  --email <address>     Admin email. Defaults to admin@<host> for domains.
+  --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD env var to
+                        avoid exposing it in the process list.
+  --no-tls              Do not request a Let's Encrypt certificate.
+  --yes                 Assume yes for confirmations (non-interactive).
+  -h, --help            Show this help.
+
+Environment:
+  RYNX_ADMIN_PASSWORD  Admin password (recommended over --password).
+  RYNX_HOST            Same as --host.
+  RYNX_ADMIN_EMAIL     Same as --email.
+EOF
+}
+
+log() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host) HOST_ARG="${2:-}"; shift 2 ;;
+    --email) EMAIL_ARG="${2:-}"; shift 2 ;;
+    --password) PASSWORD_ARG="${2:-}"; shift 2 ;;
+    --no-tls) NO_TLS=1; shift ;;
+    --yes) ASSUME_YES=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown argument: $1 (use --help)" ;;
+  esac
+done
+
+[[ "${EUID}" -eq 0 ]] || die "run this script as root (sudo bash deploy/preinstall.sh)"
+
+mkdir -p /var/log/rynxcp
+exec > >(tee -a "$LOG") 2>&1
+trap 'code=$?; printf "\n\033[1;31mFAILED\033[0m at line %s (exit %s). Log: %s\n" "$LINENO" "$code" "$LOG" >&2; exit "$code"' ERR
+
+# ---------------------------------------------------------------------------
+# Distribution detection
+# ---------------------------------------------------------------------------
+[[ -r /etc/os-release ]] || die "/etc/os-release not found; Debian or Ubuntu required"
+# shellcheck disable=SC1091
+. /etc/os-release
+DISTRO_ID="${ID:-}"
+DISTRO_CODENAME="${VERSION_CODENAME:-}"
+[[ -n "$DISTRO_CODENAME" ]] || DISTRO_CODENAME="$(lsb_release -sc 2>/dev/null || true)"
+
+case "$DISTRO_ID" in
+  ubuntu|debian) ;;
+  *) die "unsupported distribution '$DISTRO_ID'; Debian or Ubuntu required" ;;
+esac
+[[ -n "$DISTRO_CODENAME" ]] || die "cannot determine the distribution codename"
+
+log "Detected ${PRETTY_NAME:-$DISTRO_ID} (${DISTRO_CODENAME})"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+is_ipv4() {
+  local ip="$1" octet
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS=. read -r -a parts <<<"$ip"
+  for octet in "${parts[@]}"; do
+    (( octet >= 0 && octet <= 255 )) || return 1
+  done
+  return 0
+}
+
+is_domain() {
+  [[ "$1" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]
+}
+
+is_email() {
+  [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$ ]]
+}
+
+normalize_host() {
+  local value="$1"
+  value="${value#http://}"
+  value="${value#https://}"
+  value="${value%%/*}"
+  value="${value,,}"
+  printf '%s' "$value"
+}
+
+detect_public_ip() {
+  local ip
+  ip="$(curl -4 -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+  if is_ipv4 "$ip"; then
+    printf '%s' "$ip"
+    return 0
+  fi
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  if is_ipv4 "$ip"; then
+    printf '%s' "$ip"
+    return 0
+  fi
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+detect_host_default() {
+  local fqdn
+  fqdn="$(hostname -f 2>/dev/null || true)"
+  fqdn="${fqdn,,}"
+  if is_domain "$fqdn" && [[ "$fqdn" != *.localhost ]]; then
+    printf '%s' "$fqdn"
+    return 0
+  fi
+  PUBLIC_IP="$(detect_public_ip)"
+  if is_ipv4 "$PUBLIC_IP"; then
+    printf '%s' "$PUBLIC_IP"
+    return 0
+  fi
+  printf '%s' "127.0.0.1"
+}
+
+prompt_default() {
+  local prompt="$1" default="$2" value=""
+  if [[ -t 0 ]]; then
+    read -r -p "$prompt [$default]: " value || true
+    value="${value:-$default}"
+  else
+    value="$default"
+  fi
+  printf '%s' "$value"
+}
+
+confirmation() {
+  local prompt="$1" answer=""
+  if (( ASSUME_YES )); then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    return 0
+  fi
+  read -r -p "$prompt [Y/n]: " answer || true
+  [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]
+}
+
+validate_password() {
+  local password="$1" classes=0 lower email_local
+  (( ${#password} >= 12 )) || die "the admin password must be at least 12 characters"
+  (( ${#password} <= 256 )) || die "the admin password is too long"
+  [[ "$password" =~ [a-z] ]] && classes=$((classes + 1))
+  [[ "$password" =~ [A-Z] ]] && classes=$((classes + 1))
+  [[ "$password" =~ [0-9] ]] && classes=$((classes + 1))
+  [[ "$password" =~ [^A-Za-z0-9] ]] && classes=$((classes + 1))
+  (( classes >= 3 )) || die "the admin password must combine at least 3 character classes"
+  lower="${password,,}"
+  [[ "$lower" != *"$PANEL_USER"* ]] || die "the admin password must not contain the username"
+  email_local="${EMAIL%%@*}"
+  email_local="${email_local,,}"
+  if (( ${#email_local} >= 3 )) && [[ "$lower" == *"$email_local"* ]]; then
+    die "the admin password must not contain the email mailbox"
+  fi
+}
+
+set_php_ini() {
+  local file="$1" key="$2" value="$3"
+  [[ -f "$file" ]] || return 0
+  if grep -qE "^[;[:space:]]*${key}[[:space:]]*=" "$file"; then
+    sed -i -E "s|^[;[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
+  else
+    printf '\n%s = %s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+set_toml() {
+  local file="$1" key="$2" value="$3"
+  [[ -f "$file" ]] || return 0
+  if grep -qE "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+    sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
+  else
+    printf '\n%s = %s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Interactive input (host / email / password)
+# ---------------------------------------------------------------------------
+DEFAULT_HOST="$(detect_host_default)"
+HOST="$(normalize_host "${HOST_ARG:-${RYNX_HOST:-}}")"
+if [[ -z "$HOST" ]]; then
+  HOST="$(normalize_host "$(prompt_default 'Panel hostname or public IP' "$DEFAULT_HOST")")"
+fi
+[[ -n "$HOST" ]] || die "the panel host is required"
+is_domain "$HOST" || is_ipv4 "$HOST" || die "invalid host '$HOST' (use a FQDN or an IPv4 address)"
+
+if is_domain "$HOST"; then
+  [[ -n "$PUBLIC_IP" ]] || PUBLIC_IP="$(detect_public_ip)"
+  resolved="$(getent ahostsv4 "$HOST" 2>/dev/null | awk 'NR==1 {print $1}')"
+  if [[ -z "$resolved" ]]; then
+    warn "DNS for $HOST does not resolve yet; Let's Encrypt issuance will probably fail"
+  elif is_ipv4 "$PUBLIC_IP" && [[ "$resolved" != "$PUBLIC_IP" ]]; then
+    warn "$HOST resolves to $resolved but this server's public IP is $PUBLIC_IP"
+  fi
+fi
+
+EMAIL="$(normalize_host "${EMAIL_ARG:-${RYNX_ADMIN_EMAIL:-}}")"
+EMAIL="${EMAIL,,}"
+if [[ -z "$EMAIL" ]]; then
+  if is_domain "$HOST"; then
+    EMAIL="$(prompt_default 'Admin email' "admin@$HOST")"
+  else
+    EMAIL="$(prompt_default 'Admin email' "admin@example.com")"
+  fi
+fi
+is_email "$EMAIL" || die "invalid admin email '$EMAIL'"
+
+if [[ -z "$PASSWORD_ARG" ]]; then
+  if [[ ! -t 0 ]]; then
+    die "set RYNX_ADMIN_PASSWORD or pass --password when running non-interactively"
+  fi
+  while true; do
+    read -r -s -p "Admin password: " PASSWORD_ARG || true
+    printf '\n'
+    read -r -s -p "Repeat admin password: " password_confirm || true
+    printf '\n'
+    [[ "$PASSWORD_ARG" == "$password_confirm" ]] || { warn "passwords do not match"; continue; }
+    break
+  done
+fi
+validate_password "$PASSWORD_ARG"
+
+if ! confirmation "Install RYNXCP and the full service stack on this server now?"; then
+  die "aborted by the user"
+fi
+
+SSH_PORT="$(
+  grep -rhE '^[[:space:]]*Port[[:space:]]+[0-9]+' \
+    /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
+    | awk '{print $2; exit}'
+)"
+SSH_PORT="${SSH_PORT:-22}"
+
+log "Panel host: $HOST"
+log "Admin: $PANEL_USER <$EMAIL>"
+log "SSH port kept open in the firewall: $SSH_PORT"
+
+# ---------------------------------------------------------------------------
+# Base system and security updates
+# ---------------------------------------------------------------------------
+export DEBIAN_FRONTEND=noninteractive
+
+log "Refreshing APT metadata and applying security updates"
+apt-get update
+apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+
+log "Installing base tooling"
+apt-get install -y --no-install-recommends \
+  ca-certificates curl gnupg lsb-release apt-transport-https \
+  software-properties-common build-essential pkg-config git openssl \
+  nftables fail2ban logrotate unattended-upgrades
+
+# ---------------------------------------------------------------------------
+# PHP 8.5 from the security-maintained repositories
+# ---------------------------------------------------------------------------
+log "Adding the PHP 8.5 repository (Ondrej/Sury, security-maintained)"
+if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+  apt-get install -y software-properties-common
+  add-apt-repository -y ppa:ondrej/php
+else
+  install -d -m 0755 /usr/share/keyrings
+  curl -fsSL --max-time 60 https://packages.sury.org/php/apt.gpg \
+    -o /usr/share/keyrings/sury-php.gpg
+  printf 'deb [signed-by=/usr/share/keyrings/sury-php.gpg] https://packages.sury.org/php/ %s main\n' \
+    "$DISTRO_CODENAME" > /etc/apt/sources.list.d/sury-php.list
+fi
+apt-get update
+apt-cache show php8.5-fpm >/dev/null 2>&1 || die "PHP 8.5 is not available for $DISTRO_CODENAME; check the PHP repository"
+
+log "Installing web, database, DNS, FTP, mail tooling, firewall and runtimes"
+apt-get install -y --no-install-recommends \
+  nginx certbot python3-certbot-nginx \
+  php8.5-fpm php8.5-cli php8.5-common php8.5-mysql php8.5-curl php8.5-mbstring \
+  php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath php8.5-opcache \
+  mariadb-server bind9 bind9-utils bind9-dnsutils \
+  pure-ftpd opendkim opendkim-tools \
+  nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
+
+# .NET is best-effort: package availability differs between releases.
+if ! command -v dotnet >/dev/null 2>&1; then
+  if curl -fsSL --max-time 60 \
+    "https://packages.microsoft.com/config/${DISTRO_ID}/${VERSION_ID}/packages-microsoft-prod.deb" \
+    -o /tmp/packages-microsoft-prod.deb 2>/dev/null; then
+    dpkg -i /tmp/packages-microsoft-prod.deb >/dev/null 2>&1 || true
+    apt-get update >/dev/null 2>&1 || true
+    apt-get install -y dotnet-sdk-8.0 || warn ".NET SDK 8 could not be installed automatically"
+  else
+    warn ".NET repository is not available for $DISTRO_ID $VERSION_ID; install the SDK manually if needed"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# PHP security hardening and unattended security updates
+# ---------------------------------------------------------------------------
+log "Hardening PHP 8.5 defaults"
+for ini in /etc/php/8.5/fpm/php.ini /etc/php/8.5/cli/php.ini; do
+  set_php_ini "$ini" "expose_php" "Off"
+  set_php_ini "$ini" "display_errors" "Off"
+  set_php_ini "$ini" "log_errors" "On"
+  set_php_ini "$ini" "session.cookie_httponly" "1"
+  set_php_ini "$ini" "session.cookie_samesite" "Strict"
+  set_php_ini "$ini" "session.use_strict_mode" "1"
+  set_php_ini "$ini" "allow_url_include" "Off"
+  set_php_ini "$ini" "opcache.enable" "1"
+done
+
+cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+systemctl enable --now unattended-upgrades >/dev/null 2>&1 || warn "unattended-upgrades could not be enabled"
+
+# ---------------------------------------------------------------------------
+# Enable services
+# ---------------------------------------------------------------------------
+log "Enabling services"
+systemctl enable --now nginx
+systemctl enable --now php8.5-fpm
+systemctl enable --now mariadb
+systemctl enable --now bind9
+systemctl enable --now pure-ftpd
+systemctl enable --now fail2ban
+systemctl enable --now nftables >/dev/null 2>&1 || true
+
+# ---------------------------------------------------------------------------
+# Rust toolchain and RYNXCP build
+# ---------------------------------------------------------------------------
+if ! command -v cargo >/dev/null 2>&1; then
+  log "Installing the Rust toolchain"
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+fi
+if [[ -f "$HOME/.cargo/env" ]]; then
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
+fi
+command -v cargo >/dev/null 2>&1 || die "cargo is not available after installing Rust"
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+log "Building RYNXCP (release)"
+CARGO_NET_RETRY=3 cargo build --release
+
+log "Installing RYNXCP (daemon, API, CLI, web UI, units, timers)"
+bash "$ROOT_DIR/deploy/install.sh"
+
+if command -v named-checkconf >/dev/null 2>&1; then
+  named-checkconf || warn "BIND configuration check failed"
+  systemctl reload bind9 >/dev/null 2>&1 || warn "BIND could not be reloaded"
+fi
+
+# ---------------------------------------------------------------------------
+# Configure the panel host and security policy
+# ---------------------------------------------------------------------------
+DAEMON_CONF="/etc/rynxcp/rynxd.toml"
+API_CONF="/etc/rynxcp/api.toml"
+[[ -f "$DAEMON_CONF" ]] || die "$DAEMON_CONF was not created by the installer"
+[[ -f "$API_CONF" ]] || die "$API_CONF was not created by the installer"
+
+log "Configuring RYNXCP for $HOST"
+if [[ -n "$PUBLIC_IP" ]] && is_ipv4 "$PUBLIC_IP"; then
+  set_toml "$DAEMON_CONF" "default_ipv4" "\"$PUBLIC_IP\""
+fi
+set_toml "$DAEMON_CONF" "simulate" "false"
+set_toml "$DAEMON_CONF" "dns_enabled" "true"
+set_toml "$DAEMON_CONF" "db_enabled" "true"
+set_toml "$DAEMON_CONF" "ftp_enabled" "true"
+set_toml "$DAEMON_CONF" "firewall_enabled" "true"
+set_toml "$DAEMON_CONF" "firewall_backend" "\"nftables\""
+set_toml "$DAEMON_CONF" "firewall_ssh_port" "$SSH_PORT"
+set_toml "$DAEMON_CONF" "tls_email" "\"$EMAIL\""
+# Email DNS requires a mail server; keep it disabled until one exists.
+set_toml "$DAEMON_CONF" "mail_enabled" "false"
+if is_domain "$HOST"; then
+  set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
+fi
+
+set_toml "$API_CONF" "trust_proxy_headers" "true"
+
+# Nginx panel vhost (HTTP first; certbot upgrades it to TLS).
+PANEL_SITE="/etc/nginx/sites-available/rynxcp-panel"
+cat >"$PANEL_SITE" <<EOF
+# managed-by: RYNXCP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $HOST;
+
+    client_max_body_size 32m;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/_acme;
+        default_type "text/plain";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+    }
+}
+EOF
+ln -sfn "$PANEL_SITE" /etc/nginx/sites-enabled/rynxcp-panel
+nginx -t
+systemctl reload nginx
+
+if is_domain "$HOST" && (( NO_TLS == 0 )); then
+  log "Requesting the Let's Encrypt certificate for $HOST"
+  if certbot --nginx -d "$HOST" --non-interactive --agree-tos -m "$EMAIL" \
+      --redirect --keep-until-expiring; then
+    TLS_OK=1
+    PANEL_SCHEME="https"
+  elif [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
+    TLS_OK=1
+    PANEL_SCHEME="https"
+    warn "reusing the existing certificate for $HOST"
+  else
+    warn "certbot failed; the panel stays on HTTP. Fix DNS and run certbot later."
+  fi
+elif ! is_domain "$HOST"; then
+  warn "the panel host is an IP address; Let's Encrypt is not available and the panel will use HTTP"
+fi
+
+if (( TLS_OK == 1 )); then
+  set_toml "$API_CONF" "secure_cookies" "true"
+  set_toml "$API_CONF" "public_url" "\"https://$HOST\""
+else
+  set_toml "$API_CONF" "secure_cookies" "false"
+  set_toml "$API_CONF" "public_url" "\"http://$HOST\""
+fi
+
+log "Restarting RYNXCP"
+systemctl restart rynxd
+systemctl restart rynx-api
+sleep 2
+systemctl is-active --quiet rynxd || die "rynxd failed to start (journalctl -u rynxd)"
+systemctl is-active --quiet rynx-api || die "rynx-api failed to start (journalctl -u rynx-api)"
+
+# ---------------------------------------------------------------------------
+# Create or update the administrator
+# ---------------------------------------------------------------------------
+log "Creating the panel administrator"
+export RYNXCTL_PASSWORD="$PASSWORD_ARG"
+if rynxctl --config "$API_CONF" admin list 2>/dev/null | awk '{print $1}' | grep -qx "$PANEL_USER"; then
+  rynxctl --config "$API_CONF" admin passwd "$PANEL_USER"
+else
+  rynxctl --config "$API_CONF" admin create "$PANEL_USER" --email "$EMAIL" --role owner
+fi
+unset RYNXCTL_PASSWORD
+
+# ---------------------------------------------------------------------------
+# Verification
+# ---------------------------------------------------------------------------
+log "Verifying the installation"
+rynxctl --config "$API_CONF" daemon ping >/dev/null
+curl -fsS --max-time 10 "http://127.0.0.1:8080/api/v1/health" >/dev/null
+
+for _ in $(seq 1 10); do
+  if nft list table inet rynxcp >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! nft list table inet rynxcp >/dev/null 2>&1; then
+  warn "the nftables table was not applied yet; open the Firewall view once and save a rule"
+fi
+
+if (( TLS_OK == 1 )); then
+  curl -fsS --max-time 15 "https://$HOST/api/v1/health" >/dev/null || \
+    warn "HTTPS health check failed; verify DNS and the certificate manually"
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+PHP_VERSION="$(php -r 'echo PHP_VERSION;' 2>/dev/null || true)"
+cat <<EOF
+
+RYNXCP is ready.
+
+  Panel:    ${PANEL_SCHEME}://${HOST}
+  User:     ${PANEL_USER}
+  Email:    ${EMAIL}
+  Password: (the value you entered; it was not logged)
+  PHP:      ${PHP_VERSION:-8.5}
+  SSH port: ${SSH_PORT} (always allowed by the firewall)
+
+Installed:
+  Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
+  OpenDKIM tooling, fail2ban, nftables, unattended-upgrades, Node.js, Python,
+  Ruby, Java, Go${DOTNET_NOTE:-}
+
+Timers:
+  rynxcp-cert-renew.timer  daily Let's Encrypt renewal
+  rynxcp-backup.timer      nightly account backups
+
+Next steps:
+  1. Point the NS records of each hosted domain to ns1.$HOST / ns2.$HOST or
+     use your provider's DNS. Create glue/A records for ns1 and ns2.
+  2. The reverse PTR of ${PUBLIC_IP:-your public IP} must resolve to your mail
+     hostname before sending email.
+  3. Email DNS (MX/SPF/DKIM/DMARC) is provisioned per zone, but
+     mail_enabled stays false until a mail server (Postfix/Dovecot) exists.
+  4. Log in, open "Programas" to review updates and "Consola" for diagnostics.
+
+Log: $LOG
+EOF
+if [[ -f /var/run/reboot-required ]]; then
+  warn "a reboot is recommended to finish kernel/library updates"
+fi
+
+

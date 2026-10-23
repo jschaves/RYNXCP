@@ -1849,7 +1849,7 @@ impl Reconciler {
         out.push_str(&set("blocked4", "ipv4_addr", &blocked4));
         out.push_str(&set("blocked6", "ipv6_addr", &blocked6));
         out.push_str("  chain input {\n");
-        out.push_str("    type filter hook input priority filter; policy accept;\n");
+        out.push_str("    type filter hook input priority filter; policy drop;\n");
         out.push_str("    ct state established,related accept\n");
         out.push_str("    iif \"lo\" accept\n");
         if !whitelist4.is_empty() {
@@ -1885,13 +1885,16 @@ impl Reconciler {
             }
         }
         out.push_str("    tcp dport { 80, 443 } accept\n");
+        out.push_str("    tcp dport 53 accept\n");
+        out.push_str("    udp dport 53 accept\n");
+        out.push_str("    tcp dport { 21, 30000-50000 } accept\n");
         out.push_str("    ip protocol icmp accept\n");
         out.push_str("    ip6 nexthdr ipv6-icmp accept\n");
         out.push_str("  }\n}\n");
         out
     }
 
-    async fn firewall_apply(&self) -> Result<(), WireError> {
+    pub async fn firewall_apply(&self) -> Result<(), WireError> {
         if !self.cfg.firewall_enabled {
             return Ok(());
         }
@@ -2157,7 +2160,7 @@ fn trim_console_output(mut text: String) -> String {
     text.retain(|c| c == '\n' || c == '\t' || !c.is_control());
     if text.chars().count() > 64_000 {
         text = text.chars().take(64_000).collect();
-        text.push_str("\nÃ¢â‚¬Â¦ (truncated)");
+        text.push_str("\nÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ (truncated)");
     }
     text
 }

@@ -202,6 +202,11 @@ try {
     if (-not ($fw.state.whitelist -contains '198.51.100.8')) { throw 'whitelist not stored' }
     $null = RequestJson 'DELETE' '/api/v1/firewall/block/198.51.100.7'
     $null = RequestJson 'DELETE' '/api/v1/firewall/whitelist/198.51.100.8'
+    $rulesetFile = Join-Path $root 'data/daemon/sim-firewall/ruleset.nft'
+    if (-not (Test-Path $rulesetFile)) { throw 'firewall ruleset was not generated' }
+    if (-not (Select-String -Path $rulesetFile -Pattern 'policy drop' -Quiet)) {
+        throw 'firewall is not using a default-drop policy'
+    }
 
     Write-Host '==> security and impersonation'
     $stats = RequestJson 'GET' '/api/v1/security/stats?hours=24'
@@ -274,5 +279,6 @@ try {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
 }
+
 
 

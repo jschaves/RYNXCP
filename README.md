@@ -1,214 +1,266 @@
 # RYNXCP
 
-Panel de control de hosting **original, escrito desde cero en Rust** para Debian/Ubuntu.
-Gestiona VPS y servidores dedicados con un modelo declarativo: describes el estado
-deseado (cuentas, sitios, runtimes, DNS, bases de datos, FTP, backups, cortafuegos) y
-el daemon lo reconcilia contra el sistema operativo.
+A **from-scratch hosting control panel written in Rust** for Debian/Ubuntu VPS and
+dedicated servers. It follows a declarative model: you describe the desired state
+(accounts, sites, runtimes, DNS, databases, FTP, backups, firewall) and the daemon
+reconciles the operating system towards it.
 
-No es un fork de cPanel, Plesk, HestiaCP ni Vesta. Arquitectura, protocolo, motor de
-reconciliaciÃƒÂ³n y UI son propios.
+It is not a fork of cPanel, Plesk, HestiaCP or Vesta. The architecture, protocol,
+reconciliation engine and UI are original.
 
-## Funciones
+## Features
 
-| ÃƒÂrea | Incluye |
+| Area | What is included |
 | --- | --- |
-| Cuentas | Usuarios Linux aislados, home, cuota declarada, suspensiÃƒÂ³n y borrado |
-| Web | Vhosts Nginx, alias, TLS, PHP-FPM, reverse proxy, cabeceras de seguridad |
-| Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go y sitios estÃƒÂ¡ticos |
-| DNS | Zonas BIND autoritativas, registros A/AAAA/CNAME/MX/TXT/NS/SRV/CAA |
-| Correo | SPF, DKIM (clave RSA + tablas OpenDKIM), DMARC, MX y guÃƒÂ­a de PTR |
-| Bases de datos | MariaDB por dominio, usuario y contraseÃƒÂ±a propios, acceso local |
-| FTP | Usuarios virtuales Pure-FTPd con chroot al docroot, lectura o escritura |
-| Backups | Home + configuraciÃƒÂ³n gestionada, retenciÃƒÂ³n, restauraciÃƒÂ³n y timer diario |
-| Certificados | Let's Encrypt con SANs, renovaciÃƒÂ³n masiva y timer diario |
-| Monitor | Estado/CPU/RAM/uptime por servicio y series histÃƒÂ³ricas de 7 dÃƒÂ­as |
-| Cortafuegos | Reglas nftables, IPs baneadas, listas blancas y baneo automÃƒÂ¡tico |
-| Seguridad | Argon2id, lockout por cuenta+IP, auth log para fail2ban, RBAC |
-| Consola | Acciones privilegiadas con lista cerrada, salida y auditorÃƒÂ­a |
-| Programas | Inventario instalado, actualizaciones pendientes y botÃƒÂ³n de upgrade |
-| Usuarios | Roles owner/admin/operator/viewer, suplantaciÃƒÂ³n auditada y revocaciÃƒÂ³n |
+| Accounts | Isolated Linux users, home directory, declared quota, real suspension (Nginx/apps/FTP) and deletion |
+| Web | Nginx virtual hosts, aliases, TLS, PHP-FPM, reverse proxy, security headers |
+| Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go and static sites |
+| DNS | Authoritative BIND zones, A/AAAA/CNAME/MX/TXT/NS/SRV/CAA records |
+| Email | SPF, DKIM (RSA key + OpenDKIM tables), DMARC, MX and PTR guidance |
+| Databases | MariaDB per domain, dedicated user/password, local-only access |
+| FTP | Pure-FTPd virtual users, chrooted to the document root, read-only or read-write |
+| Backups | Home + managed configuration, retention, restore and daily timer |
+| Certificates | Let's Encrypt with SANs, bulk renewal and daily timer |
+| Monitoring | Per-service state/CPU/RAM/uptime and 7-day historical series |
+| Firewall | nftables rules, banned IPs, allowlists and automatic brute-force bans |
+| Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC |
+| Console | Closed-list privileged actions with output and audit trail |
+| Programs | Installed software inventory, pending updates and upgrade button |
+| Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
 
-## Arquitectura
+## Architecture
 
 ```
- navegador
-    Ã¢â€â€š  HTTPS + cookie HttpOnly + CSRF
-    Ã¢â€“Â¼
-Ã¢â€Å’Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â        Unix socket 0660 (grupo rynx)
-Ã¢â€â€š rynx-api  (usuario rynx)     Ã¢â€â€š  CBOR  + token + SO_PEERCRED
-Ã¢â€â€š Ã‚Â· Axum, sesiones, RBAC       Ã¢â€â€š Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â
-Ã¢â€â€š Ã‚Â· Argon2id, lockout, logs    Ã¢â€â€š                                Ã¢â€â€š
-Ã¢â€â€š Ã‚Â· panel.db (SQLite separada) Ã¢â€â€š                                Ã¢â€“Â¼
-Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Ëœ                 Ã¢â€Å’Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Â
-                                                 Ã¢â€â€š rynxd  (root, sin red en prod)Ã¢â€â€š
-                                                 Ã¢â€â€š Ã‚Â· valida todo otra vez        Ã¢â€â€š
-                                                 Ã¢â€â€š Ã‚Â· reconciliaciÃƒÂ³n declarativa  Ã¢â€â€š
-                                                 Ã¢â€â€š Ã‚Â· useradd/chown/systemctl     Ã¢â€â€š
-                                                 Ã¢â€â€š Ã‚Â· nginx, php-fpm, bind,       Ã¢â€â€š
-                                                 Ã¢â€â€š   mariadb, pure-ftpd, nft     Ã¢â€â€š
-                                                 Ã¢â€â€š Ã‚Â· state.db + audit.log        Ã¢â€â€š
-                                                 Ã¢â€â€Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€Ëœ
+ browser
+    â”‚  HTTPS + HttpOnly cookie + CSRF
+    â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”        Unix socket 0660 (group rynx)
+â”‚ rynx-api  (user rynx)        â”‚  CBOR  + token + SO_PEERCRED
+â”‚ Â· Axum, sessions, RBAC       â”‚ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ Â· Argon2id, lockout, logs    â”‚                                â”‚
+â”‚ Â· panel.db (separate SQLite) â”‚                                â–¼
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                 â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+                                                 â”‚ rynxd  (root, no network)     â”‚
+                                                 â”‚ Â· re-validates every request  â”‚
+                                                 â”‚ Â· declarative reconciliation  â”‚
+                                                 â”‚ Â· useradd/chown/systemctl     â”‚
+                                                 â”‚ Â· nginx, php-fpm, bind,       â”‚
+                                                 â”‚   mariadb, pure-ftpd, nft     â”‚
+                                                 â”‚ Â· state.db + audit.log        â”‚
+                                                 â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
-Dos bases de datos separadas a propÃƒÂ³sito:
+Two databases are separated on purpose:
 
-- `panel.db`: usuarios del panel, hashes Argon2id, sesiones y eventos de autenticaciÃƒÂ³n.
-- `state.db`: estado de hosting deseado. Solo lo escribe el daemon.
+- `panel.db`: panel users, Argon2id hashes, sessions and authentication events.
+- `state.db`: desired hosting state. Only the daemon writes to it.
 
-Comprometer la API web no concede escritura directa sobre el estado del hosting.
+Compromising the web API does not grant direct write access to hosting state.
 
-## Seguridad
+## Security
 
-- **Rust**: sin GC, sin `null`, concurrencia sin carreras de datos.
-- **Daemon root mÃƒÂ­nimo**: no escucha red en producciÃƒÂ³n; solo un socket Unix `0660`
-  en el grupo `rynx` y verifica credenciales del par (`SO_PEERCRED`).
-- **Doble autenticaciÃƒÂ³n de transporte**: token de 256 bits comparado en tiempo
-  constante + UID/GID del proceso llamante.
-- **Cero shells**: todo comando usa `argv` explÃƒÂ­cito y entorno limpio. Nunca
-  `sh -c` ni interpolaciÃƒÂ³n.
-- **ValidaciÃƒÂ³n en dos capas**: API y daemon. Dominios, usuarios, rutas, puertos,
-  versiones, IPs, nombres DNS, variables y comandos tienen listas blancas.
-- **Escritura atÃƒÂ³mica** con `O_NOFOLLOW`, permisos restrictivos y verificaciÃƒÂ³n de
-  que el destino no escapa de su raÃƒÂ­z. Nginx se prueba con `nginx -t` y se revierte
-  si falla; las zonas con `named-checkzone`.
-- **Sesiones**: token opaco; solo se guarda su SHA-256. Cookie `HttpOnly`,
-  `SameSite=Strict`, `Secure` en producciÃƒÂ³n, expiraciÃƒÂ³n absoluta e inactividad.
-- **Anti fuerza bruta**: ventana deslizante + lockout por cuenta+IP y por IP,
-  retardo en fallo, eventos persistentes y log estructurado para fail2ban.
-- **Listas blancas de IP**: tienen prioridad sobre los baneos del cortafuegos.
-- **SSH siempre permitido** en nftables para evitar bloqueos accidentales.
-- **RBAC** con protecciÃƒÂ³n del ÃƒÂºltimo owner, autoprotecciÃƒÂ³n y suplantaciÃƒÂ³n auditada.
-- **AuditorÃƒÂ­a encadenada**: cada evento incluye `prev_hash`; editar o borrar una
-  lÃƒÂ­nea rompe la cadena y la verificaciÃƒÂ³n lo detecta.
-- **Cabeceras**: CSP estricta, `nosniff`, `DENY`, HSTS, `no-store` en `/api`.
+- **Rust**: no garbage collector, no `null`, data-race-free concurrency.
+- **Minimal root daemon**: no network listener in production; only a `0660` Unix
+  socket in group `rynx`, with peer credential verification (`SO_PEERCRED`).
+- **Two-factor transport authentication**: 256-bit token compared in constant time
+  plus caller UID/GID validation.
+- **No shells**: every command uses an explicit `argv` and a scrubbed environment.
+  No `sh -c`, no string interpolation.
+- **Two validation layers**: API and daemon. Domains, users, paths, ports, versions,
+  IPs, DNS names, environment variables and commands are strictly allowlisted.
+- **Atomic writes** with `O_NOFOLLOW`, restrictive permissions and confinement to
+  the managed root. Nginx configs are tested with `nginx -t` and rolled back on
+  failure; zones are checked with `named-checkzone`.
+- **Sessions**: opaque tokens; only their SHA-256 is stored. Cookie is `HttpOnly`,
+  `SameSite=Strict`, `Secure` in production, with absolute and idle expiry.
+- **Brute-force protection**: sliding window + lockout per account+IP and per IP,
+  failure delay, persistent events and a structured fail2ban log.
+- **IP allowlists** take precedence over firewall bans.
+- **Firewall defaults**: nftables uses a default-drop input policy. SSH, HTTP,
+  HTTPS, DNS (53/tcp+udp) and FTPS (21 plus passive 30000-50000) are always
+  allowed; SSH cannot be denied from the panel to prevent lockouts.
+- **RBAC** with last-owner protection, self-protection and audited impersonation.
+- **Tamper-evident audit log**: every event commits to the previous hash; editing
+  or deleting a line breaks the chain and verification detects it.
+- **Headers**: strict CSP, `nosniff`, `DENY`, HSTS, `no-store` on `/api`.
 
 ## Runtimes
 
-| Runtime | Mecanismo | Versiones sugeridas |
+| Runtime | Mechanism | Suggested versions |
 | --- | --- | --- |
-| PHP | FPM pool por cuenta, `open_basedir`, funciones peligrosas deshabilitadas | 8.1 Ã¢â‚¬â€œ 8.5 |
+| PHP | Per-account FPM pool, `open_basedir`, dangerous functions disabled | 8.1 â€“ 8.5 |
 | Node.js | systemd + reverse proxy | 18, 20, 22, 24 |
-| Python | gunicorn / uvicorn bajo systemd | 3.10 Ã¢â‚¬â€œ 3.13 |
-| Ruby | puma / rackup bajo systemd | 3.2 Ã¢â‚¬â€œ 3.4 |
-| Java | `java -jar` bajo systemd | 11, 17, 21 |
-| .NET | `dotnet App.dll` bajo systemd | 8, 9 |
-| Go | binario compilado bajo systemd | n/a |
-| EstÃƒÂ¡tico | Nginx directo | n/a |
+| Python | gunicorn / uvicorn under systemd | 3.10 â€“ 3.13 |
+| Ruby | puma / rackup under systemd | 3.2 â€“ 3.4 |
+| Java | `java -jar` under systemd | 11, 17, 21 |
+| .NET | `dotnet App.dll` under systemd | 8, 9 |
+| Go | compiled binary under systemd | n/a |
+| Static | Nginx directly | n/a |
 
-Cada aplicaciÃƒÂ³n recibe usuario sin shell, puerto loopback validado, unidad systemd
-endurecida, archivo de entorno `0640` y vhost con cabeceras.
+Each application gets a shell-less user, a validated loopback port, a hardened
+systemd unit, a `0640` environment file and a vhost with security headers.
 
-## DNS y correo (SPF Ã‚Â· DKIM Ã‚Â· DMARC)
+## DNS and email (SPF Â· DKIM Â· DMARC)
 
-Con `dns_enabled = true` cada sitio genera una zona BIND con SOA, NS, A/AAAA, CNAME,
-CAA y los registros de correo. Con `mail_enabled = true` y `mail_hostname` configurado
-se aÃƒÂ±aden:
+With `dns_enabled = true`, every site gets a BIND zone with SOA, NS, A/AAAA, CNAME,
+CAA and email records. With `mail_enabled = true` and `mail_hostname` configured,
+the panel also adds:
 
-- `MX` al host de correo.
-- `TXT @` con `v=spf1 mx a ~all`.
-- `TXT _dmarc` con `p=quarantine`, `adkim=s`, `aspf=s`.
-- `TXT <selector>._domainkey` con la clave pÃƒÂºblica DKIM (RSA 2048).
-- Entradas en `KeyTable` y `SigningTable` de OpenDKIM.
+- `MX` pointing to the mail host.
+- `TXT @` with `v=spf1 mx a ~all`.
+- `TXT _dmarc` with `p=quarantine`, `adkim=s`, `aspf=s`.
+- `TXT <selector>._domainkey` with the DKIM public key (RSA 2048).
+- `KeyTable` and `SigningTable` entries for OpenDKIM.
 
-El **PTR inverso** lo controla el proveedor de la IP, no el panel: debe resolver al
-`mail_hostname`. VerifÃƒÂ­calo con `dig -x TU_IP`. Esto es imprescindible para no caer en
-spam junto con SPF/DKIM/DMARC.
+The **reverse PTR** is controlled by the IP provider, not the panel: it must resolve
+to `mail_hostname`. Verify with `dig -x YOUR_IP`. Together with SPF/DKIM/DMARC this
+is essential to keep email out of spam.
 
-El panel provisiona DNS y firma DKIM; el servidor de correo (Postfix/Dovecot) y los
-buzones no se instalan automÃƒÂ¡ticamente. La UI muestra esta limitaciÃƒÂ³n.
+The panel provisions DNS and DKIM signing material; the mail server (Postfix/Dovecot)
+and mailboxes are not installed automatically. The UI states this limitation.
 
-## Bases de datos
+## Databases
 
-Una base MariaDB por dominio (`rynx_<dominio>`), `utf8mb4`, con usuario exclusivo y
-contraseÃƒÂ±a aleatoria de 32 caracteres. El usuario solo accede por `localhost`. La
-contraseÃƒÂ±a se guarda en `state.db` (permisos `0600`) y se muestra al administrador.
+One MariaDB database per domain (`rynx_<domain>`), `utf8mb4`, with a dedicated user
+and a random 32-character password. The user can only connect over `localhost`.
+The password is stored in `state.db` (`0600`) and shown to administrators.
 
 ## FTP
 
-Usuarios virtuales Pure-FTPd mapeados al UID de la cuenta (lectura/escritura) o al
-usuario `rynxftp` (solo lectura), con chroot al document root del sitio. Se puede usar
-FTPS explÃƒÂ­cito. La contraseÃƒÂ±a se genera si no se indica.
+Pure-FTPd virtual users mapped to the account UID (read-write) or to the `rynxftp`
+user (read-only), chrooted to the site document root. Explicit FTPS is supported.
+A password is generated when not provided.
 
 ## Backups
 
-Cada copia incluye home, vhost, zona DNS, pool PHP, unidades systemd y ficheros de
-entorno. Se guardan en `/var/backups/rynxcp/<cuenta>/`, se conservan las ÃƒÂºltimas 7 por
-cuenta y pueden restaurarse desde la UI. Se ejecutan a diario con un timer systemd.
+Each backup includes the home directory, vhost, DNS zone, PHP pool, systemd units and
+environment files. Backups are stored in `/var/backups/rynxcp/<account>/`, the last 7
+per account are retained, and they can be restored from the UI. A systemd timer runs
+them daily.
 
-Restaurar extrae solo rutas gestionadas (`home/<cuenta>`, nginx, php, systemd, apps),
-rechaza `..` y rutas absolutas, y re-aplica el estado deseado despuÃƒÂ©s.
+Restore only extracts managed paths (`home/<account>`, nginx, php, systemd, apps),
+rejects `..` and absolute paths, and re-applies desired state afterwards.
 
-## Monitor y consola
+## Monitoring and console
 
-El daemon muestrea cada 60 s: load, memoria, disco, servicios activos y estado/CPU/RAM
-de nginx, PHP-FPM, aplicaciones y el propio daemon. Se conservan 7 dÃƒÂ­as.
+The daemon samples every 60 seconds: load, memory, disk, active services and
+state/CPU/RAM for nginx, PHP-FPM, applications and the daemon itself. Seven days of
+history are retained.
 
-La consola admin **no es un shell**. Solo ejecuta acciones cerradas (test/reload de
-Nginx, reinicio/logs de una app, recarga de PHP-FPM, reconciliaciÃƒÂ³n, renovaciÃƒÂ³n TLS,
-backups, disco) y cada ejecuciÃƒÂ³n queda auditada.
+The admin console **is not a shell**. It only runs closed actions (Nginx test/reload,
+app restart/logs, PHP-FPM reload, reconciliation, TLS renewal, backups, disk usage)
+and every execution is audited.
 
-## InstalaciÃƒÂ³n en Debian/Ubuntu
+## One-shot pre-installer (recommended)
 
-Dependencias del sistema (instala lo que vayas a usar):
+`deploy/preinstall.sh` prepares a fresh Debian/Ubuntu server end to end:
+
+```bash
+sudo bash deploy/preinstall.sh
+```
+
+It is interactive and asks for:
+
+1. **Panel host** — detected automatically (`hostname -f`, otherwise the public
+   IP) and offered as the default.
+2. **Admin email** — defaults to `admin@<host>` when the host is a domain.
+3. **Admin password** — hidden input, confirmed, minimum 12 characters and at
+   least three character classes; it is never written to the log.
+
+Non-interactive usage:
+
+```bash
+sudo RYNX_ADMIN_PASSWORD='Your-Strong-Pass1' \
+  bash deploy/preinstall.sh --host panel.example.com --email admin@example.com --yes
+```
+
+What it installs and configures:
+
+- Security updates plus `unattended-upgrades`.
+- **PHP 8.5** from the security-maintained Ondrej (Ubuntu) or Sury (Debian)
+  repository, with hardened `php.ini` defaults and OPcache.
+- Nginx, Certbot, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban,
+  nftables, logrotate.
+- Node.js, Python 3, Ruby, Java, Go and .NET when the distribution provides it.
+- The Rust toolchain when missing, then `cargo build --release` and
+  `deploy/install.sh`.
+- DNS, database, FTP and firewall enabled; the SSH port is detected from
+  `sshd_config` and always kept open.
+- A panel virtual host and, for a domain with working DNS, a Let's Encrypt
+  certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays
+  on HTTP and the script explains how to retry.
+
+The panel is published at `http(s)://<host>` and the administrator is created
+with the email/password you entered. Email DNS (`mail_enabled`) stays disabled
+until a real mail server exists; zones still include SPF/DKIM/DMARC records when
+mail records are provisioned from the UI.
+
+## Installing on Debian/Ubuntu (manual)
+
+Prefer the pre-installer above unless you need full control.
+
+System dependencies. Add the PHP 8.5 repository first (Ondrej PPA on Ubuntu,
+Sury on Debian); the pre-installer does this automatically:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential pkg-config nginx certbot \
-  php8.3-fpm php8.3-cli php8.3-mysql \
+  php8.5-fpm php8.5-cli php8.5-mysql \
   mariadb-server bind9 bind9-utils \
   pure-ftpd opendkim opendkim-tools fail2ban nftables \
   nodejs python3-venv ruby-full default-jre dotnet-sdk-8.0 golang
 ```
 
-Compila e instala:
+Build and install:
 
 ```bash
 cargo build --release
 sudo bash deploy/install.sh
 ```
 
-El instalador crea grupo/usuario `rynx`, `rynxftp`, directorios, token, log de
-autenticaciÃƒÂ³n, fail2ban, logrotate, unidades y timers; arranca `rynxd` y `rynx-api`.
+The installer creates the `rynx`/`rynxftp` users and groups, directories, token,
+authentication log, fail2ban integration, logrotate rules, units and timers, then
+starts `rynxd` and `rynx-api`.
 
 ```bash
-sudo rynxctl admin create admin --email tu@example.com
+sudo rynxctl admin create admin --email you@example.com
 sudo cp deploy/nginx/panel.conf.example /etc/nginx/sites-available/rynxcp-panel
 sudo ln -s /etc/nginx/sites-available/rynxcp-panel /etc/nginx/sites-enabled/
 sudo certbot --nginx -d panel.example.com
 ```
 
-Si Nginx termina TLS delante de la API, activa `trust_proxy_headers = true` en
+If Nginx terminates TLS in front of the API, set `trust_proxy_headers = true` in
 `/etc/rynxcp/api.toml`.
 
-Timers instalados:
+Installed timers:
 
-- `rynxcp-cert-renew.timer`: renueva certificados cada dÃƒÂ­a.
-- `rynxcp-backup.timer`: backups nocturnos.
+- `rynxcp-cert-renew.timer`: renews certificates daily.
+- `rynxcp-backup.timer`: nightly backups.
 
-## Desarrollo local (Windows o Linux)
+## Local development (Windows or Linux)
 
-Modo simulaciÃƒÂ³n: renderiza todos los artefactos en `./data/daemon/sandbox` y no toca
-el sistema operativo.
+Simulation mode renders every artifact under `./data/daemon/sandbox` and never
+touches the operating system.
 
 ```bash
 cargo build
 # terminal 1
 target/debug/rynxd.exe --config rynxd.toml
 # terminal 2
-target/debug/rynxctl.exe admin create admin --email tu@example.com
+target/debug/rynxctl.exe admin create admin --email you@example.com
 # terminal 3
 target/debug/rynx-api.exe --config rynx-api.toml
 ```
 
-Abre <http://127.0.0.1:8080>. En Linux usa los binarios sin `.exe`.
+Open <http://127.0.0.1:8080>. On Linux, use the binaries without `.exe`.
 
 ## CLI
 
 ```bash
-rynxctl admin create <usuario> --email <email> [--role owner|admin|operator|viewer]
+rynxctl admin create <user> --email <email> [--role owner|admin|operator|viewer]
 rynxctl admin list
-rynxctl admin passwd <usuario>
-rynxctl admin disable|enable <usuario>
+rynxctl admin passwd <user>
+rynxctl admin disable|enable <user>
 rynxctl daemon ping|info
 rynxctl cert renew [--staging]
 rynxctl backup all
@@ -220,8 +272,8 @@ rynxctl reconcile
 
 ## API
 
-Salvo login, health y meta, todo exige sesiÃƒÂ³n; los mÃƒÂ©todos mutantes exigen
-`x-csrf-token`.
+Except for login, health and meta, every route requires a session; mutating methods
+require `x-csrf-token`.
 
 ```
 POST   /api/v1/auth/login
@@ -258,19 +310,19 @@ GET|POST   /api/v1/users             PATCH|DELETE /api/v1/users/{username}
 POST       /api/v1/reconcile
 ```
 
-## Estructura
+## Layout
 
 ```
 crates/
-  rynx-proto/   protocolo CBOR versionado y modelos
-  rynx-core/    config, validaciÃƒÂ³n, polÃƒÂ­tica, crypto, auditorÃƒÂ­a, plantillas
-  rynx-panel/   identidad del panel, Argon2id, sesiones, RBAC, auth events
-  rynxd/        daemon root, executor Linux/simulaciÃƒÂ³n, reconciliaciÃƒÂ³n
-  rynx-api/     Axum, seguridad, CSRF, lÃƒÂ­mites, SPA
+  rynx-proto/   versioned CBOR protocol and shared models
+  rynx-core/    config, validation, policy, crypto, audit, templates
+  rynx-panel/   panel identity, Argon2id, sessions, RBAC, auth events
+  rynxd/        root daemon, Linux/simulation executor, reconciliation
+  rynx-api/     Axum, security, CSRF, rate limits, SPA
   rynx-cli/     rynxctl
-web/            SPA sin build step
-deploy/         systemd, nginx, fail2ban, logrotate, configs, instalador
-scripts/        smoke test end-to-end
+web/            SPA with no build step
+deploy/         systemd, nginx, fail2ban, logrotate, configs, installer, preinstaller
+scripts/        end-to-end smoke test
 ```
 
 ## Tests
@@ -282,12 +334,31 @@ cargo fmt --all --check
 powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1   # Windows
 ```
 
-## LÃƒÂ­mites conocidos
+## License
 
-- El correo (Postfix/Dovecot/buzones) no se instala automÃƒÂ¡ticamente; el panel prepara
-  DNS, DKIM y las tablas de OpenDKIM.
-- El PTR inverso se configura en el proveedor de la IP.
-- FTP usa un certificado TLS global de Pure-FTPd (FTPS explÃƒÂ­cito).
-- Multi-nodo, DNS secundario, mÃƒÂ©tricas remotas y 2FA quedan para siguientes versiones.
+RYNXCP is free software: you can redistribute it and/or modify it under the
+terms of the **GNU Affero General Public License**, version 3 or (at your option)
+any later version. See [LICENSE](LICENSE) for the full text.
+
+The software is provided **“AS IS”, WITHOUT WARRANTY OF ANY KIND**, and the
+authors accept **no liability** for any damage, data loss, service interruption
+or security incident arising from its use. Sections 15 and 16 of the license
+contain the full warranty disclaimer and limitation of liability.
+
+Because the AGPL applies to network use, if you run a modified version of
+RYNXCP as a service you must offer its complete corresponding source code to
+remote users.
+
+Copyright (C) 2026 RYNXCP contributors.
+
+## Known limitations
+
+- Email (Postfix/Dovecot/mailboxes) is not installed automatically; the panel
+  prepares DNS, DKIM and OpenDKIM tables.
+- Reverse PTR is configured at the IP provider.
+- FTP uses Pure-FTPd's global TLS certificate (explicit FTPS).
+- Multi-node, secondary DNS, remote metrics and 2FA are planned for later versions.
+
+
 
 

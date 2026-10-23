@@ -72,9 +72,13 @@ if [[ -d /etc/pure-ftpd/conf ]]; then
   echo yes > /etc/pure-ftpd/conf/ChrootEveryone
   echo yes > /etc/pure-ftpd/conf/NoAnonymous
   echo /etc/pure-ftpd/pureftpd.pdb > /etc/pure-ftpd/conf/PureDB
+  echo "30000 50000" > /etc/pure-ftpd/conf/PassivePortRange
 fi
-if [[ -f /etc/bind/named.conf.local ]] && ! grep -q 'named.conf.rynxcp' /etc/bind/named.conf.local; then
-  echo 'include "/etc/bind/named.conf.rynxcp";' >> /etc/bind/named.conf.local
+if [[ -f /etc/bind/named.conf.local ]]; then
+  [[ -f /etc/bind/named.conf.rynxcp ]] || install -m 0644 /dev/null /etc/bind/named.conf.rynxcp
+  if ! grep -q 'named.conf.rynxcp' /etc/bind/named.conf.local; then
+    echo 'include "/etc/bind/named.conf.rynxcp";' >> /etc/bind/named.conf.local
+  fi
 fi
 
 echo "==> installing fail2ban integration"
@@ -127,6 +131,8 @@ echo
 echo "Daemon:  systemctl status rynxd"
 echo "API:     systemctl status rynx-api"
 echo "Audit:   /var/log/rynxcp/audit.log"
+
+
 
 
 

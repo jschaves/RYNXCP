@@ -108,6 +108,9 @@ async fn main() -> Result<()> {
     {
         let sampler = reconciler.clone();
         tokio::spawn(async move {
+            if let Err(err) = sampler.firewall_apply().await {
+                tracing::warn!(error = %err.message, "initial firewall apply failed");
+            }
             let _ = sampler.sample_metrics().await;
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             interval.tick().await;
