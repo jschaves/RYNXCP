@@ -331,15 +331,34 @@ apt-get install -y --no-install-recommends \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
 
 # .NET is best-effort: package availability differs between releases.
+# Ubuntu 26.04 ships dotnet-sdk-10.0 in its own feed; the Microsoft feed is
+# only a fallback for older releases and Debian.
 if ! command -v dotnet >/dev/null 2>&1; then
-  if curl -fsSL --max-time 60 \
-    "https://packages.microsoft.com/config/${DISTRO_ID}/${VERSION_ID}/packages-microsoft-prod.deb" \
-    -o /tmp/packages-microsoft-prod.deb 2>/dev/null; then
-    dpkg -i /tmp/packages-microsoft-prod.deb >/dev/null 2>&1 || true
-    apt-get update >/dev/null 2>&1 || true
-    apt-get install -y dotnet-sdk-8.0 || warn ".NET SDK 8 could not be installed automatically"
+  dotnet_pkg=""
+  for candidate in dotnet-sdk-10.0 dotnet-sdk-9.0 dotnet-sdk-8.0; do
+    if apt-cache show "$candidate" >/dev/null 2>&1; then
+      dotnet_pkg="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$dotnet_pkg" ]]; then
+    if curl -fsSL --max-time 60 \
+      "https://packages.microsoft.com/config/${DISTRO_ID}/${VERSION_ID}/packages-microsoft-prod.deb" \
+      -o /tmp/packages-microsoft-prod.deb 2>/dev/null; then
+      dpkg -i /tmp/packages-microsoft-prod.deb >/dev/null 2>&1 || true
+      apt-get update >/dev/null 2>&1 || true
+      for candidate in dotnet-sdk-10.0 dotnet-sdk-9.0 dotnet-sdk-8.0; do
+        if apt-cache show "$candidate" >/dev/null 2>&1; then
+          dotnet_pkg="$candidate"
+          break
+        fi
+      done
+    fi
+  fi
+  if [[ -n "$dotnet_pkg" ]]; then
+    apt-get install -y "$dotnet_pkg" || warn "$dotnet_pkg could not be installed automatically"
   else
-    warn ".NET repository is not available for $DISTRO_ID $VERSION_ID; install the SDK manually if needed"
+    warn ".NET SDK is not available for $DISTRO_ID $VERSION_ID; install it manually if needed"
   fi
 fi
 
