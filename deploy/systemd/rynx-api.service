@@ -26,7 +26,7 @@ RestrictSUIDSGID=true
 RestrictNamespaces=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
-ReadWritePaths=/var/lib/rynxcp/panel
+ReadWritePaths=/var/lib/rynxcp/panel /var/log/rynxcp
 ReadOnlyPaths=/etc/rynxcp /usr/share/rynxcp
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 

@@ -33,6 +33,10 @@ install -d -m 0755 /usr/local/bin
 install -d -m 0755 /etc/rynxcp /etc/rynxcp/apps
 install -d -m 0755 /usr/share/rynxcp /usr/share/rynxcp/web
 install -d -m 0750 /var/lib/rynxcp /var/lib/rynxcp/rynxd /var/lib/rynxcp/panel /var/lib/rynxcp/apps
+# The unprivileged API runs as rynx and must traverse /var/lib/rynxcp to open
+# the panel database. install -d creates it as root:root, so fix the group.
+chown root:rynx /var/lib/rynxcp
+chmod 0750 /var/lib/rynxcp
 install -d -m 0750 /var/log/rynxcp
 chown root:rynx /var/log/rynxcp
 touch /var/log/rynxcp/auth.log
