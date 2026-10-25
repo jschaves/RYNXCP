@@ -155,11 +155,20 @@ function bool(form, name) {
   return !!(el && el.checked);
 }
 
+function T(text) {
+  return window.RYNX_I18N ? window.RYNX_I18N.tr(text) : text;
+}
+
+function translateUi(root) {
+  if (window.RYNX_I18N) window.RYNX_I18N.translateDom(root || document.body);
+}
+
 function toast(message, kind = 'ok') {
   const root = $('#toasts');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
-  el.innerHTML = `<div class="t-title">${kind === 'error' ? 'Error' : 'Hecho'}</div><div>${esc(message)}</div>`;
+  const title = kind === 'error' ? T('Error') : T('Hecho');
+  el.innerHTML = `<div class="t-title">${esc(title)}</div><div>${esc(T(message))}</div>`;
   root.appendChild(el);
   setTimeout(() => el.remove(), kind === 'error' ? 7000 : 3500);
 }
@@ -207,6 +216,7 @@ function showLogin() {
   S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
+  translateUi(document.body);
   const input = $('#login-form').elements.username;
   if (input) setTimeout(() => input.focus(), 30);
 }
@@ -324,12 +334,14 @@ async function navigate(id) {
   const [title, subtitle] = TITLES[id];
   $('#view-title').textContent = title;
   $('#view-subtitle').textContent = subtitle;
-  $('#view').innerHTML = '<div class="loading">Cargando…</div>';
+  $('#view').innerHTML = `<div class="loading">${T('Cargando…')}</div>`;
   try {
     await renderers[id]();
+    translateUi(document.body);
   } catch (err) {
     if (token !== S.navToken) return;
     $('#view').innerHTML = `<div class="card empty"><strong>No se pudo cargar la vista</strong><span>${esc(err.message)}</span></div>`;
+    translateUi(document.body);
   }
 }
 
@@ -406,6 +418,7 @@ function openModal(options) {
       </div>
     </div>`;
 
+  translateUi(root);
   const form = $('#modal-form');
   const close = () => { root.innerHTML = ''; };
 
@@ -656,11 +669,11 @@ function openAccountModal() {
       const result = await api('/api/v1/accounts', { method: 'POST', body });
       if (result.panel_password) {
         showOutput(
-          'Cuenta y acceso creados',
-          `usuario del panel: ${result.panel_user.username}\n` +
-            `contraseña: ${result.panel_password}\n\n` +
-            `Entra en ${location.origin} con esas credenciales.\n` +
-            'Guarda la contraseña ahora; no se volverá a mostrar.',
+          T('Cuenta y acceso creados'),
+          `${T('usuario del panel:')} ${result.panel_user.username}\n` +
+            `${T('contraseña:')} ${result.panel_password}\n\n` +
+            `${T('Entra en')} ${location.origin} ${T('con esas credenciales.')}\n` +
+            T('Guarda la contraseña ahora; no se volverá a mostrar.'),
         );
       } else {
         toast('Cuenta creada');
@@ -1163,11 +1176,11 @@ async function handleAction(action, id) {
       });
       if (result.panel_password) {
         showOutput(
-          'Acceso al panel creado',
-          `usuario: ${result.panel_user.username}\n` +
-            `contraseña: ${result.panel_password}\n\n` +
-            `Entra en ${location.origin}.\n` +
-            'El acceso es de solo lectura (viewer).',
+          T('Acceso al panel creado'),
+          `${T('usuario:')} ${result.panel_user.username}\n` +
+            `${T('contraseña:')} ${result.panel_password}\n\n` +
+            `${T('Entra en')} ${location.origin}.\n` +
+            T('El acceso es de solo lectura (viewer).'),
         );
       } else {
         toast('El acceso ya existía');
@@ -1252,7 +1265,7 @@ async function handleAction(action, id) {
       S.csrf = data.csrf_token;
       S.impersonatedBy = data.impersonated_by || null;
       enterApp();
-      toast(`Ahora viendo el panel como ${data.user.username}`);
+      toast(`${T('Ahora viendo el panel como')} ${data.user.username}`);
       return;
     }
     case 'cert-renew': {
@@ -1855,6 +1868,14 @@ function showOutput(title, text) {
 }
 
 /* ---------------- wiring ---------------- */
+
+window.RYNX_ON_LANG_CHANGE = () => {
+  if (S.user) {
+    refresh();
+  } else {
+    showLogin();
+  }
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   $('#login-form').addEventListener('submit', async (event) => {
