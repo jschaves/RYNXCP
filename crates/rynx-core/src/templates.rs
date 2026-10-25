@@ -95,7 +95,6 @@ fn common_server_body(ctx: &NginxContext<'_>, out: &mut String) {
                 format!("unix:{socket}")
             };
             let _ = writeln!(out, "    location ~ \\.php$ {{");
-            let _ = writeln!(out, "        try_files $uri =404;");
             let _ = writeln!(out, "        include snippets/fastcgi-php.conf;");
             let _ = writeln!(out, "        fastcgi_pass {socket};");
             let _ = writeln!(out, "    }}");
@@ -506,6 +505,19 @@ mod tests {
         assert!(!conf.contains("fastcgi_pass"));
         assert!(conf.contains(MARKER));
         assert!(!conf.contains("listen 443"));
+    }
+
+    #[test]
+    fn php_site_does_not_duplicate_fastcgi_try_files() {
+        let rt = Runtime::Php {
+            version: "8.5".into(),
+        };
+        let tls = TlsMode::Disabled;
+        let mut c = ctx(&tls, None);
+        c.runtime = &rt;
+        let conf = nginx_site(&c);
+        assert!(conf.contains("include snippets/fastcgi-php.conf;"));
+        assert!(!conf.contains("try_files $uri =404;"));
     }
 
     #[test]
