@@ -638,9 +638,9 @@ function openAccountModal() {
       <div class="full">${fCheck('enabled', 'Cuenta activa', true)}</div>
       ${fSelect('panel_access', 'Acceso al panel del cliente', [
         { value: 'viewer', label: 'Solo lectura (viewer)' },
-        { value: 'operator', label: 'Operador (puede gestionar todo)' },
+        { value: 'operator', label: 'Operador (gestiona su cuenta)' },
         { value: 'none', label: 'Sin acceso al panel' },
-      ], { value: 'viewer', help: 'El operador puede gestionar todas las cuentas; para clientes usa solo lectura.' })}
+      ], { value: 'viewer', help: 'El operador puede gestionar los recursos de su propia cuenta; el viewer es solo lectura.' })}
     </div>`,
     onSubmit: async (form) => {
       const access = val(form, 'panel_access');
