@@ -19,6 +19,7 @@ pub async fn run(
     Json(body): Json<ConsoleRequest>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(

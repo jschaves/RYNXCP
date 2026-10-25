@@ -8,6 +8,7 @@ use rynx_proto::{AccountSpec, AccountView, Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +55,7 @@ pub async fn list(
         .daemon
         .call(Request::AccountList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -63,6 +65,7 @@ pub async fn create(
     Json(body): Json<CreateAccount>,
 ) -> Result<Json<CreateAccountResponse>, ApiError> {
     auth.require_write()?;
+    auth.require_global()?;
     let spec = body.spec;
 
     if let Some(role) = body.panel_role {
@@ -160,6 +163,7 @@ pub async fn delete(
     Query(query): Query<PurgeQuery>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(

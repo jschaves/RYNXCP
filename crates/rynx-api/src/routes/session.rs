@@ -141,6 +141,7 @@ pub async fn impersonate(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     check_origin(&headers, &state.cfg)?;
     if username == auth.user.username {
         return Err(ApiError::BadRequest(

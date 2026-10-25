@@ -50,6 +50,7 @@ pub async fn list(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<Vec<UserView>>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     Ok(Json(state.db.list_users()?))
 }
 
@@ -59,6 +60,7 @@ pub async fn create(
     Json(body): Json<CreateUser>,
 ) -> Result<Json<UserView>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let role = body.role.unwrap_or(Role::Operator);
     if role == Role::Owner && !auth.is_owner() {
         return Err(ApiError::Forbidden);
@@ -90,6 +92,7 @@ pub async fn update(
     Json(body): Json<UpdateUser>,
 ) -> Result<Json<UserView>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let target = state
         .db
         .find_user(&username)?
@@ -163,6 +166,7 @@ pub async fn delete(
     Path(username): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     if username == auth.user.username {
         return Err(ApiError::BadRequest("cannot delete yourself".into()));
     }

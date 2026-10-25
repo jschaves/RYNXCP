@@ -6,6 +6,7 @@ use rynx_proto::{Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 #[derive(Debug, Deserialize)]
@@ -21,6 +22,7 @@ pub async fn list(
         .daemon
         .call(Request::DatabaseList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -30,6 +32,7 @@ pub async fn create(
     Json(body): Json<CreateDatabase>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &body.domain).await?;
     let response = state
         .daemon
         .call(
@@ -48,6 +51,7 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_database(&state, &auth, &id).await?;
     let response = state
         .daemon
         .call(Request::DatabaseDelete { id }, &auth.user.username)

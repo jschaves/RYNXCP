@@ -38,6 +38,31 @@ impl AuthUser {
     pub fn is_owner(&self) -> bool {
         self.user.role == Role::Owner
     }
+
+    /// Hosting account linked to this panel user. Linked users only see and
+    /// manage that account's resources.
+    pub fn scoped_account(&self) -> Option<&str> {
+        self.user.account.as_deref()
+    }
+
+    /// Global routes (users, firewall, console, system, ...) are only for
+    /// panel users that are not linked to a hosting account.
+    pub fn require_global(&self) -> Result<(), ApiError> {
+        if self.scoped_account().is_some() {
+            return Err(ApiError::Forbidden);
+        }
+        Ok(())
+    }
+
+    /// Rejects access to another account's resources for linked users.
+    pub fn ensure_account(&self, account: &str) -> Result<(), ApiError> {
+        if let Some(own) = self.scoped_account() {
+            if own != account {
+                return Err(ApiError::Forbidden);
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
@@ -91,4 +116,39 @@ pub async fn require_auth(
         impersonated_by: session.impersonated_by,
     });
     Ok(next.run(request).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth_user(account: Option<&str>, role: Role) -> AuthUser {
+        AuthUser {
+            user: UserView {
+                id: "id".into(),
+                username: "user".into(),
+                email: "user@example.com".into(),
+                role,
+                active: true,
+                created_at: "2026-01-01T00:00:00Z".into(),
+                updated_at: "2026-01-01T00:00:00Z".into(),
+                account: account.map(str::to_string),
+            },
+            csrf_token: "csrf".into(),
+            session_token: "session".into(),
+            impersonated_by: None,
+        }
+    }
+
+    #[test]
+    fn scoped_users_cannot_escape_their_account() {
+        let scoped = auth_user(Some("acme"), Role::Operator);
+        assert!(scoped.ensure_account("acme").is_ok());
+        assert!(scoped.ensure_account("other").is_err());
+        assert!(scoped.require_global().is_err());
+
+        let global = auth_user(None, Role::Admin);
+        assert!(global.ensure_account("other").is_ok());
+        assert!(global.require_global().is_ok());
+    }
 }

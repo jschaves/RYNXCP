@@ -27,6 +27,7 @@ pub async fn status(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::FirewallStatus, &auth.user.username)
@@ -40,6 +41,7 @@ pub async fn upsert_rule(
     Json(spec): Json<FirewallRuleSpec>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::FirewallRuleUpsert(spec), &auth.user.username)
@@ -53,6 +55,7 @@ pub async fn delete_rule(
     Path(id): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::FirewallRuleDelete { id }, &auth.user.username)
@@ -66,6 +69,7 @@ pub async fn block(
     Json(body): Json<BlockBody>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(
@@ -86,6 +90,7 @@ pub async fn unblock(
     Path(ip): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::FirewallUnblock { ip }, &auth.user.username)
@@ -99,6 +104,7 @@ pub async fn whitelist_add(
     Json(body): Json<IpBody>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(
@@ -115,6 +121,7 @@ pub async fn whitelist_remove(
     Path(ip): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::FirewallWhitelistRemove { ip }, &auth.user.username)

@@ -6,6 +6,7 @@ use rynx_proto::{Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 #[derive(Debug, Deserialize)]
@@ -24,6 +25,7 @@ pub async fn list(
         .daemon
         .call(Request::CertList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -33,6 +35,7 @@ pub async fn issue(
     Json(body): Json<IssueRequest>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &body.domain).await?;
     let response = state
         .daemon
         .call(
@@ -59,6 +62,7 @@ pub async fn renew(
     Query(query): Query<RenewQuery>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(

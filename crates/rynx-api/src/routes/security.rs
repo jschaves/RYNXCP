@@ -25,6 +25,7 @@ pub async fn events(
     Query(query): Query<EventsQuery>,
 ) -> Result<Json<Value>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let events = state.db.list_auth_events(query.limit.unwrap_or(200))?;
     Ok(Json(json!({ "events": events })))
 }
@@ -35,6 +36,7 @@ pub async fn stats(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<Value>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let hours = query.hours.unwrap_or(24).clamp(1, 24 * 90);
     let stats = state.db.auth_stats(hours * 3600)?;
     Ok(Json(json!(stats)))

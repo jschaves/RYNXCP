@@ -5,6 +5,7 @@ use rynx_proto::{Request, Response as DaemonResponse, WebsiteSpec};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 pub async fn list(
@@ -15,6 +16,7 @@ pub async fn list(
         .daemon
         .call(Request::WebsiteList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -24,6 +26,7 @@ pub async fn create(
     Json(spec): Json<WebsiteSpec>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_website_upsert(&state, &auth, &spec.domain, &spec.username).await?;
     let response = state
         .daemon
         .call(Request::WebsiteUpsert(spec), &auth.user.username)
@@ -37,6 +40,7 @@ pub async fn delete(
     Path(domain): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &domain).await?;
     let response = state
         .daemon
         .call(Request::WebsiteDelete { domain }, &auth.user.username)

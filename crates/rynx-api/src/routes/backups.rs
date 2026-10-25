@@ -6,6 +6,7 @@ use rynx_proto::{Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 #[derive(Debug, Deserialize)]
@@ -21,6 +22,7 @@ pub async fn list(
         .daemon
         .call(Request::BackupList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -30,6 +32,7 @@ pub async fn create(
     Json(body): Json<CreateBackup>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    auth.ensure_account(&body.username)?;
     let response = state
         .daemon
         .call(
@@ -48,6 +51,7 @@ pub async fn delete(
     Path(id): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_backup(&state, &auth, &id).await?;
     let response = state
         .daemon
         .call(Request::BackupDelete { id }, &auth.user.username)
@@ -61,6 +65,7 @@ pub async fn restore(
     Path(id): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::BackupRestore { id }, &auth.user.username)

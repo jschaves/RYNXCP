@@ -6,6 +6,7 @@ pub mod daemon;
 pub mod error;
 pub mod ratelimit;
 pub mod routes;
+pub mod scope;
 pub mod security;
 pub mod state;
 

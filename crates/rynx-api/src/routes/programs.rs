@@ -12,6 +12,7 @@ pub async fn programs(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::Programs, &auth.user.username)
@@ -24,6 +25,7 @@ pub async fn updates(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::Updates, &auth.user.username)
@@ -36,6 +38,7 @@ pub async fn apply(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::ApplyUpdates, &auth.user.username)

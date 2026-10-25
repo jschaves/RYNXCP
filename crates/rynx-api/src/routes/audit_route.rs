@@ -21,6 +21,7 @@ pub async fn list(
 ) -> Result<Json<DaemonResponse>, ApiError> {
     let limit = query.limit.unwrap_or(100).clamp(1, 1000);
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::AuditTail { limit }, &auth.user.username)

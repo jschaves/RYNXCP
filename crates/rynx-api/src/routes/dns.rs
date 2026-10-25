@@ -5,6 +5,7 @@ use rynx_proto::{DnsRecordSpec, Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
+use crate::scope;
 use crate::state::ApiState;
 
 pub async fn list(
@@ -15,6 +16,7 @@ pub async fn list(
         .daemon
         .call(Request::DnsZoneList, &auth.user.username)
         .await?;
+    let response = scope::list_response(&state, &auth, response).await?;
     Ok(Json(response))
 }
 
@@ -23,6 +25,7 @@ pub async fn zone(
     Extension(auth): Extension<AuthUser>,
     Path(domain): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
+    scope::ensure_domain(&state, &auth, &domain).await?;
     let response = state
         .daemon
         .call(Request::DnsZone { domain }, &auth.user.username)
@@ -37,6 +40,7 @@ pub async fn upsert_record(
     Json(mut spec): Json<DnsRecordSpec>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &domain).await?;
     spec.domain = domain;
     let response = state
         .daemon
@@ -51,6 +55,7 @@ pub async fn delete_record(
     Path((domain, id)): Path<(String, String)>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &domain).await?;
     let response = state
         .daemon
         .call(Request::DnsRecordDelete { domain, id }, &auth.user.username)
@@ -64,6 +69,7 @@ pub async fn provision_mail(
     Path(domain): Path<String>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
+    scope::ensure_domain(&state, &auth, &domain).await?;
     let response = state
         .daemon
         .call(Request::DnsMailProvision { domain }, &auth.user.username)

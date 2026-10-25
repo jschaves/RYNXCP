@@ -33,6 +33,9 @@ default, operator optional) with a generated password. The Accounts view exposes
 an "Entrar" action that impersonates that user. Emails are unique across panel
 users and hosting accounts, so an administrator email cannot be reused for an
 account. Linked users follow the account when it is suspended or deleted.
+Linked users are scoped to their own account: they only see and manage that
+account's sites, apps, PHP pools, databases, FTP, DNS, certificates and backups,
+and global views (users, firewall, console, system, monitor, audit) are denied.
 
 ## Architecture
 

@@ -203,6 +203,8 @@ async function api(path, options = {}) {
 function showLogin() {
   S.user = null;
   S.csrf = null;
+  S.impersonatedBy = null;
+  S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
   const input = $('#login-form').elements.username;
@@ -210,6 +212,7 @@ function showLogin() {
 }
 
 function enterApp() {
+  S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#user-name').textContent = S.user.username;
@@ -222,24 +225,53 @@ function enterApp() {
     if (target) target.textContent = S.user.username;
   }
   buildNav();
-  navigate('overview');
+  if (isScoped()) {
+    const mode = $('#mode-badge');
+    if (mode) {
+      mode.textContent = 'cliente';
+      mode.className = 'badge';
+    }
+  }
+  navigate(isScoped() ? 'accounts' : 'overview');
 }
 
 function isAdmin() {
   return S.user && (S.user.role === 'owner' || S.user.role === 'admin');
 }
 
+function isScoped() {
+  return Boolean(S.user && S.user.account);
+}
+
+function canWrite() {
+  return Boolean(S.user && ['owner', 'admin', 'operator'].includes(S.user.role));
+}
+
+const SCOPED_NAV = new Set([
+  'accounts',
+  'websites',
+  'apps',
+  'php',
+  'databases',
+  'ftp',
+  'dns',
+  'ssl',
+  'backups',
+]);
+
 function buildNav() {
   const nav = $('#nav');
   let html = '';
   let group = '';
   for (const item of NAV_ITEMS) {
+    if (isScoped() && !SCOPED_NAV.has(item.id)) continue;
     if (item.admin && !isAdmin()) continue;
     if (item.group !== group) {
       group = item.group;
       html += `<div class="nav-group">${esc(group)}</div>`;
     }
-    html += `<button data-view="${item.id}"><span class="dot"></span>${esc(item.label)}</button>`;
+    const label = item.id === 'accounts' && isScoped() ? 'Mi cuenta' : item.label;
+    html += `<button data-view="${item.id}"><span class="dot"></span>${esc(label)}</button>`;
   }
   nav.innerHTML = html;
   $$('#nav button').forEach((button) => {
@@ -449,11 +481,14 @@ function fTextarea(name, label, opts = {}) {
 /* ---------------- shared cell builders ---------------- */
 
 function accountOptions(includeEmpty = false) {
-  const items = S.data.accounts.map((a) => ({
+  let items = S.data.accounts.map((a) => ({
     value: a.spec.username,
     label: `${a.spec.username}${a.spec.enabled ? '' : ' (suspendida)'}`,
   }));
-  if (includeEmpty) items.unshift({ value: '', label: '— selecciona —' });
+  if (S.user && S.user.account) {
+    items = items.filter((item) => item.value === S.user.account);
+  }
+  if (includeEmpty) items.unshift({ value: '', label: '- selecciona -' });
   return items;
 }
 
@@ -555,20 +590,23 @@ async function renderOverview() {
 
 async function renderAccounts() {
   await loadList('accounts');
-  if (isAdmin()) await loadList('users');
+  if (isAdmin() && !isScoped()) await loadList('users');
   const rows = S.data.accounts.map((account) => {
     const spec = account.spec;
-    const panelUser = isAdmin()
+    const scoped = isScoped();
+    const panelUser = isAdmin() && !scoped
       ? (S.data.users || []).find((user) => user.account === spec.username)
       : null;
     const actions = [];
-    if (isAdmin()) {
+    if (isAdmin() && !scoped) {
       actions.push(panelUser
         ? btn('Entrar', 'impersonate', panelUser.username, 'tiny ghost')
         : btn('Crear acceso', 'account-panel-access', spec.username, 'tiny ghost'));
     }
-    actions.push(btn(spec.enabled ? 'Suspender' : 'Activar', 'account-toggle', spec.username));
-    actions.push(btn('Eliminar', 'account-delete', spec.username, 'tiny danger'));
+    if (!scoped) {
+      actions.push(btn(spec.enabled ? 'Suspender' : 'Activar', 'account-toggle', spec.username));
+      actions.push(btn('Eliminar', 'account-delete', spec.username, 'tiny danger'));
+    }
     return [
       td(`<div class="cell-title">${esc(spec.username)}</div><div class="cell-sub">${esc(spec.email)}</div>`),
       td(`<span class="chip">UID ${esc(account.uid)}</span>`),
@@ -580,9 +618,12 @@ async function renderAccounts() {
     ];
   });
 
+  const scoped = isScoped();
   $('#view').innerHTML =
-    sectionHead('Cuentas de hosting', `<button class="btn primary" data-action="account-new">Nueva cuenta</button>`) +
-    table(['Cuenta', 'UID', 'Disco', 'PHP', 'Estado', 'Home', ''], rows, 'Crea la primera cuenta para empezar.');
+    sectionHead(scoped ? 'Mi cuenta' : 'Cuentas de hosting',
+      scoped ? '' : `<button class="btn primary" data-action="account-new">Nueva cuenta</button>`) +
+    table(['Cuenta', 'UID', 'Disco', 'PHP', 'Estado', 'Home', ''], rows,
+      scoped ? 'No tienes una cuenta vinculada.' : 'Crea la primera cuenta para empezar.');
 }
 
 function openAccountModal() {
@@ -633,6 +674,7 @@ function openAccountModal() {
 
 async function renderWebsites() {
   await Promise.all([loadList('websites'), loadList('accounts'), loadList('apps')]);
+  const writable = canWrite();
   const rows = S.data.websites.map((website) => {
     const spec = website.spec;
     const aliases = spec.aliases && spec.aliases.length
@@ -644,13 +686,13 @@ async function renderWebsites() {
       td(spec.tls === 'disabled' ? badge('sin tls', 'warn') : badge(spec.tls === 'lets_encrypt' ? 'let\'s encrypt' : 'manual', 'info')),
       td(spec.enabled ? badge('activo', 'ok') : badge('deshabilitado', 'warn')),
       td(`<span class="mono small">${esc(spec.docroot)}</span>`),
-      td(btn('Eliminar', 'website-delete', spec.domain, 'tiny danger'), 'actions'),
+      td(writable ? btn('Eliminar', 'website-delete', spec.domain, 'tiny danger') : '', 'actions'),
     ];
   });
 
   $('#view').innerHTML =
-    sectionHead('Sitios web', `<button class="btn primary" data-action="website-new">Nuevo sitio</button>`) +
-    table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aún no hay virtual hosts.');
+    sectionHead('Sitios web', writable ? `<button class="btn primary" data-action="website-new">Nuevo sitio</button>` : '') +
+    table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aǧn no hay virtual hosts.');
 }
 
 function openWebsiteModal() {
@@ -745,6 +787,7 @@ function openWebsiteModal() {
 
 async function renderApps() {
   await Promise.all([loadList('apps'), loadList('accounts')]);
+  const writable = canWrite();
   const rows = S.data.apps.map((app) => {
     const spec = app.spec;
     return [
@@ -753,13 +796,13 @@ async function renderApps() {
       td(`<span class="mono">127.0.0.1:${esc(spec.port)}</span>`),
       td(`<span class="mono small">${esc(spec.command)} ${esc((spec.args || []).join(' '))}</span>`),
       td(spec.enabled ? badge('activa', 'ok') : badge('detenida', 'warn')),
-      td(btn('Eliminar', 'app-delete', `${spec.username}/${spec.name}`, 'tiny danger'), 'actions'),
+      td(writable ? btn('Eliminar', 'app-delete', `${spec.username}/${spec.name}`, 'tiny danger') : '', 'actions'),
     ];
   });
 
   $('#view').innerHTML =
-    sectionHead('Aplicaciones gestionadas', `<button class="btn primary" data-action="app-new">Nueva aplicación</button>`) +
-    table(['Aplicación', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
+    sectionHead('Aplicaciones gestionadas', writable ? `<button class="btn primary" data-action="app-new">Nueva aplicaci��n</button>` : '') +
+    table(['Aplicaci��n', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
 }
 
 function openAppModal() {
@@ -860,6 +903,7 @@ function openAppModal() {
 
 async function renderPhp() {
   await Promise.all([loadList('pools'), loadList('accounts')]);
+  const writable = canWrite();
   const rows = S.data.pools.map((pool) => {
     const spec = pool.spec;
     return [
@@ -870,13 +914,13 @@ async function renderPhp() {
       td(`${esc(spec.memory_limit_mb)} MB`),
       td(`<span class="mono small">${esc(pool.socket)}</span>`),
       td(statusBadge(spec.enabled)),
-      td(btn('Eliminar', 'php-delete', spec.username, 'tiny danger'), 'actions'),
+      td(writable ? btn('Eliminar', 'php-delete', spec.username, 'tiny danger') : '', 'actions'),
     ];
   });
 
   $('#view').innerHTML =
-    sectionHead('Pools PHP-FPM', `<button class="btn primary" data-action="php-new">Nuevo pool</button>`) +
-    table(['Cuenta', 'Versión', 'PM', 'Workers', 'Memoria', 'Socket', 'Estado', ''], rows, 'No hay pools; se crean automáticamente al publicar un sitio PHP.');
+    sectionHead('Pools PHP-FPM', writable ? `<button class="btn primary" data-action="php-new">Nuevo pool</button>` : '') +
+    table(['Cuenta', 'Versi��n', 'PM', 'Workers', 'Memoria', 'Socket', 'Estado', ''], rows, 'No hay pools; se crean automǭticamente al publicar un sitio PHP.');
 }
 
 function openPhpModal() {
@@ -922,16 +966,20 @@ function openPhpModal() {
 /* ---------------- ssl ---------------- */
 
 async function renderSsl() {
-  await loadList('certs');
+  await Promise.all([loadList('certs'), loadList('websites')]);
+  const writable = canWrite();
+  const scoped = isScoped();
   const rows = S.data.certs.map((cert) => [
     td(`<div class="cell-title">${esc(cert.domain)}</div><div class="cell-sub mono">${esc(cert.path)}</div>`),
-    td(esc(cert.issuer || '—')),
+    td(esc(cert.issuer || '�?"')),
     td(esc(fmtDate(cert.not_after))),
     td(certBadge(cert.status)),
   ]);
 
+  const renew = scoped ? '' : '<button class="btn ghost" data-action="cert-renew">Renovar todos</button>';
+  const issue = writable ? '<button class="btn primary" data-action="cert-new">Emitir certificado</button>' : '';
   $('#view').innerHTML =
-    sectionHead('Certificados TLS', `<button class="btn ghost" data-action="cert-renew">Renovar todos</button><button class="btn primary" data-action="cert-new">Emitir certificado</button>`) +
+    sectionHead('Certificados TLS', renew + issue) +
     table(['Dominio', 'Emisor', 'Vence', 'Estado'], rows, 'No hay certificados; publica un sitio con TLS Let\'s Encrypt.');
 }
 
@@ -1304,17 +1352,18 @@ async function handleAction(action, id) {
 
 async function renderDatabases() {
   await Promise.all([loadList('databases'), loadList('websites')]);
+  const writable = canWrite();
   const rows = S.data.databases.map((db) => [
     td(`<div class="cell-title">${esc(db.domain)}</div><div class="cell-sub">${esc(db.host)}</div>`),
     td(`<span class="mono small">${esc(db.username)}</span>`),
     td(`<span class="secret mono small" data-secret="${esc(db.id)}" data-value="${esc(db.password)}">${esc(db.password)}</span> ${btn('Ver', 'reveal', db.id)}`),
     td(esc(db.engine)),
     td(esc(fmtDate(db.created_at))),
-    td(btn('Eliminar', 'database-delete', db.id, 'tiny danger'), 'actions'),
+    td(writable ? btn('Eliminar', 'database-delete', db.id, 'tiny danger') : '', 'actions'),
   ]);
   $('#view').innerHTML =
-    sectionHead('Bases de datos por dominio', '<button class="btn primary" data-action="database-new">Nueva base</button>') +
-    table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
+    sectionHead('Bases de datos por dominio', writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '') +
+    table(['Dominio', 'Usuario', 'Contrase��a', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
 }
 
 function openDatabaseModal() {
@@ -1343,17 +1392,18 @@ function openDatabaseModal() {
 
 async function renderFtp() {
   await Promise.all([loadList('ftp'), loadList('websites')]);
+  const writable = canWrite();
   const rows = S.data.ftp.map((account) => [
     td(`<div class="cell-title">${esc(account.login)}</div><div class="cell-sub">${esc(account.domain)}</div>`),
     td(`<span class="mono small">${esc(account.home)}</span>`),
     td(account.readonly ? badge('solo lectura', 'warn') : badge('lectura/escritura', 'ok')),
     td(`<span class="secret mono small" data-secret="${esc(account.id)}" data-value="${esc(account.password)}">${esc(account.password)}</span> ${btn('Ver', 'reveal', account.id)}`),
     td(esc(fmtDate(account.created_at))),
-    td(btn('Eliminar', 'ftp-delete', account.id, 'tiny danger'), 'actions'),
+    td(writable ? btn('Eliminar', 'ftp-delete', account.id, 'tiny danger') : '', 'actions'),
   ]);
   $('#view').innerHTML =
-    sectionHead('Usuarios FTP', '<button class="btn primary" data-action="ftp-new">Nuevo usuario FTP</button>') +
-    table(['Login', 'Home (chroot)', 'Permisos', 'Contraseña', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al document root del sitio.');
+    sectionHead('Usuarios FTP', writable ? '<button class="btn primary" data-action="ftp-new">Nuevo usuario FTP</button>' : '') +
+    table(['Login', 'Home (chroot)', 'Permisos', 'Contrase��a', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al document root del sitio.');
 }
 
 function openFtpModal() {
@@ -1385,6 +1435,7 @@ function openFtpModal() {
 
 async function renderDns() {
   const data = await api('/api/v1/dns');
+  const writable = canWrite();
   const zones = data.zones || [];
   if (!zones.length) {
     $('#view').innerHTML = `<div class="card empty"><strong>Sin zonas DNS</strong><span>Publica un sitio con DNS habilitado para generar automáticamente SOA, NS, A, SPF, DKIM, DMARC y MX.</span></div>`;
@@ -1398,7 +1449,7 @@ async function renderDns() {
     td(`<span class="mono small">${esc(record.spec.value)}</span>`),
     td(esc(record.spec.ttl)),
     td(record.managed ? badge('auto', 'info') : badge('manual', '')),
-    td(btn('Eliminar', 'dns-record-delete', `${selected.domain}/${record.id}`, 'tiny danger'), 'actions'),
+    td(writable ? btn('Eliminar', 'dns-record-delete', `${selected.domain}/${record.id}`, 'tiny danger') : '', 'actions'),
   ]);
   const options = zones.map((zone) => `<option value="${esc(zone.domain)}" ${zone.domain === selected.domain ? 'selected' : ''}>${esc(zone.domain)}</option>`).join('');
   $('#view').innerHTML = `
@@ -1408,8 +1459,7 @@ async function renderDns() {
         <select id="dns-zone-select" class="compact">${options}</select>
       </div>
       <div class="row-inline">
-        <button class="btn ghost" data-action="dns-mail">Provisionar correo</button>
-        <button class="btn primary" data-action="dns-record-new">Añadir registro</button>
+        ${writable ? '<button class="btn ghost" data-action="dns-mail">Provisionar correo</button><button class="btn primary" data-action="dns-record-new">Añadir registro</button>' : ''}
       </div>
     </div>
     <div class="grid cols-4">
@@ -1471,6 +1521,8 @@ function openDnsRecordModal() {
 
 async function renderBackups() {
   await Promise.all([loadList('backups'), loadList('accounts')]);
+  const writable = canWrite();
+  const scoped = isScoped();
   const rows = S.data.backups.map((backup) => [
     td(`<div class="cell-title">${esc(backup.username)}</div><div class="cell-sub mono">${esc(backup.id)}</div>`),
     td(esc(fmtDate(backup.created_at))),
@@ -1478,13 +1530,13 @@ async function renderBackups() {
     td(badge(backup.status, backup.status === 'simulated' ? 'warn' : 'ok')),
     td(`<span class="mono small">${esc(backup.path)}</span>`),
     td([
-      isAdmin() ? btn('Restaurar', 'backup-restore', backup.id, 'tiny ghost') : '',
-      btn('Eliminar', 'backup-delete', backup.id, 'tiny danger'),
+      isAdmin() && !scoped ? btn('Restaurar', 'backup-restore', backup.id, 'tiny ghost') : '',
+      writable ? btn('Eliminar', 'backup-delete', backup.id, 'tiny danger') : '',
     ].join(''), 'actions'),
   ]);
   $('#view').innerHTML =
-    sectionHead('Copias de seguridad', '<button class="btn primary" data-action="backup-new">Crear backup</button>') +
-    table(['Cuenta', 'Fecha', 'Tamaño', 'Estado', 'Ruta', ''], rows, 'Aún no hay copias. Se conservan las últimas 7 por cuenta.');
+    sectionHead('Copias de seguridad', writable ? '<button class="btn primary" data-action="backup-new">Crear backup</button>' : '') +
+    table(['Cuenta', 'Fecha', 'Tama��o', 'Estado', 'Ruta', ''], rows, 'Aǧn no hay copias. Se conservan las ǧltimas 7 por cuenta.');
 }
 
 function openBackupModal() {

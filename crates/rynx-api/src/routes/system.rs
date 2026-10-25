@@ -29,6 +29,7 @@ pub async fn info(
     State(state): State<ApiState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::SystemInfo, &auth.user.username)
@@ -41,6 +42,7 @@ pub async fn reconcile(
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_admin()?;
+    auth.require_global()?;
     let response = state
         .daemon
         .call(Request::ReconcileAll, &auth.user.username)
