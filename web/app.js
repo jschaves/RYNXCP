@@ -264,6 +264,7 @@ function enterApp() {
     }
   }
   navigate(isScoped() ? 'accounts' : 'overview');
+  if (isScoped()) loadList('certs').then(updateCertAlert).catch(() => {});
 }
 
 function isAdmin() {
@@ -359,6 +360,7 @@ async function navigate(id) {
   try {
     await renderers[id]();
     translateUi(document.body);
+    updateCertAlert();
   } catch (err) {
     if (token !== S.navToken) return;
     $('#view').innerHTML = `<div class="card empty"><strong>No se pudo cargar la vista</strong><span>${esc(err.message)}</span></div>`;
@@ -368,6 +370,9 @@ async function navigate(id) {
 
 async function refresh() {
   await navigate(S.current);
+  if (S.current !== 'overview' && S.current !== 'ssl') {
+    loadList('certs').then(updateCertAlert).catch(() => {});
+  }
 }
 
 /* ---------------- data loaders ---------------- */
@@ -533,6 +538,33 @@ function statusBadge(enabled) {
 function certBadge(status) {
   const map = { active: 'ok', expiring: 'warn', expired: 'bad', missing: 'warn', error: 'bad' };
   return badge(status, map[status] || '');
+}
+
+const CERT_ATTENTION = new Set(['expiring', 'expired', 'missing', 'error']);
+
+function certProblems() {
+  return (S.data.certs || []).filter((cert) => CERT_ATTENTION.has(cert.status));
+}
+
+function updateCertAlert() {
+  const el = $('#cert-alert');
+  if (!el) return;
+  const problems = certProblems();
+  if (!problems.length) {
+    el.classList.add('hidden');
+    return;
+  }
+  const critical = problems.some((cert) => cert.status === 'expired' || cert.status === 'error');
+  const preview = problems.slice(0, 3).map((cert) => `${cert.domain} (${cert.status})`).join(', ');
+  el.classList.remove('hidden');
+  el.classList.toggle('critical', critical);
+  const text = $('#cert-alert-text');
+  if (text) {
+    text.innerHTML = `${esc(T('Certificados que requieren atención'))}: ${problems.length}
+      <span class="mono small">${esc(preview)}${problems.length > 3 ? '…' : ''}</span>`;
+  }
+  const button = $('#cert-alert-review');
+  if (button) button.textContent = T('Revisar certificados');
 }
 
 /* ---------------- overview ---------------- */
@@ -1945,6 +1977,11 @@ document.addEventListener('DOMContentLoaded', () => {
         toast(err.message, 'error');
       }
     });
+  }
+
+  const certAlertReview = $('#cert-alert-review');
+  if (certAlertReview) {
+    certAlertReview.addEventListener('click', () => navigate('ssl'));
   }
 
   setInterval(() => {

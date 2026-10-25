@@ -265,6 +265,11 @@ Installed timers:
 - `rynxcp-cert-renew.timer`: renews certificates daily.
 - `rynxcp-backup.timer`: nightly backups.
 
+The panel shows a warning banner when a certificate is expiring, expired,
+missing or in error, with a shortcut to the certificate page. Automatic renewal
+failures are recorded in the `rynxcp-cert-renew` journal and reflected in that
+banner on the next data refresh.
+
 ## Local development (Windows or Linux)
 
 Simulation mode renders every artifact under `./data/daemon/sandbox` and never

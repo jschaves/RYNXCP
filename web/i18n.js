@@ -282,6 +282,8 @@
       "That username is already used by a panel user.",
     "Ese email ya está en uso por un usuario del panel.":
       "That email is already used by a panel user.",
+    "Certificados que requieren atención": "Certificates need attention",
+    "Revisar certificados": "Review certificates",
   };
 
   const PT = {
@@ -306,6 +308,8 @@
     "Renovar todos": "Renovar todos", "Crear backup": "Criar backup",
     "Restaurar": "Restaurar", "Cuenta": "Conta", "Dominio": "Domínio",
     "Estado": "Estado", "Email": "Email", "Rol": "Função", "Versión": "Versão",
+    "Certificados que requieren atención": "Certificados que precisam de atenção",
+    "Revisar certificados": "Revisar certificados",
   };
 
   const FR = {
@@ -331,6 +335,8 @@
     "Renovar todos": "Tout renouveler", "Crear backup": "Créer une sauvegarde",
     "Restaurar": "Restaurer", "Cuenta": "Compte", "Dominio": "Domaine",
     "Estado": "État", "Email": "E-mail", "Rol": "Rôle", "Versión": "Version",
+    "Certificados que requieren atención": "Certificats à vérifier",
+    "Revisar certificados": "Vérifier les certificats",
   };
 
   const AR = {
@@ -358,6 +364,8 @@
     "Restaurar": "استعادة", "Cuenta": "الحساب", "Dominio": "النطاق",
     "Estado": "الحالة", "Email": "البريد الإلكتروني", "Rol": "الدور",
     "Versión": "الإصدار",
+    "Certificados que requieren atención": "شهادات تحتاج إلى مراجعة",
+    "Revisar certificados": "مراجعة الشهادات",
   };
 
   const RU = {
@@ -384,6 +392,8 @@
     "Crear backup": "Создать резервную копию", "Restaurar": "Восстановить",
     "Cuenta": "Учётная запись", "Dominio": "Домен", "Estado": "Состояние",
     "Email": "Эл. почта", "Rol": "Роль", "Versión": "Версия",
+    "Certificados que requieren atención": "Сертификаты требуют внимания",
+    "Revisar certificados": "Проверить сертификаты",
   };
 
   const ZH = {
@@ -407,6 +417,8 @@
     "Renovar todos": "全部续期", "Crear backup": "创建备份",
     "Restaurar": "恢复", "Cuenta": "账户", "Dominio": "域名",
     "Estado": "状态", "Email": "电子邮件", "Rol": "角色", "Versión": "版本",
+    "Certificados que requieren atención": "证书需要处理",
+    "Revisar certificados": "查看证书",
   };
 
   const JA = {
@@ -433,6 +445,8 @@
     "Restaurar": "復元", "Cuenta": "アカウント", "Dominio": "ドメイン",
     "Estado": "ステータス", "Email": "メール", "Rol": "ロール",
     "Versión": "バージョン",
+    "Certificados que requieren atención": "証明書の確認が必要です",
+    "Revisar certificados": "証明書を確認",
   };
 
   const IT = {
@@ -473,6 +487,8 @@
     "Aún no hay virtual hosts.": "Nessun virtual host.",
     "El sistema está actualizado.": "Il sistema è aggiornato.",
     "No se detectó software.": "Nessun software rilevato.",
+    "Certificados que requieren atención": "Certificati da controllare",
+    "Revisar certificados": "Controlla i certificati",
   };
 
   const DE = {
@@ -513,6 +529,8 @@
     "Aún no hay virtual hosts.": "Noch keine virtuellen Hosts.",
     "El sistema está actualizado.": "Das System ist auf dem neuesten Stand.",
     "No se detectó software.": "Keine Software erkannt.",
+    "Certificados que requieren atención": "Zertifikate benötigen Aufmerksamkeit",
+    "Revisar certificados": "Zertifikate prüfen",
   };
 
   const DICT = {
