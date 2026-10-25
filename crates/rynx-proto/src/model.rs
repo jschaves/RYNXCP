@@ -91,6 +91,21 @@ pub enum Request {
     },
     CertList,
 
+    MailDomainUpsert(MailDomainSpec),
+    MailDomainDelete {
+        domain: String,
+    },
+    MailDomainList,
+    MailTls {
+        domain: String,
+        email: String,
+    },
+    MailAccountUpsert(MailAccountSpec),
+    MailAccountDelete {
+        id: String,
+    },
+    MailAccountList,
+
     BackupCreate {
         username: String,
     },
@@ -209,6 +224,18 @@ pub enum Response {
     },
     Certs {
         certs: Vec<CertView>,
+    },
+    MailDomain {
+        domain: MailDomainView,
+    },
+    MailDomains {
+        domains: Vec<MailDomainView>,
+    },
+    MailAccount {
+        account: MailAccountView,
+    },
+    MailAccounts {
+        accounts: Vec<MailAccountView>,
     },
     Backup {
         backup: BackupView,
@@ -440,6 +467,59 @@ pub struct WebsiteView {
     pub id: String,
     pub spec: WebsiteSpec,
     pub document_root: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MailDomainSpec {
+    pub domain: String,
+    pub username: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub catch_all: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MailDomainView {
+    pub domain: String,
+    pub username: String,
+    pub enabled: bool,
+    pub catch_all: Option<String>,
+    pub webmail_url: String,
+    pub tls_status: CertificateStatus,
+    pub tls_not_after: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MailAccountSpec {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub domain: String,
+    pub local_part: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    pub quota_mb: u64,
+    pub enabled: bool,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub forward_to: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MailAccountView {
+    pub id: String,
+    pub domain: String,
+    pub username: String,
+    pub local_part: String,
+    pub address: String,
+    pub quota_mb: u64,
+    pub enabled: bool,
+    pub aliases: Vec<String>,
+    pub forward_to: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }

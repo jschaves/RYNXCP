@@ -15,7 +15,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use rynx_core::{CoreError, DaemonConfig};
-use rynx_proto::{AccountSpec, AppSpec, CertView, PackageUpdate, ProgramInfo, SystemInfo};
+use rynx_proto::{
+    AccountSpec, AppSpec, CertView, MailDomainSpec, PackageUpdate, ProgramInfo, SystemInfo,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
@@ -58,6 +60,17 @@ pub struct UnitStatus {
     pub memory_kb: u64,
     pub cpu_percent: f32,
     pub uptime_secs: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MailAccountConfig {
+    pub domain: String,
+    pub local_part: String,
+    pub password_hash: String,
+    pub quota_mb: u64,
+    pub enabled: bool,
+    pub aliases: Vec<String>,
+    pub forward_to: Vec<String>,
 }
 
 #[async_trait]
@@ -147,6 +160,16 @@ pub trait Executor: Send + Sync {
     async fn write_dns_conf(&self, content: &str) -> ExecResult<()>;
     async fn generate_dkim_key(&self, domain: &str, selector: &str) -> ExecResult<String>;
     async fn write_dkim_tables(&self, keytable: &str, signingtable: &str) -> ExecResult<()>;
+
+    async fn hash_mail_password(&self, password: &str) -> ExecResult<String>;
+    async fn sync_mail(
+        &self,
+        domains: &[MailDomainSpec],
+        accounts: &[MailAccountConfig],
+    ) -> ExecResult<()>;
+    async fn remove_mailbox(&self, domain: &str, local_part: &str) -> ExecResult<()>;
+    async fn remove_mail_domain(&self, domain: &str) -> ExecResult<()>;
+    async fn reload_mail(&self) -> ExecResult<()>;
 
     async fn create_database(&self, database: &str, user: &str, password: &str) -> ExecResult<()>;
     async fn drop_database(&self, database: &str, user: &str) -> ExecResult<()>;

@@ -43,12 +43,48 @@ pub async fn start(
     staging: bool,
     actor: &str,
 ) -> CertJobView {
+    let request = Request::CertIssue {
+        domain: domain.to_string(),
+        email: email.to_string(),
+        staging,
+    };
+    spawn(state, domain, actor, request, "requesting certificate").await
+}
+
+pub async fn start_mail_tls(
+    state: &ApiState,
+    domain: &str,
+    email: &str,
+    actor: &str,
+) -> CertJobView {
+    let webmail = format!("webmail.{domain}");
+    let request = Request::MailTls {
+        domain: domain.to_string(),
+        email: email.to_string(),
+    };
+    spawn(
+        state,
+        &webmail,
+        actor,
+        request,
+        "requesting webmail certificate",
+    )
+    .await
+}
+
+async fn spawn(
+    state: &ApiState,
+    domain: &str,
+    actor: &str,
+    request: Request,
+    message: &str,
+) -> CertJobView {
     let id = random_hex(12);
     let view = CertJobView {
         id: id.clone(),
         domain: domain.to_string(),
         status: "running".into(),
-        message: "requesting certificate".into(),
+        message: message.into(),
         certificate: None,
     };
     {
@@ -74,20 +110,9 @@ pub async fn start(
 
     let jobs = state.cert_jobs.clone();
     let daemon = state.daemon.clone();
-    let domain = domain.to_string();
-    let email = email.to_string();
     let actor = actor.to_string();
     tokio::spawn(async move {
-        let result = daemon
-            .call(
-                Request::CertIssue {
-                    domain,
-                    email,
-                    staging,
-                },
-                &actor,
-            )
-            .await;
+        let result = daemon.call(request, &actor).await;
         let mut jobs = jobs.lock().await;
         if let Some(job) = jobs.get_mut(&id) {
             match result {

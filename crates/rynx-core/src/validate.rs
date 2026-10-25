@@ -8,7 +8,9 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use crate::{CoreError, CoreResult};
-use rynx_proto::{AccountSpec, AppSpec, PhpPoolSpec, Runtime, WebsiteSpec};
+use rynx_proto::{
+    AccountSpec, AppSpec, MailAccountSpec, MailDomainSpec, PhpPoolSpec, Runtime, WebsiteSpec,
+};
 
 static USERNAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]{2,23}$").unwrap());
 static DOMAIN_RE: Lazy<Regex> =
@@ -19,6 +21,8 @@ static VERSION_RE: Lazy<Regex> =
 static EMAIL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$").unwrap()
 });
+static MAIL_LOCAL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$").unwrap());
 static ENV_KEY_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$").unwrap());
 static COMMAND_RE: Lazy<Regex> =
@@ -313,6 +317,87 @@ pub fn validate_website_spec(spec: &WebsiteSpec) -> CoreResult<()> {
                 .ok_or_else(|| invalid("managed runtime requires an application name"))?;
             validate_app_name(app)?;
         }
+    }
+    Ok(())
+}
+
+pub fn validate_mail_domain_spec(spec: &MailDomainSpec) -> CoreResult<()> {
+    validate_domain(&spec.domain)?;
+    validate_username(&spec.username)?;
+    if let Some(target) = &spec.catch_all {
+        if !target.trim().is_empty() {
+            validate_email(target)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_mail_account_spec(spec: &MailAccountSpec) -> CoreResult<()> {
+    validate_domain(&spec.domain)?;
+    if !MAIL_LOCAL_RE.is_match(&spec.local_part) {
+        return Err(invalid(
+            "mailbox name must be lowercase and match ^[a-z0-9][a-z0-9._-]{0,62}$",
+        ));
+    }
+    if spec.local_part.contains("..") {
+        return Err(invalid("mailbox name contains an invalid dot sequence"));
+    }
+    if let Some(id) = &spec.id {
+        if id.len() < 8
+            || id.len() > 64
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(invalid("mailbox id is invalid"));
+        }
+    }
+    if !(64..=1_048_576).contains(&spec.quota_mb) {
+        return Err(invalid("mailbox quota must be between 64 and 1048576 MB"));
+    }
+    if let Some(password) = &spec.password {
+        validate_mail_password(password)?;
+    } else if spec.id.is_none() {
+        return Err(invalid("a password is required for a new mailbox"));
+    }
+    if spec.aliases.len() > 50 || spec.forward_to.len() > 50 {
+        return Err(invalid("too many aliases or forwarding targets"));
+    }
+    for alias in &spec.aliases {
+        validate_email(alias)?;
+        let Some((_, domain)) = alias.rsplit_once('@') else {
+            return Err(invalid("alias address is invalid"));
+        };
+        if domain != spec.domain {
+            return Err(invalid("aliases must belong to the mailbox domain"));
+        }
+    }
+    for target in &spec.forward_to {
+        validate_email(target)?;
+    }
+    Ok(())
+}
+
+pub fn validate_mail_password(password: &str) -> CoreResult<()> {
+    if !(12..=128).contains(&password.len()) {
+        return Err(invalid(
+            "mailbox password must be between 12 and 128 characters",
+        ));
+    }
+    if password.chars().any(|c| c.is_control()) {
+        return Err(invalid("mailbox password contains control characters"));
+    }
+    let classes = [
+        password.chars().any(|c| c.is_ascii_lowercase()),
+        password.chars().any(|c| c.is_ascii_uppercase()),
+        password.chars().any(|c| c.is_ascii_digit()),
+        password.chars().any(|c| !c.is_ascii_alphanumeric()),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if classes < 3 {
+        return Err(invalid(
+            "mailbox password must combine at least 3 character classes",
+        ));
     }
     Ok(())
 }

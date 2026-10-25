@@ -458,6 +458,10 @@ set_toml "$DAEMON_CONF" "panel_port" "$PANEL_PORT"
 set_toml "$DAEMON_CONF" "tls_email" "\"$EMAIL\""
 # Email DNS requires a mail server; keep it disabled until one exists.
 set_toml "$DAEMON_CONF" "mail_enabled" "false"
+if [[ "${RYNX_SKIP_MAIL:-0}" != "1" ]]; then
+  log "Installing the Postfix/Dovecot/Roundcube mail stack"
+  bash "$ROOT_DIR/deploy/mail-setup.sh"
+fi
 if is_domain "$HOST"; then
   set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
 fi
@@ -751,8 +755,8 @@ RYNXCP is ready.
 
 Installed:
   Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
-  OpenDKIM tooling, fail2ban, nftables, unattended-upgrades, Node.js, Python,
-  Ruby, Java, Go${DOTNET_NOTE:-}
+  OpenDKIM, fail2ban, nftables, unattended-upgrades, Node.js, Python,
+  Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot and Roundcube
 
 Timers:
   rynxcp-cert-renew.timer  daily Let's Encrypt renewal
@@ -762,9 +766,9 @@ Next steps:
   1. Point the NS records of each hosted domain to ns1.$HOST / ns2.$HOST or
      use your provider's DNS. Create glue/A records for ns1 and ns2.
   2. The reverse PTR of ${PUBLIC_IP:-your public IP} must resolve to your mail
-     hostname before sending email.
-  3. Email DNS (MX/SPF/DKIM/DMARC) is provisioned per zone, but
-     mail_enabled stays false until a mail server (Postfix/Dovecot) exists.
+     hostname before sending email, and outbound TCP/25 must be open.
+  3. Create a website, open "Correo" and activate mail for its domain. RYNXCP
+     provisions MX/SPF/DKIM/DMARC/SRV/TLS-RPT and starts the webmail SSL job.
   4. Log in, open "Programas" to review updates and "Consola" for diagnostics.
 
 Log: $LOG

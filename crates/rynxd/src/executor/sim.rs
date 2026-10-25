@@ -6,13 +6,15 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
+use rynx_core::crypto::random_hex;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, PackageUpdate, ProgramInfo, SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, MailDomainSpec, PackageUpdate, ProgramInfo,
+    SystemInfo,
 };
 
-use super::{ExecError, ExecResult, Executor, UnitStatus};
+use super::{ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
 
 pub struct SimExecutor {
     cfg: DaemonConfig,
@@ -451,6 +453,92 @@ impl Executor for SimExecutor {
             "-----BEGIN PUBLIC KEY-----\nU0lNVUxBVEVELVBVQkxJQy1LRVk=\n-----END PUBLIC KEY-----\n";
         write_text(&dir.join(format!("{selector}.public")), public)?;
         Ok(public.to_string())
+    }
+
+    async fn hash_mail_password(&self, _password: &str) -> ExecResult<String> {
+        Ok(format!("{{SHA512-CRYPT}}sim-{}", random_hex(12)))
+    }
+
+    async fn sync_mail(
+        &self,
+        domains: &[MailDomainSpec],
+        accounts: &[MailAccountConfig],
+    ) -> ExecResult<()> {
+        let root = self.cfg.state_dir.join("sandbox").join("mail");
+        let vmail = self.cfg.state_dir.join("sandbox").join("vmail");
+        std::fs::create_dir_all(&root)?;
+        std::fs::create_dir_all(&vmail)?;
+        let mut domain_lines = String::new();
+        let mut mailbox_lines = String::new();
+        let mut alias_lines = String::new();
+        let mut users = String::new();
+        let mut conf = String::from("# managed-by: RYNXCP\n");
+        for domain in domains.iter().filter(|domain| domain.enabled) {
+            domain_lines.push_str(&format!("{} {}\n", domain.domain, domain.domain));
+            if let Some(target) = &domain.catch_all {
+                alias_lines.push_str(&format!("@{} {}\n", domain.domain, target));
+            }
+            conf.push_str(&format!(
+                "local_name mail.{} {{ ssl_cert = </sandbox/certs/webmail.{}/fullchain.pem\n ssl_key = </sandbox/certs/webmail.{}/privkey.pem\n}}\n",
+                domain.domain, domain.domain, domain.domain
+            ));
+        }
+        for account in accounts.iter().filter(|account| account.enabled) {
+            let home = vmail.join(&account.domain).join(&account.local_part);
+            std::fs::create_dir_all(home.join("Maildir/cur"))?;
+            std::fs::create_dir_all(home.join("Maildir/new"))?;
+            std::fs::create_dir_all(home.join("Maildir/tmp"))?;
+            std::fs::create_dir_all(home.join("sieve"))?;
+            let address = format!("{}@{}", account.local_part, account.domain);
+            mailbox_lines.push_str(&format!(
+                "{} {}/{}/\n",
+                address, account.domain, account.local_part
+            ));
+            for alias in &account.aliases {
+                alias_lines.push_str(&format!("{alias} {address}\n"));
+            }
+            users.push_str(&format!(
+                "{}:{}:5000:5000::{}::userdb_quota_rule=*:storage={}M\n",
+                address,
+                account.password_hash,
+                home.display(),
+                account.quota_mb
+            ));
+        }
+        write_text(&root.join("domains"), &domain_lines)?;
+        write_text(&root.join("mailboxes"), &mailbox_lines)?;
+        write_text(&root.join("aliases"), &alias_lines)?;
+        write_text(&root.join("users"), &users)?;
+        write_text(&root.join("dovecot.conf"), &conf)?;
+        write_text(&root.join("sni"), "")?;
+        Ok(())
+    }
+
+    async fn remove_mailbox(&self, domain: &str, local_part: &str) -> ExecResult<()> {
+        let path = self
+            .cfg
+            .state_dir
+            .join("sandbox")
+            .join("vmail")
+            .join(domain)
+            .join(local_part);
+        let _ = std::fs::remove_dir_all(path);
+        Ok(())
+    }
+
+    async fn remove_mail_domain(&self, domain: &str) -> ExecResult<()> {
+        let path = self
+            .cfg
+            .state_dir
+            .join("sandbox")
+            .join("vmail")
+            .join(domain);
+        let _ = std::fs::remove_dir_all(path);
+        Ok(())
+    }
+
+    async fn reload_mail(&self) -> ExecResult<()> {
+        Ok(())
     }
 
     async fn write_dkim_tables(&self, keytable: &str, signingtable: &str) -> ExecResult<()> {

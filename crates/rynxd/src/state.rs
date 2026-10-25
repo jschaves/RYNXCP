@@ -10,9 +10,10 @@ use serde::Serialize;
 
 use rynx_core::crypto::{now_rfc3339, now_unix};
 use rynx_proto::{
-    AccountSpec, AccountView, AppSpec, AppView, BackupView, BlockedIpView, DatabaseView,
-    DnsRecordSpec, DnsRecordView, FirewallRuleSpec, FirewallRuleView, FtpView, MetricSample,
-    PhpPoolSpec, PhpPoolView, Runtime, TlsMode, WebsiteSpec, WebsiteView,
+    AccountSpec, AccountView, AppSpec, AppView, BackupView, BlockedIpView, CertificateStatus,
+    DatabaseView, DnsRecordSpec, DnsRecordView, FirewallRuleSpec, FirewallRuleView, FtpView,
+    MailAccountSpec, MailAccountView, MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec,
+    PhpPoolView, Runtime, TlsMode, WebsiteSpec, WebsiteView,
 };
 
 const SCHEMA: &str = r#"
@@ -47,6 +48,32 @@ CREATE TABLE IF NOT EXISTS websites (
     updated_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_websites_user ON websites(username);
+
+CREATE TABLE IF NOT EXISTS mail_domains (
+    domain     TEXT PRIMARY KEY,
+    username   TEXT NOT NULL,
+    enabled    INTEGER NOT NULL,
+    catch_all  TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_domains_user ON mail_domains(username);
+
+CREATE TABLE IF NOT EXISTS mail_accounts (
+    id            TEXT PRIMARY KEY,
+    domain        TEXT NOT NULL,
+    username      TEXT NOT NULL,
+    local_part    TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    quota_mb      INTEGER NOT NULL,
+    enabled       INTEGER NOT NULL,
+    aliases       TEXT NOT NULL,
+    forward_to    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(domain, local_part)
+);
+CREATE INDEX IF NOT EXISTS idx_mail_accounts_domain ON mail_accounts(domain);
 
 CREATE TABLE IF NOT EXISTS php_pools (
     username        TEXT PRIMARY KEY,
@@ -382,6 +409,217 @@ impl StateStore {
         let conn = self.conn()?;
         conn.execute("DELETE FROM websites WHERE domain = ?1", params![domain])?;
         Ok(())
+    }
+
+    pub fn list_mail_domains(&self) -> Result<Vec<MailDomainView>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT domain, username, enabled, catch_all, created_at, updated_at \
+             FROM mail_domains ORDER BY domain",
+        )?;
+        let rows = stmt.query_map([], map_mail_domain)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_mail_domain(&self, domain: &str) -> Result<Option<MailDomainView>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT domain, username, enabled, catch_all, created_at, updated_at \
+                 FROM mail_domains WHERE domain = ?1",
+                params![domain],
+                map_mail_domain,
+            )
+            .optional()?)
+    }
+
+    pub fn upsert_mail_domain(&self, spec: &MailDomainSpec) -> Result<MailDomainView> {
+        let now = now_rfc3339();
+        let existing = self.get_mail_domain(&spec.domain)?;
+        let created_at = existing
+            .as_ref()
+            .map(|view| view.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let catch_all = spec
+            .catch_all
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO mail_domains (domain, username, enabled, catch_all, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(domain) DO UPDATE SET \
+               username = excluded.username, enabled = excluded.enabled, \
+               catch_all = excluded.catch_all, updated_at = excluded.updated_at",
+            params![
+                spec.domain,
+                spec.username,
+                spec.enabled as i64,
+                catch_all,
+                created_at,
+                now
+            ],
+        )?;
+        self.get_mail_domain(&spec.domain)?
+            .ok_or_else(|| anyhow::anyhow!("mail domain disappeared after upsert"))
+    }
+
+    pub fn delete_mail_domain(&self, domain: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM mail_accounts WHERE domain = ?1",
+            params![domain],
+        )?;
+        conn.execute(
+            "DELETE FROM mail_domains WHERE domain = ?1",
+            params![domain],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_mail_accounts(&self) -> Result<Vec<MailAccountView>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, domain, username, local_part, quota_mb, enabled, aliases, forward_to, created_at, updated_at \
+             FROM mail_accounts ORDER BY domain, local_part",
+        )?;
+        let rows = stmt.query_map([], map_mail_account)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_mail_accounts_for_domain(&self, domain: &str) -> Result<Vec<MailAccountView>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, domain, username, local_part, quota_mb, enabled, aliases, forward_to, created_at, updated_at \
+             FROM mail_accounts WHERE domain = ?1 ORDER BY local_part",
+        )?;
+        let rows = stmt.query_map(params![domain], map_mail_account)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn mail_account_hash(&self, id: &str) -> Result<Option<String>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT password_hash FROM mail_accounts WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
+    pub fn get_mail_account(&self, id: &str) -> Result<Option<MailAccountView>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, domain, username, local_part, quota_mb, enabled, aliases, forward_to, created_at, updated_at \
+                 FROM mail_accounts WHERE id = ?1",
+                params![id],
+                map_mail_account,
+            )
+            .optional()?)
+    }
+
+    pub fn find_mail_account(
+        &self,
+        domain: &str,
+        local_part: &str,
+    ) -> Result<Option<MailAccountView>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, domain, username, local_part, quota_mb, enabled, aliases, forward_to, created_at, updated_at \
+                 FROM mail_accounts WHERE domain = ?1 AND local_part = ?2",
+                params![domain, local_part],
+                map_mail_account,
+            )
+            .optional()?)
+    }
+
+    pub fn upsert_mail_account(
+        &self,
+        spec: &MailAccountSpec,
+        username: &str,
+        password_hash: Option<&str>,
+    ) -> Result<MailAccountView> {
+        let now = now_rfc3339();
+        let existing = match &spec.id {
+            Some(id) => self.get_mail_account(id)?,
+            None => self.find_mail_account(&spec.domain, &spec.local_part)?,
+        };
+        let existing_hash = if let Some(view) = &existing {
+            let conn = self.conn()?;
+            conn.query_row(
+                "SELECT password_hash FROM mail_accounts WHERE id = ?1",
+                params![view.id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        } else {
+            None
+        };
+        let hash = password_hash
+            .map(str::to_string)
+            .or(existing_hash)
+            .ok_or_else(|| anyhow::anyhow!("mailbox password is required"))?;
+        let id = spec
+            .id
+            .clone()
+            .or_else(|| existing.as_ref().map(|view| view.id.clone()))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let created_at = existing
+            .as_ref()
+            .map(|view| view.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let aliases = serde_json::to_string(&spec.aliases).unwrap_or_else(|_| "[]".into());
+        let forward_to = serde_json::to_string(&spec.forward_to).unwrap_or_else(|_| "[]".into());
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO mail_accounts \
+               (id, domain, username, local_part, password_hash, quota_mb, enabled, aliases, forward_to, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+             ON CONFLICT(id) DO UPDATE SET \
+               domain = excluded.domain, username = excluded.username, local_part = excluded.local_part, \
+               password_hash = excluded.password_hash, quota_mb = excluded.quota_mb, enabled = excluded.enabled, \
+               aliases = excluded.aliases, forward_to = excluded.forward_to, updated_at = excluded.updated_at",
+            params![
+                id,
+                spec.domain,
+                username,
+                spec.local_part,
+                hash,
+                spec.quota_mb as i64,
+                spec.enabled as i64,
+                aliases,
+                forward_to,
+                created_at,
+                now
+            ],
+        )?;
+        self.get_mail_account(&id)?
+            .ok_or_else(|| anyhow::anyhow!("mailbox disappeared after upsert"))
+    }
+
+    pub fn delete_mail_account(&self, id: &str) -> Result<Option<MailAccountView>> {
+        let existing = self.get_mail_account(id)?;
+        if existing.is_some() {
+            let conn = self.conn()?;
+            conn.execute("DELETE FROM mail_accounts WHERE id = ?1", params![id])?;
+        }
+        Ok(existing)
     }
 
     pub fn list_php_pools(&self) -> Result<Vec<PhpPoolView>> {
@@ -1173,6 +1411,41 @@ fn map_backup(row: &rusqlite::Row<'_>) -> rusqlite::Result<BackupView> {
         size_bytes: row.get::<_, i64>(3)? as u64,
         path: row.get(4)?,
         status: row.get(5)?,
+    })
+}
+
+fn map_mail_domain(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailDomainView> {
+    let domain: String = row.get(0)?;
+    Ok(MailDomainView {
+        webmail_url: format!("https://webmail.{domain}/"),
+        domain,
+        username: row.get(1)?,
+        enabled: row.get::<_, i64>(2)? != 0,
+        catch_all: row.get(3)?,
+        tls_status: CertificateStatus::Missing,
+        tls_not_after: None,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+    })
+}
+
+fn map_mail_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailAccountView> {
+    let domain: String = row.get(1)?;
+    let local_part: String = row.get(3)?;
+    let aliases_raw: String = row.get(6)?;
+    let forward_raw: String = row.get(7)?;
+    Ok(MailAccountView {
+        id: row.get(0)?,
+        address: format!("{local_part}@{domain}"),
+        local_part,
+        domain,
+        username: row.get(2)?,
+        quota_mb: row.get::<_, i64>(4)? as u64,
+        enabled: row.get::<_, i64>(5)? != 0,
+        aliases: serde_json::from_str(&aliases_raw).unwrap_or_default(),
+        forward_to: serde_json::from_str(&forward_raw).unwrap_or_default(),
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
     })
 }
 

@@ -16,6 +16,7 @@ pub mod databases;
 pub mod dns;
 pub mod firewall;
 pub mod ftp;
+pub mod mail;
 pub mod monitor;
 pub mod php;
 pub mod programs;
@@ -64,6 +65,20 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/certs/jobs", post(certs::start_job))
         .route("/api/v1/certs/jobs/{id}", get(certs::job_status))
         .route("/api/v1/certs/renew", post(certs::renew))
+        .route(
+            "/api/v1/mail/domains",
+            get(mail::list_domains).post(mail::upsert_domain),
+        )
+        .route("/api/v1/mail/domains/{domain}", delete(mail::delete_domain))
+        .route(
+            "/api/v1/mail/domains/{domain}/tls",
+            post(mail::issue_domain_tls),
+        )
+        .route(
+            "/api/v1/mail/accounts",
+            get(mail::list_accounts).post(mail::upsert_account),
+        )
+        .route("/api/v1/mail/accounts/{id}", delete(mail::delete_account))
         .route("/api/v1/backups", get(backups::list).post(backups::create))
         .route("/api/v1/backups/{id}", delete(backups::delete))
         .route("/api/v1/backups/{id}/restore", post(backups::restore))

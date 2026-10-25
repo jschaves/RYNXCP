@@ -20,7 +20,7 @@ reconciliation engine and UI are original.
 | Web | Nginx virtual hosts, aliases, TLS, PHP-FPM, reverse proxy, security headers |
 | Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go and static sites |
 | DNS | Authoritative BIND zones, A/AAAA/CNAME/MX/TXT/NS/SRV/CAA records |
-| Email | SPF, DKIM (RSA key + OpenDKIM tables), DMARC, MX and PTR guidance |
+| Email | Postfix + Dovecot mailboxes, aliases/forwarding, quotas, DKIM/OpenDKIM, DMARC, SRV, TLS-RPT and Roundcube webmail |
 | Databases | MariaDB per domain, dedicated user/password, local-only access |
 | FTP | Pure-FTPd virtual users, chrooted to the document root, read-only or read-write |
 | Backups | Home + managed configuration, retention, restore and daily timer |
@@ -56,6 +56,20 @@ When a Static or PHP site is first applied, the daemon creates its document root
 and, if there is no `index.html` or `index.php`, a welcome page in the UI
 language of the panel user who created the site. Existing content is never
 overwritten.
+
+Mail is enabled per website from the **Correo** view. RYNXCP provisions
+`mail.<domain>` for SMTP/IMAP/POP3, `webmail.<domain>` for Roundcube and the
+complete DNS security set: MX, SPF, DKIM (`mail._domainkey`), `_domainkey`,
+DMARC, TLS-RPT, CAA, A/AAAA, `webmail`/`imap`/`smtp`/`pop`/`autodiscover` and
+SRV records for IMAPS, IMAP, POP3S, POP3, submission, submissions, Sieve and
+autodiscover. Certificates cover `webmail`, `mail`, `imap`, `smtp`, `pop`,
+`autodiscover` and `autoconfig`.
+
+Mailboxes support per-account quotas, local aliases, forwarding and a domain
+catch-all. Roundcube is installed with the Managesieve plugin, so each user can
+configure spam filters, rules and autoresponders from the webmail UI. Mail
+delivery requires outbound port 25 and a matching PTR; if the provider blocks
+port 25, use an SMTP relay instead.
 
 Creating an enabled site with `tls = "lets_encrypt"` also starts a certificate
 job immediately. The API returns the job in `cert_job`; the panel polls
@@ -223,16 +237,20 @@ What it installs and configures:
   logrotate.
 - Node.js, Python 3, Ruby, Java, Go and .NET when the distribution provides it.
 - The Rust toolchain when missing, then `cargo build --release` and `deploy/install.sh`.
+- Postfix, Dovecot (IMAP/POP3/LMTP/Sieve/Managesieve), OpenDKIM and Roundcube
+  via `deploy/mail-setup.sh` (also invoked by the pre-installer; set
+  `RYNX_SKIP_MAIL=1` to skip it).
 - DNS, database, FTP and firewall enabled; the SSH port is detected from
-  `sshd_config` and always kept open.
+  `sshd_config` and always kept open. Mail ports 25/110/143/465/587/993/995 and
+  4190 are allowed by the nftables rules.
 - A panel virtual host and, for a domain with working DNS, a Let's Encrypt
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
 
 The panel is published at `http(s)://<host>[:port]` and the administrator is created with
-the email/password you entered. Email DNS (`mail_enabled`) stays disabled until a
-real mail server exists; zones still include SPF/DKIM/DMARC records when mail records
-are provisioned from the UI.
+the email/password you entered. Email is opt-in per website from the **Correo**
+view; enabling it starts the webmail certificate job and provisions the mail DNS
+records.
 
 ## Installing on Debian/Ubuntu (manual)
 
@@ -255,6 +273,7 @@ Build and install:
 ```bash
 cargo build --release
 sudo bash deploy/install.sh
+sudo bash deploy/mail-setup.sh
 ```
 
 The installer creates the `rynx`/`rynxftp` users and groups, directories, token,
@@ -332,6 +351,9 @@ GET|POST   /api/v1/php-pools         DELETE /api/v1/php-pools/{username}
 GET|POST   /api/v1/apps              DELETE /api/v1/apps/{username}/{name}
 GET|POST   /api/v1/certs             POST   /api/v1/certs/renew
 POST       /api/v1/certs/jobs        GET    /api/v1/certs/jobs/{id}
+GET|POST   /api/v1/mail/domains       DELETE /api/v1/mail/domains/{domain}
+POST       /api/v1/mail/domains/{domain}/tls
+GET|POST   /api/v1/mail/accounts      DELETE /api/v1/mail/accounts/{id}
 GET|POST   /api/v1/backups           DELETE /api/v1/backups/{id}
 POST       /api/v1/backups/{id}/restore
 GET        /api/v1/dns               GET    /api/v1/dns/{domain}

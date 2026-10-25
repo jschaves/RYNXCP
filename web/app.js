@@ -10,7 +10,7 @@ const S = {
   system: null,
   mode: null,
   impersonatedBy: null,
-  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] },
+  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], mailDomains: [], mailAccounts: [] },
 };
 
 const RUNTIMES = {
@@ -35,6 +35,7 @@ const NAV_ITEMS = [
   { id: 'databases', label: 'Bases de datos', group: 'Operación' },
   { id: 'ftp', label: 'FTP', group: 'Operación' },
   { id: 'dns', label: 'DNS', group: 'Operación' },
+  { id: 'mail', label: 'Correo', group: 'Operación' },
   { id: 'ssl', label: 'Certificados', group: 'Operación' },
   { id: 'backups', label: 'Backups', group: 'Operación' },
   { id: 'monitor', label: 'Monitor', group: 'Operación' },
@@ -62,6 +63,7 @@ const TITLES = {
   websites: ['Sitios web', 'Virtual hosts Nginx con TLS y reverse proxy'],
   apps: ['Aplicaciones', 'Procesos gestionados por systemd (Node, Python, Ruby, Java, .NET, Go)'],
   php: ['PHP-FPM', 'Pools por cuenta con open_basedir y funciones restringidas'],
+  mail: ['Correo', 'Dominios, buzones, webmail y seguridad DNS'],
   ssl: ['Certificados', 'Emisión y estado de certificados Let\'s Encrypt'],
   users: ['Usuarios del panel', 'Acceso al panel con roles y sesiones revocables'],
   audit: ['Auditoría', 'Registro append-only encadenado por SHA-256'],
@@ -287,6 +289,7 @@ const SCOPED_NAV = new Set([
   'databases',
   'ftp',
   'dns',
+  'mail',
   'ssl',
   'backups',
 ]);
@@ -330,6 +333,7 @@ async function boot() {
 const renderers = {
   databases: renderDatabases,
   ftp: renderFtp,
+  mail: renderMail,
   dns: renderDns,
   backups: renderBackups,
   monitor: renderMonitor,
@@ -854,6 +858,268 @@ function openWebsiteModal() {
   });
 }
 
+/* ---------------- mail ---------------- */
+
+function mailDomainByDomain(domain) {
+  return (S.data.mailDomains || []).find((mail) => mail.domain === domain);
+}
+
+function mailAccountById(id) {
+  return (S.data.mailAccounts || []).find((account) => account.id === id);
+}
+
+function mailList(value, domain) {
+  return String(value || '')
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => toAsciiEmail(item.includes('@') ? item : `${item}@${domain}`));
+}
+
+async function renderMail() {
+  await Promise.all([
+    loadList('mailDomains'),
+    loadList('mailAccounts'),
+    loadList('websites'),
+    loadList('accounts'),
+  ]);
+  const writable = canWrite();
+  const rows = (S.data.websites || []).map((site) => {
+    const spec = site.spec;
+    const mail = mailDomainByDomain(spec.domain);
+    const accounts = (S.data.mailAccounts || []).filter((account) => account.domain === spec.domain);
+    if (!mail) {
+      return [
+        td(`<div class="cell-title">${esc(spec.domain)}</div><div class="cell-sub">${esc(spec.username)}</div>`),
+        td('<span class="muted">-</span>'),
+        td('<span class="muted">-</span>'),
+        td(badge('sin correo', '')),
+        td('0'),
+        td(writable ? btn('Activar correo', 'mail-enable', spec.domain, 'tiny primary') : ''),
+      ];
+    }
+    const actions = [
+      writable ? btn('Cuenta', 'mail-account-new', spec.domain, 'tiny primary') : '',
+      writable ? btn(mail.enabled ? 'Desactivar' : 'Activar', 'mail-toggle', spec.domain, 'tiny ghost') : '',
+      writable ? btn('SSL', 'mail-tls', spec.domain, 'tiny ghost') : '',
+      writable ? btn('Catch-all', 'mail-catchall', spec.domain, 'tiny ghost') : '',
+      writable ? btn('Eliminar', 'mail-delete', spec.domain, 'tiny danger') : '',
+    ].filter(Boolean).join(' ');
+    return [
+      td(`<div class="cell-title">${esc(mail.domain)}</div><div class="cell-sub">${esc(mail.username)}</div>`),
+      td(`<span class="mono small">mail.${esc(mail.domain)}</span>`),
+      td(`<a class="mono small" href="${esc(mail.webmail_url)}" target="_blank" rel="noopener">webmail.${esc(mail.domain)}</a>`),
+      td(certBadge(mail.tls_status)),
+      td(String(accounts.length)),
+      td(`${mail.enabled ? badge('activo', 'ok') : badge('desactivado', 'warn')} ${actions}`),
+    ];
+  });
+  const accountRows = (S.data.mailAccounts || []).map((account) => [
+    td(`<div class="cell-title">${esc(account.address)}</div><div class="cell-sub">${esc(account.domain)}</div>`),
+    td(`${esc(account.quota_mb)} MB`),
+    td(`<div class="mono small">${esc((account.aliases || []).join(', ') || '-')}</div><div class="cell-sub">${esc((account.forward_to || []).join(', ') || '')}</div>`),
+    td(account.enabled ? badge('activo', 'ok') : badge('deshabilitado', 'warn')),
+    td(writable ? [
+      btn('Contraseña', 'mail-account-passwd', account.id, 'tiny'),
+      btn(account.enabled ? 'Desactivar' : 'Activar', 'mail-account-toggle', account.id, 'tiny ghost'),
+      btn('Eliminar', 'mail-account-delete', account.id, 'tiny danger'),
+    ].join(' ') : ''),
+  ]);
+  $('#view').innerHTML = `
+    <div class="card"><p class="muted small" style="margin:0">
+      Cada dominio usa <span class="mono">mail.dominio</span> para IMAP/SMTP y
+      <span class="mono">webmail.dominio</span> para Roundcube. La autorespuesta y los filtros
+      se gestionan dentro del webmail con el plugin Managesieve.
+    </p></div>
+    ${sectionHead('Dominios de correo', writable ? '<button class="btn primary" data-action="mail-new">Activar correo</button>' : '')}
+    ${table(['Dominio', 'Servidor', 'Webmail', 'TLS', 'Buzones', 'Acciones'], rows, 'Publica un sitio para poder activar su correo.')}
+    ${sectionHead('Buzones', '')}
+    ${table(['Buzón', 'Cuota', 'Alias / reenvío', 'Estado', 'Acciones'], accountRows, 'Sin buzones; activa el correo de un dominio y crea el primero.')}`;
+}
+
+function openMailEnableModal() {
+  const candidates = (S.data.websites || []).filter((site) => !mailDomainByDomain(site.spec.domain));
+  if (!candidates.length) {
+    toast('Todos los sitios ya tienen correo activado', 'error');
+    return;
+  }
+  openModal({
+    title: 'Activar correo',
+    submitLabel: 'Activar',
+    html: `<div class="form-grid">
+      ${fSelect('domain', 'Sitio', candidates.map((site) => ({ value: site.spec.domain, label: site.spec.domain })), { required: true })}
+      <p class="hint full">Se crea <span class="mono">mail.dominio</span>, <span class="mono">webmail.dominio</span> y los registros MX, SPF, DKIM, DMARC, SRV y TLS-RPT.</p>
+    </div>`,
+    onSubmit: async (form) => {
+      const domain = val(form, 'domain');
+      const site = candidates.find((item) => item.spec.domain === domain);
+      if (!site) throw new Error('Sitio no encontrado');
+      const result = await api('/api/v1/mail/domains', {
+        method: 'POST',
+        body: { domain, username: site.spec.username, enabled: true, catch_all: null },
+      });
+      toast('Correo activado');
+      if (result.cert_job) {
+        showCertJob(result.cert_job, `webmail.${domain}`, {
+          email: S.user.email,
+          siteCreated: false,
+        }).catch(() => {});
+      }
+      await refresh();
+    },
+  });
+}
+
+async function enableMail(domain) {
+  const site = (S.data.websites || []).find((item) => item.spec.domain === domain);
+  if (!site) throw new Error('Sitio no encontrado');
+  const result = await api('/api/v1/mail/domains', {
+    method: 'POST',
+    body: { domain, username: site.spec.username, enabled: true, catch_all: null },
+  });
+  toast('Correo activado');
+  if (result.cert_job) {
+    showCertJob(result.cert_job, `webmail.${domain}`, {
+      email: S.user.email,
+      siteCreated: false,
+    }).catch(() => {});
+  }
+  await refresh();
+}
+
+async function toggleMailDomain(domain) {
+  const mail = mailDomainByDomain(domain);
+  if (!mail) return;
+  const enabled = !mail.enabled;
+  const result = await api('/api/v1/mail/domains', {
+    method: 'POST',
+    body: {
+      domain: mail.domain,
+      username: mail.username,
+      enabled,
+      catch_all: mail.catch_all,
+    },
+  });
+  toast(enabled ? 'Correo activado' : 'Correo desactivado');
+  if (enabled && result.cert_job) {
+    showCertJob(result.cert_job, `webmail.${domain}`, {
+      email: S.user.email,
+      siteCreated: false,
+    }).catch(() => {});
+  }
+  await refresh();
+}
+
+function openMailAccountModal(domain) {
+  openModal({
+    title: `Nuevo buzón · ${domain}`,
+    submitLabel: 'Crear buzón',
+    html: `<div class="form-grid">
+      ${fInput('local_part', 'Buzón', { required: true, placeholder: 'info', help: 'se usará como info@dominio' })}
+      ${fInput('password', 'Contraseña', { type: 'password', required: true, autocomplete: 'new-password', help: 'mínimo 12 caracteres y 3 clases' })}
+      ${fInput('quota_mb', 'Cuota (MB)', { type: 'number', value: 1024, min: 64, required: true })}
+      ${fInput('aliases', 'Alias locales', { placeholder: 'ventas, soporte', help: 'separados por coma; se añade @dominio' })}
+      ${fInput('forward_to', 'Reenviar a', { placeholder: 'otro@example.com', help: 'opcional; conserva copia local' })}
+      <div class="full">${fCheck('enabled', 'Buzón activo', true)}</div>
+    </div>`,
+    onSubmit: async (form) => {
+      await api('/api/v1/mail/accounts', {
+        method: 'POST',
+        body: {
+          domain,
+          local_part: val(form, 'local_part').toLowerCase(),
+          password: val(form, 'password'),
+          quota_mb: num(form, 'quota_mb', 1024),
+          enabled: bool(form, 'enabled'),
+          aliases: mailList(val(form, 'aliases'), domain),
+          forward_to: mailList(val(form, 'forward_to'), domain),
+        },
+      });
+      toast('Buzón creado');
+      await refresh();
+    },
+  });
+}
+
+function openMailPasswordModal(account) {
+  if (!account) return;
+  openModal({
+    title: `Contraseña · ${account.address}`,
+    submitLabel: 'Actualizar',
+    html: `<div class="stack">${fInput('password', 'Nueva contraseña', { type: 'password', required: true, autocomplete: 'new-password', help: 'mínimo 12 caracteres y 3 clases' })}</div>`,
+    onSubmit: async (form) => {
+      await api('/api/v1/mail/accounts', {
+        method: 'POST',
+        body: {
+          id: account.id,
+          domain: account.domain,
+          local_part: account.local_part,
+          password: val(form, 'password'),
+          quota_mb: account.quota_mb,
+          enabled: account.enabled,
+          aliases: account.aliases,
+          forward_to: account.forward_to,
+        },
+      });
+      toast('Contraseña actualizada');
+    },
+  });
+}
+
+function openMailCatchAllModal(domain) {
+  const mail = mailDomainByDomain(domain);
+  if (!mail) return;
+  openModal({
+    title: `Catch-all · ${domain}`,
+    submitLabel: 'Guardar',
+    html: `<div class="stack">${fInput('catch_all', 'Destino', { type: 'email', value: mail.catch_all || '', placeholder: 'buzon@dominio', help: 'vacío para desactivar el catch-all' })}</div>`,
+    onSubmit: async (form) => {
+      await api('/api/v1/mail/domains', {
+        method: 'POST',
+        body: {
+          domain: mail.domain,
+          username: mail.username,
+          enabled: mail.enabled,
+          catch_all: val(form, 'catch_all') ? toAsciiEmail(val(form, 'catch_all')) : null,
+        },
+      });
+      toast('Catch-all actualizado');
+      await refresh();
+    },
+  });
+}
+
+async function toggleMailAccount(account) {
+  if (!account) return;
+  await api('/api/v1/mail/accounts', {
+    method: 'POST',
+    body: {
+      id: account.id,
+      domain: account.domain,
+      local_part: account.local_part,
+      quota_mb: account.quota_mb,
+      enabled: !account.enabled,
+      aliases: account.aliases,
+      forward_to: account.forward_to,
+    },
+  });
+  toast(account.enabled ? 'Buzón desactivado' : 'Buzón activado');
+  await refresh();
+}
+
+async function retryMailTls(domain) {
+  const result = await api(`/api/v1/mail/domains/${encodeURIComponent(domain)}/tls`, {
+    method: 'POST',
+  });
+  if (result.cert_job) {
+    showCertJob(result.cert_job, `webmail.${domain}`, {
+      email: S.user.email,
+      siteCreated: false,
+    }).catch(() => {});
+  }
+  await refresh();
+}
+
 /* ---------------- applications ---------------- */
 
 async function renderApps() {
@@ -1103,7 +1369,7 @@ function showCertJob(job, domain, options = {}) {
         <div class="cert-steps">
           <div class="cert-step done" data-cert-step="site">
             <span class="dot"></span>
-            <div><strong>${esc(T('Sitio publicado'))}</strong></div>
+            <div><strong>${esc(T(options.siteCreated === false ? 'Sitio' : 'Sitio publicado'))}</strong></div>
           </div>
           <div class="cert-step running" data-cert-step="request">
             <span class="dot"></span>
@@ -1422,6 +1688,36 @@ async function handleAction(action, id) {
       if (!confirm(`¿Eliminar la cuenta ${id}? Se borrarán el home, sitios, apps, bases de datos, DNS, FTP, certificados y backups.`)) return;
       await api(`/api/v1/accounts/${encodeURIComponent(id)}?purge=true`, { method: 'DELETE' });
       toast('Cuenta eliminada');
+      return refresh();
+    }
+    case 'mail-new':
+      return openMailEnableModal();
+    case 'mail-enable':
+      return enableMail(id);
+    case 'mail-toggle':
+      return toggleMailDomain(id);
+    case 'mail-account-new':
+      return openMailAccountModal(id);
+    case 'mail-account-passwd':
+      return openMailPasswordModal(mailAccountById(id));
+    case 'mail-account-toggle':
+      return toggleMailAccount(mailAccountById(id));
+    case 'mail-account-delete': {
+      const account = mailAccountById(id);
+      if (!account) throw new Error('Buzón no encontrado');
+      if (!confirm(`¿Eliminar el buzón ${account.address}? Se borrará su correo almacenado.`)) return;
+      await api(`/api/v1/mail/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      toast('Buzón eliminado');
+      return refresh();
+    }
+    case 'mail-catchall':
+      return openMailCatchAllModal(id);
+    case 'mail-tls':
+      return retryMailTls(id);
+    case 'mail-delete': {
+      if (!confirm(`¿Eliminar el correo de ${id}? Se borrarán los buzones y el webmail.`)) return;
+      await api(`/api/v1/mail/domains/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      toast('Correo eliminado');
       return refresh();
     }
     case 'website-new':

@@ -12,12 +12,20 @@ use tokio::io::AsyncWriteExt;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, PackageUpdate, ProgramInfo, SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, MailDomainSpec, PackageUpdate, ProgramInfo,
+    SystemInfo,
 };
 
-use super::{ExecError, ExecResult, Executor, UnitStatus};
+use super::{ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
 
 const SAFE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const VMAIL_ROOT: &str = "/var/vmail";
+const POSTFIX_MAIL_DIR: &str = "/etc/postfix/rynxcp";
+const DOVECOT_MAIL_DIR: &str = "/etc/dovecot/rynxcp";
+const DOVECOT_MAIL_CONF: &str = "/etc/dovecot/conf.d/99-rynxcp.conf";
+const MAIL_CERT_DIR: &str = "/etc/ssl/rynxcp/mail";
+const MAIL_UID: u32 = 5000;
+const MAIL_GID: u32 = 5000;
 
 pub struct RealExecutor {
     cfg: DaemonConfig,
@@ -98,6 +106,38 @@ async fn run(program: &str, args: &[&str]) -> ExecResult<String> {
 async fn run_owned(program: &str, args: &[String]) -> ExecResult<String> {
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run(program, &refs).await
+}
+
+async fn run_with_stdin(program: &str, args: &[&str], input: &str) -> ExecResult<String> {
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .env_clear()
+        .env("PATH", SAFE_PATH)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ExecError::Command {
+            program: program.to_string(),
+            args: args.join(" "),
+            status: -1,
+            stderr: e.to_string(),
+        })?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input.as_bytes()).await?;
+        stdin.flush().await?;
+    }
+    let output = child.wait_with_output().await?;
+    if !output.status.success() {
+        return Err(ExecError::Command {
+            program: program.to_string(),
+            args: args.join(" "),
+            status: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Like `run` but returns stdout and stderr on success (nginx prints its
@@ -828,6 +868,264 @@ impl Executor for RealExecutor {
         }
         let pem = std::fs::read_to_string(&public)?;
         Ok(pem)
+    }
+
+    async fn hash_mail_password(&self, password: &str) -> ExecResult<String> {
+        let input = format!("{password}\n{password}\n");
+        let hash = run_with_stdin("doveadm", &["pw", "-s", "SHA512-CRYPT"], &input).await?;
+        if !hash.starts_with('{') || hash.len() < 20 {
+            return Err(ExecError::Io(
+                "doveadm did not return a password hash".into(),
+            ));
+        }
+        Ok(hash)
+    }
+
+    async fn sync_mail(
+        &self,
+        domains: &[MailDomainSpec],
+        accounts: &[MailAccountConfig],
+    ) -> ExecResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let active_domains: Vec<&MailDomainSpec> =
+            domains.iter().filter(|domain| domain.enabled).collect();
+        let active_accounts: Vec<&MailAccountConfig> = accounts
+            .iter()
+            .filter(|account| {
+                account.enabled
+                    && active_domains
+                        .iter()
+                        .any(|domain| domain.domain == account.domain)
+            })
+            .collect();
+
+        for account in &active_accounts {
+            let home = PathBuf::from(VMAIL_ROOT)
+                .join(&account.domain)
+                .join(&account.local_part);
+            self.make_dir(&home, 0o700, MAIL_UID, MAIL_GID)?;
+            for sub in [
+                "Maildir",
+                "Maildir/cur",
+                "Maildir/new",
+                "Maildir/tmp",
+                "sieve",
+            ] {
+                self.make_dir(&home.join(sub), 0o700, MAIL_UID, MAIL_GID)?;
+            }
+        }
+
+        let mut domain_lines = String::new();
+        let mut mailbox_lines = String::new();
+        let mut alias_lines = String::new();
+        let mut sender_lines = String::new();
+        for domain in &active_domains {
+            domain_lines.push_str(&format!("{} {}\n", domain.domain, domain.domain));
+            if let Some(target) = domain
+                .catch_all
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                alias_lines.push_str(&format!("@{} {}\n", domain.domain, target));
+            }
+        }
+        for account in &active_accounts {
+            let address = format!("{}@{}", account.local_part, account.domain);
+            sender_lines.push_str(&format!("{} {}\n", address, address));
+            mailbox_lines.push_str(&format!(
+                "{} {}/{}/\n",
+                address, account.domain, account.local_part
+            ));
+            for alias in &account.aliases {
+                let alias = alias.trim();
+                if !alias.is_empty() {
+                    alias_lines.push_str(&format!("{alias} {address}\n"));
+                    sender_lines.push_str(&format!("{alias} {address}\n"));
+                }
+            }
+            let forwards: Vec<&str> = account
+                .forward_to
+                .iter()
+                .map(String::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && *value != address)
+                .collect();
+            if !forwards.is_empty() {
+                let mut targets = vec![address.as_str()];
+                targets.extend(forwards);
+                alias_lines.push_str(&format!("{} {}\n", address, targets.join(", ")));
+            }
+        }
+
+        std::fs::create_dir_all(POSTFIX_MAIL_DIR)?;
+        std::fs::create_dir_all(DOVECOT_MAIL_DIR)?;
+        std::fs::create_dir_all(MAIL_CERT_DIR)?;
+        let domains_path = PathBuf::from(POSTFIX_MAIL_DIR).join("domains");
+        let mailboxes_path = PathBuf::from(POSTFIX_MAIL_DIR).join("mailboxes");
+        let aliases_path = PathBuf::from(POSTFIX_MAIL_DIR).join("aliases");
+        let senders_path = PathBuf::from(POSTFIX_MAIL_DIR).join("senders");
+        std::fs::write(&domains_path, &domain_lines)?;
+        std::fs::write(&mailboxes_path, &mailbox_lines)?;
+        std::fs::write(&aliases_path, &alias_lines)?;
+        std::fs::write(&senders_path, &sender_lines)?;
+        for path in [&domains_path, &mailboxes_path, &aliases_path, &senders_path] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))?;
+        }
+
+        let mut users = String::from("# managed-by: RYNXCP\n");
+        let mut sni = String::new();
+        let mut dovecot = String::from(
+            "# managed-by: RYNXCP\n\
+             mail_location = maildir:/var/vmail/%d/%n/Maildir\n\
+             mail_uid = 5000\n\
+             mail_gid = 5000\n\
+             first_valid_uid = 5000\n\
+             auth_mechanisms = plain login\n\
+             passdb {\n\
+               driver = passwd-file\n\
+               args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/rynxcp/users\n\
+             }\n\
+             userdb {\n\
+               driver = passwd-file\n\
+               args = username_format=%u /etc/dovecot/rynxcp/users\n\
+             }\n\
+             service auth {\n\
+               unix_listener /var/spool/postfix/private/auth {\n\
+                 mode = 0660\n\
+                 user = postfix\n\
+                 group = postfix\n\
+               }\n\
+             }\n\
+             service lmtp {\n\
+               unix_listener /var/spool/postfix/private/dovecot-lmtp {\n\
+                 mode = 0600\n\
+                 user = postfix\n\
+                 group = postfix\n\
+               }\n\
+             }\n\
+             protocol lmtp { mail_plugins = $mail_plugins quota sieve }\n\
+             protocol imap { mail_plugins = $mail_plugins quota }\n\
+             protocol pop3 { mail_plugins = $mail_plugins quota }\n\
+             plugin {\n\
+               quota = maildir:User quota\n\
+               sieve = /var/vmail/%d/%n/sieve/roundcube.sieve\n\
+               sieve_dir = /var/vmail/%d/%n/sieve\n\
+             }\n\
+             ssl = required\n\
+             ssl_cert = </etc/ssl/rynxcp/mail/default.crt\n\
+             ssl_key = </etc/ssl/rynxcp/mail/default.key\n",
+        );
+        for account in &active_accounts {
+            let home = format!("{}/{}/{}", VMAIL_ROOT, account.domain, account.local_part);
+            users.push_str(&format!(
+                "{}@{}:{}:{}:{}::{}::userdb_quota_rule=*:storage={}M\n",
+                account.local_part,
+                account.domain,
+                account.password_hash,
+                MAIL_UID,
+                MAIL_GID,
+                home,
+                account.quota_mb
+            ));
+        }
+        for domain in &active_domains {
+            let cert_dir = self
+                .cfg
+                .certs_root
+                .join(format!("webmail.{}", domain.domain));
+            let chain = cert_dir.join("fullchain.pem");
+            let key = cert_dir.join("privkey.pem");
+            if !chain.exists() || !key.exists() {
+                continue;
+            }
+            let combined = PathBuf::from(MAIL_CERT_DIR).join(format!("{}.pem", domain.domain));
+            let mut pem = std::fs::read(&key)?;
+            pem.extend(std::fs::read(&chain)?);
+            std::fs::write(&combined, pem)?;
+            std::fs::set_permissions(&combined, std::fs::Permissions::from_mode(0o640))?;
+            if let Some(user) = User::from_name("postfix").ok().flatten() {
+                let _ = chown(&combined, Some(Uid::from_raw(0)), Some(user.gid));
+            }
+            for prefix in [
+                "mail",
+                "webmail",
+                "imap",
+                "smtp",
+                "pop",
+                "autodiscover",
+                "autoconfig",
+            ] {
+                let name = format!("{prefix}.{}", domain.domain);
+                sni.push_str(&format!("{} {}\n", name, combined.display()));
+                dovecot.push_str(&format!(
+                    "local_name {name} {{\n  ssl_cert = <{}\n  ssl_key = <{}\n}}\n",
+                    chain.display(),
+                    key.display()
+                ));
+            }
+        }
+        let users_path = PathBuf::from(DOVECOT_MAIL_DIR).join("users");
+        std::fs::write(&users_path, users)?;
+        std::fs::set_permissions(&users_path, std::fs::Permissions::from_mode(0o640))?;
+        let dovecot_owner = User::from_name("dovecot").ok().flatten();
+        if let Some(user) = dovecot_owner {
+            let _ = chown(&users_path, Some(Uid::from_raw(0)), Some(user.gid));
+        }
+        std::fs::write(DOVECOT_MAIL_CONF, dovecot)?;
+        std::fs::set_permissions(DOVECOT_MAIL_CONF, std::fs::Permissions::from_mode(0o644))?;
+
+        let sni_path = PathBuf::from(POSTFIX_MAIL_DIR).join("sni");
+        if sni.is_empty() {
+            let default_pem = PathBuf::from(MAIL_CERT_DIR).join("default.pem");
+            if default_pem.exists() {
+                sni.push_str(&format!("default.invalid {}\n", default_pem.display()));
+            }
+        }
+        std::fs::write(&sni_path, sni)?;
+        std::fs::set_permissions(&sni_path, std::fs::Permissions::from_mode(0o640))?;
+        if let Some(user) = User::from_name("postfix").ok().flatten() {
+            let _ = chown(&sni_path, Some(Uid::from_raw(0)), Some(user.gid));
+        }
+
+        for map in [&domains_path, &mailboxes_path, &aliases_path, &senders_path] {
+            run("postmap", &[&format!("hash:{}", map.display())]).await?;
+        }
+        run("postmap", &["-F", &format!("hash:{}", sni_path.display())]).await?;
+        run("postfix", &["check"]).await?;
+        run("doveconf", &["-n"]).await?;
+        self.reload_mail().await
+    }
+
+    async fn remove_mailbox(&self, domain: &str, local_part: &str) -> ExecResult<()> {
+        let path = PathBuf::from(VMAIL_ROOT).join(domain).join(local_part);
+        if !path.starts_with(VMAIL_ROOT) {
+            return Err(ExecError::Io("mailbox path escapes vmail root".into()));
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(ExecError::Io(err.to_string())),
+        }
+    }
+
+    async fn remove_mail_domain(&self, domain: &str) -> ExecResult<()> {
+        let path = PathBuf::from(VMAIL_ROOT).join(domain);
+        if !path.starts_with(VMAIL_ROOT) {
+            return Err(ExecError::Io("mail domain path escapes vmail root".into()));
+        }
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(ExecError::Io(err.to_string())),
+        }
+    }
+
+    async fn reload_mail(&self) -> ExecResult<()> {
+        self.reload_service("postfix").await?;
+        self.reload_service("dovecot").await?;
+        Ok(())
     }
 
     async fn write_dkim_tables(&self, keytable: &str, signingtable: &str) -> ExecResult<()> {

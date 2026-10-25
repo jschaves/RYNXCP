@@ -10,19 +10,23 @@ use rynx_core::templates::{self, NginxContext};
 use rynx_core::validate::{
     self, db_identifier, validate_account_spec, validate_app_spec, validate_ban_ip,
     validate_dns_record_spec, validate_domain, validate_email, validate_firewall_rule_spec,
-    validate_ftp_spec, validate_ip_or_cidr, validate_php_pool_spec, validate_website_spec,
+    validate_ftp_spec, validate_ip_or_cidr, validate_mail_account_spec, validate_mail_domain_spec,
+    validate_php_pool_spec, validate_website_spec,
 };
 use rynx_core::DaemonConfig;
 use rynx_proto::{
     AccountSpec, AccountView, AppSpec, AppView, AuditEntry, BackupView, CertView,
     CertificateStatus, ConsoleAction, DatabaseView, DnsRecordSpec, DnsRecordView, DnsZoneView,
-    FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView, MetricSample, PhpPoolSpec,
-    PhpPoolView, Request, Response, Runtime, ServiceStat, SystemInfo, TlsMode, WebsiteSpec,
-    WebsiteView, WireError,
+    FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView, MailAccountSpec,
+    MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec, PhpPoolView, Request, Response,
+    Runtime, ServiceStat, SystemInfo, TlsMode, WebsiteSpec, WebsiteView, WireError,
 };
 
-use crate::executor::{ExecError, Executor};
+use crate::executor::{ExecError, Executor, MailAccountConfig};
 use crate::state::StateStore;
+
+const WEBMAIL_ROOT: &str = "/usr/share/roundcube";
+const WEBMAIL_PHP_SOCKET: &str = "/run/php/php8.5-fpm.sock";
 
 fn exec_error(err: ExecError) -> WireError {
     match err {
@@ -95,6 +99,14 @@ impl Reconciler {
             } => self.cert_issue(&domain, &email, staging, actor).await,
             Request::CertRenew { staging } => self.cert_renew(staging, actor).await,
             Request::CertList => self.cert_list().await,
+
+            Request::MailDomainUpsert(spec) => self.mail_domain_upsert(spec, actor).await,
+            Request::MailDomainDelete { domain } => self.mail_domain_delete(&domain, actor).await,
+            Request::MailDomainList => self.mail_domain_list().await,
+            Request::MailTls { domain, email } => self.mail_tls(&domain, &email, actor).await,
+            Request::MailAccountUpsert(spec) => self.mail_account_upsert(spec, actor).await,
+            Request::MailAccountDelete { id } => self.mail_account_delete(&id, actor).await,
+            Request::MailAccountList => self.mail_account_list().await,
 
             Request::BackupCreate { username } => self.backup_create(&username, actor).await,
             Request::BackupList => {
@@ -345,6 +357,16 @@ impl Reconciler {
             .collect();
         let domains: Vec<String> = websites.iter().map(|w| w.spec.domain.clone()).collect();
 
+        for mail in self
+            .state
+            .list_mail_domains()
+            .map_err(internal)?
+            .into_iter()
+            .filter(|mail| mail.username == username)
+        {
+            let _ = self.mail_domain_delete(&mail.domain, actor).await;
+        }
+
         for website in &websites {
             self.exec
                 .remove_site(&website.spec.domain)
@@ -428,6 +450,29 @@ impl Reconciler {
 
     async fn website_upsert(&self, spec: WebsiteSpec, actor: &str) -> Result<Response, WireError> {
         validate_website_spec(&spec).map_err(invalid)?;
+        for prefix in [
+            "webmail",
+            "mail",
+            "imap",
+            "smtp",
+            "pop",
+            "autodiscover",
+            "autoconfig",
+        ] {
+            if let Some(parent) = spec.domain.strip_prefix(&format!("{prefix}.")) {
+                if self
+                    .state
+                    .get_mail_domain(parent)
+                    .map_err(internal)?
+                    .is_some()
+                {
+                    return Err(WireError::conflict(format!(
+                        "{} is reserved by the mail service for {parent}",
+                        spec.domain
+                    )));
+                }
+            }
+        }
         let is_new = self
             .state
             .get_website(&spec.domain)
@@ -600,6 +645,14 @@ impl Reconciler {
             return Err(WireError::conflict(
                 "delete the database associated with this domain first",
             ));
+        }
+        if self
+            .state
+            .get_mail_domain(domain)
+            .map_err(internal)?
+            .is_some()
+        {
+            let _ = self.mail_domain_delete(domain, actor).await;
         }
         for ftp in self
             .state
@@ -906,7 +959,375 @@ impl Reconciler {
                 }),
             }
         }
+        for mail in self.state.list_mail_domains().map_err(internal)? {
+            if !mail.enabled {
+                continue;
+            }
+            let domain = Self::webmail_domain(&mail.domain);
+            match self.exec.cert_info(&domain).await {
+                Ok(Some(cert)) => certs.push(cert),
+                Ok(None) => certs.push(CertView {
+                    domain: domain.clone(),
+                    issuer: String::new(),
+                    not_after: String::new(),
+                    status: CertificateStatus::Missing,
+                    path: self.cfg.certs_root.join(&domain).display().to_string(),
+                }),
+                Err(_) => certs.push(CertView {
+                    domain: domain.clone(),
+                    issuer: String::new(),
+                    not_after: String::new(),
+                    status: CertificateStatus::Error,
+                    path: self.cfg.certs_root.join(&domain).display().to_string(),
+                }),
+            }
+        }
         Ok(Response::Certs { certs })
+    }
+
+    fn webmail_aliases(domain: &str) -> Vec<String> {
+        ["mail", "imap", "smtp", "pop", "autodiscover", "autoconfig"]
+            .into_iter()
+            .map(|prefix| format!("{prefix}.{domain}"))
+            .collect()
+    }
+
+    fn webmail_domain(domain: &str) -> String {
+        format!("webmail.{domain}")
+    }
+
+    fn mail_subdomains(domain: &str) -> Vec<String> {
+        let mut names = vec![Self::webmail_domain(domain)];
+        names.extend(Self::webmail_aliases(domain));
+        names
+    }
+
+    async fn enrich_mail_domain(&self, mut view: MailDomainView) -> MailDomainView {
+        let webmail = Self::webmail_domain(&view.domain);
+        match self.exec.cert_info(&webmail).await {
+            Ok(Some(cert)) => {
+                view.tls_status = cert.status;
+                view.tls_not_after = Some(cert.not_after);
+            }
+            Ok(None) => {
+                view.tls_status = CertificateStatus::Missing;
+                view.tls_not_after = None;
+            }
+            Err(_) => {
+                view.tls_status = CertificateStatus::Error;
+                view.tls_not_after = None;
+            }
+        }
+        view.webmail_url = format!("https://{webmail}/");
+        view
+    }
+
+    async fn apply_webmail_vhost(&self, domain: &str) -> Result<(), WireError> {
+        let webmail = Self::webmail_domain(domain);
+        let aliases = Self::webmail_aliases(domain);
+        let cert_dir = self.cfg.certs_root.join(&webmail);
+        let cert =
+            if cert_dir.join("fullchain.pem").exists() && cert_dir.join("privkey.pem").exists() {
+                Some(cert_dir.as_path())
+            } else {
+                None
+            };
+        let content = templates::webmail_site(
+            &webmail,
+            &aliases,
+            cert,
+            &self.cfg.acme_root.display().to_string(),
+            WEBMAIL_ROOT,
+            WEBMAIL_PHP_SOCKET,
+        );
+        self.exec
+            .apply_site(&webmail, &content, true)
+            .await
+            .map_err(exec_error)
+    }
+
+    async fn sync_mail_config(&self) -> Result<(), WireError> {
+        let views = self.state.list_mail_domains().map_err(internal)?;
+        let domains: Vec<MailDomainSpec> = views
+            .iter()
+            .map(|view| MailDomainSpec {
+                domain: view.domain.clone(),
+                username: view.username.clone(),
+                enabled: view.enabled,
+                catch_all: view.catch_all.clone(),
+            })
+            .collect();
+        let accounts = self.state.list_mail_accounts().map_err(internal)?;
+        let mut configs = Vec::with_capacity(accounts.len());
+        for account in accounts {
+            let Some(hash) = self
+                .state
+                .mail_account_hash(&account.id)
+                .map_err(internal)?
+            else {
+                continue;
+            };
+            configs.push(MailAccountConfig {
+                domain: account.domain.clone(),
+                local_part: account.local_part.clone(),
+                password_hash: hash,
+                quota_mb: account.quota_mb,
+                enabled: account.enabled,
+                aliases: account.aliases.clone(),
+                forward_to: account.forward_to.clone(),
+            });
+        }
+        self.exec
+            .sync_mail(&domains, &configs)
+            .await
+            .map_err(exec_error)
+    }
+
+    async fn mail_domain_upsert(
+        &self,
+        spec: MailDomainSpec,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        validate_mail_domain_spec(&spec).map_err(invalid)?;
+        if !self.cfg.mail_enabled {
+            return Err(WireError::unsupported("mail management is disabled"));
+        }
+        let website = self
+            .state
+            .get_website(&spec.domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found(format!("website '{}' not found", spec.domain)))?;
+        if website.spec.username != spec.username {
+            return Err(WireError::conflict(
+                "mail domain owner does not match the website owner",
+            ));
+        }
+        let account = self.require_account(&spec.username)?;
+        if !account.spec.enabled {
+            return Err(WireError::conflict(format!(
+                "account '{}' is suspended",
+                spec.username
+            )));
+        }
+        for name in Self::mail_subdomains(&spec.domain) {
+            if self.state.get_website(&name).map_err(internal)?.is_some() {
+                return Err(WireError::conflict(format!(
+                    "{name} is already a website; remove or rename it before enabling mail"
+                )));
+            }
+        }
+        self.state.upsert_mail_domain(&spec).map_err(internal)?;
+        self.dns_ensure_zone(&spec.domain, true).await?;
+        self.dns_render(&spec.domain).await?;
+        if spec.enabled {
+            self.apply_webmail_vhost(&spec.domain).await?;
+        } else {
+            let _ = self
+                .exec
+                .remove_site(&Self::webmail_domain(&spec.domain))
+                .await;
+        }
+        self.sync_mail_config().await?;
+        self.log(
+            actor,
+            "mail.domain.upsert",
+            &spec.domain,
+            &format!(
+                "user={} enabled={} catch_all={}",
+                spec.username,
+                spec.enabled,
+                spec.catch_all.as_deref().unwrap_or("-")
+            ),
+        )?;
+        let view = self
+            .state
+            .get_mail_domain(&spec.domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::internal("mail domain disappeared after upsert"))?;
+        Ok(Response::MailDomain {
+            domain: self.enrich_mail_domain(view).await,
+        })
+    }
+
+    async fn mail_domain_delete(&self, domain: &str, actor: &str) -> Result<Response, WireError> {
+        validate_domain(domain).map_err(invalid)?;
+        if self
+            .state
+            .get_mail_domain(domain)
+            .map_err(internal)?
+            .is_none()
+        {
+            return Err(WireError::not_found(format!(
+                "mail domain '{domain}' not found"
+            )));
+        }
+        for account in self
+            .state
+            .list_mail_accounts_for_domain(domain)
+            .map_err(internal)?
+        {
+            let _ = self
+                .exec
+                .remove_mailbox(&account.domain, &account.local_part)
+                .await;
+        }
+        self.state.delete_mail_domain(domain).map_err(internal)?;
+        let webmail = Self::webmail_domain(domain);
+        let _ = self.exec.remove_site(&webmail).await;
+        let _ = self.exec.remove_cert(&webmail).await;
+        let _ = self.exec.remove_mail_domain(domain).await;
+        self.remove_mail_dns(domain).await;
+        self.sync_mail_config().await?;
+        self.log(actor, "mail.domain.delete", domain, "")?;
+        Ok(Response::Ack {
+            message: format!("mail domain '{domain}' deleted"),
+        })
+    }
+
+    async fn remove_mail_dns(&self, domain: &str) {
+        let Ok(records) = self.state.list_dns_records(domain) else {
+            return;
+        };
+        for record in records {
+            if !record.managed {
+                continue;
+            }
+            let name = record.spec.name.as_str();
+            let rtype = record.spec.rtype.as_str();
+            let remove = match name {
+                "@" => rtype == "MX",
+                "mail" | "webmail" | "imap" | "smtp" | "pop" | "autodiscover" | "autoconfig"
+                | "mta-sts" | "_dmarc" | "_domainkey" | "mail._domainkey" | "_imaps._tcp"
+                | "_imap._tcp" | "_pop3s._tcp" | "_pop3._tcp" | "_submissions._tcp"
+                | "_submission._tcp" | "_autodiscover._tcp" | "_sieve._tcp" | "_smtp._tls"
+                | "_mta-sts" => true,
+                _ => false,
+            };
+            if remove {
+                let _ = self.state.delete_dns_record(domain, &record.id);
+            }
+        }
+        let _ = self.dns_render(domain).await;
+    }
+
+    async fn mail_tls(
+        &self,
+        domain: &str,
+        email: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        validate_domain(domain).map_err(invalid)?;
+        validate_email(email).map_err(invalid)?;
+        let mail = self
+            .state
+            .get_mail_domain(domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found(format!("mail domain '{domain}' not found")))?;
+        if !mail.enabled {
+            return Err(WireError::conflict("mail domain is disabled"));
+        }
+        self.apply_webmail_vhost(domain).await?;
+        let webmail = Self::webmail_domain(domain);
+        let mut names = vec![webmail.clone()];
+        names.extend(Self::webmail_aliases(domain));
+        self.exec
+            .issue_cert(&webmail, &names, email, &self.exec.acme_root(), false)
+            .await
+            .map_err(exec_error)?;
+        self.sync_mail_config().await?;
+        self.apply_webmail_vhost(domain).await?;
+        let cert = self
+            .exec
+            .cert_info(&webmail)
+            .await
+            .map_err(exec_error)?
+            .ok_or_else(|| WireError::internal("certificate was not installed"))?;
+        self.log(actor, "mail.tls.issue", domain, &webmail)?;
+        Ok(Response::Cert { cert })
+    }
+
+    async fn mail_domain_list(&self) -> Result<Response, WireError> {
+        let mut domains = Vec::new();
+        for view in self.state.list_mail_domains().map_err(internal)? {
+            domains.push(self.enrich_mail_domain(view).await);
+        }
+        Ok(Response::MailDomains { domains })
+    }
+
+    async fn mail_account_upsert(
+        &self,
+        spec: MailAccountSpec,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        validate_mail_account_spec(&spec).map_err(invalid)?;
+        let domain = self
+            .state
+            .get_mail_domain(&spec.domain)
+            .map_err(internal)?
+            .ok_or_else(|| {
+                WireError::not_found(format!("mail domain '{}' not found", spec.domain))
+            })?;
+        if !domain.enabled {
+            return Err(WireError::conflict("mail domain is disabled"));
+        }
+        if let Some(id) = &spec.id {
+            let existing = self
+                .state
+                .get_mail_account(id)
+                .map_err(internal)?
+                .ok_or_else(|| WireError::not_found(format!("mailbox '{id}' not found")))?;
+            if existing.domain != spec.domain || existing.username != domain.username {
+                return Err(WireError::conflict("mailbox id belongs to another domain"));
+            }
+        }
+        let password_hash = match spec.password.as_deref() {
+            Some(password) => Some(
+                self.exec
+                    .hash_mail_password(password)
+                    .await
+                    .map_err(exec_error)?,
+            ),
+            None => None,
+        };
+        let view = self
+            .state
+            .upsert_mail_account(&spec, &domain.username, password_hash.as_deref())
+            .map_err(internal)?;
+        self.sync_mail_config().await?;
+        self.log(
+            actor,
+            "mail.account.upsert",
+            &view.address,
+            &format!(
+                "quota_mb={} enabled={} aliases={} forwards={}",
+                view.quota_mb,
+                view.enabled,
+                view.aliases.len(),
+                view.forward_to.len()
+            ),
+        )?;
+        Ok(Response::MailAccount { account: view })
+    }
+
+    async fn mail_account_delete(&self, id: &str, actor: &str) -> Result<Response, WireError> {
+        let Some(account) = self.state.get_mail_account(id).map_err(internal)? else {
+            return Err(WireError::not_found(format!("mailbox '{id}' not found")));
+        };
+        let _ = self
+            .exec
+            .remove_mailbox(&account.domain, &account.local_part)
+            .await;
+        self.state.delete_mail_account(id).map_err(internal)?;
+        self.sync_mail_config().await?;
+        self.log(actor, "mail.account.delete", &account.address, "")?;
+        Ok(Response::Ack {
+            message: format!("mailbox '{}' deleted", account.address),
+        })
+    }
+
+    async fn mail_account_list(&self) -> Result<Response, WireError> {
+        let accounts = self.state.list_mail_accounts().map_err(internal)?;
+        Ok(Response::MailAccounts { accounts })
     }
 
     async fn cert_renew(&self, staging: bool, actor: &str) -> Result<Response, WireError> {
@@ -923,6 +1344,12 @@ impl Reconciler {
             });
         }
         self.exec.renew_certs(staging).await.map_err(exec_error)?;
+        let _ = self.sync_mail_config().await;
+        for mail in self.state.list_mail_domains().map_err(internal)? {
+            if mail.enabled {
+                let _ = self.apply_webmail_vhost(&mail.domain).await;
+            }
+        }
 
         let mut failures = 0usize;
         for website in &websites {
@@ -1179,20 +1606,76 @@ impl Reconciler {
     }
 
     async fn dns_seed_mail(&self, domain: &str) -> Result<(), WireError> {
-        let Some(mail_host) = self.cfg.mail_hostname.clone() else {
-            return Err(WireError::unsupported(
-                "mail_hostname is not configured; cannot enable email DNS",
-            ));
-        };
+        let mail_host = format!("mail.{domain}");
+        let webmail_host = format!("webmail.{domain}");
+        if let Some(ipv4) = &self.cfg.default_ipv4 {
+            self.dns_put(domain, "mail", "A", ipv4, None, true)?;
+            self.dns_put(domain, "webmail", "A", ipv4, None, true)?;
+        }
+        if let Some(ipv6) = &self.cfg.default_ipv6 {
+            self.dns_put(domain, "mail", "AAAA", ipv6, None, true)?;
+            self.dns_put(domain, "webmail", "AAAA", ipv6, None, true)?;
+        }
+        for (name, target) in [
+            ("imap", mail_host.as_str()),
+            ("smtp", mail_host.as_str()),
+            ("pop", mail_host.as_str()),
+            ("autodiscover", webmail_host.as_str()),
+            ("autoconfig", webmail_host.as_str()),
+        ] {
+            self.dns_put(domain, name, "CNAME", target, None, true)?;
+        }
         self.dns_put(domain, "@", "MX", &mail_host, Some(10), true)?;
-        self.dns_put(domain, "@", "TXT", "v=spf1 mx a ~all", None, true)?;
+        self.dns_put(
+            domain,
+            "@",
+            "TXT",
+            &format!("v=spf1 mx a:{mail_host} -all"),
+            None,
+            true,
+        )?;
         self.dns_put(
             domain,
             "_dmarc",
             "TXT",
             &format!(
-                "v=DMARC1; p=quarantine; rua=mailto:postmaster@{domain}; adkim=s; aspf=s; pct=100"
+                "v=DMARC1; p=quarantine; rua=mailto:postmaster@{domain}; ruf=mailto:postmaster@{domain}; adkim=s; aspf=s; pct=100; fo=1"
             ),
+            None,
+            true,
+        )?;
+        self.dns_put(
+            domain,
+            "_smtp._tls",
+            "TXT",
+            &format!("v=TLSRPTv1; rua=mailto:tlsrpt@{domain}"),
+            None,
+            true,
+        )?;
+        self.dns_put(domain, "_domainkey", "TXT", "t=y; o=~", None, true)?;
+        for (name, port) in [
+            ("_imaps._tcp", 993),
+            ("_imap._tcp", 143),
+            ("_pop3s._tcp", 995),
+            ("_pop3._tcp", 110),
+            ("_submissions._tcp", 465),
+            ("_submission._tcp", 587),
+            ("_sieve._tcp", 4190),
+        ] {
+            self.dns_put(
+                domain,
+                name,
+                "SRV",
+                &format!("0 1 {port} {mail_host}"),
+                None,
+                true,
+            )?;
+        }
+        self.dns_put(
+            domain,
+            "_autodiscover._tcp",
+            "SRV",
+            &format!("0 1 443 {webmail_host}"),
             None,
             true,
         )?;
@@ -1219,6 +1702,7 @@ impl Reconciler {
             .upsert_dns_zone_meta(domain, serial, true, &selector)
             .map_err(internal)?;
         self.dns_sync_dkim_tables().await?;
+        let _ = self.exec.reload_unit("opendkim").await;
         Ok(())
     }
 
@@ -1275,7 +1759,7 @@ impl Reconciler {
                 .map_err(internal)?;
             self.dns_seed_defaults(domain).await?;
         }
-        if (enable_mail || self.cfg.mail_enabled) && self.cfg.mail_hostname.is_some() {
+        if enable_mail || self.cfg.mail_enabled {
             self.dns_seed_mail(domain).await?;
         }
         Ok(())
@@ -1423,7 +1907,12 @@ impl Reconciler {
         }
         self.dns_ensure_zone(domain, true).await?;
         let zone = self.dns_render(domain).await?;
-        self.log(actor, "dns.mail.provision", domain, "spf+dkim+dmarc+mx")?;
+        self.log(
+            actor,
+            "dns.mail.provision",
+            domain,
+            "mx+a+spf+dkim+dmarc+srv+tlsrpt+webmail",
+        )?;
         Ok(Response::DnsZone { zone })
     }
 
@@ -1926,6 +2415,7 @@ impl Reconciler {
         }
         out.push_str("    tcp dport 53 accept\n");
         out.push_str("    udp dport 53 accept\n");
+        out.push_str("    tcp dport { 25, 110, 143, 465, 587, 993, 995, 4190 } accept\n");
         out.push_str("    tcp dport { 21, 30000-50000 } accept\n");
         out.push_str("    ip protocol icmp accept\n");
         out.push_str("    ip6 nexthdr ipv6-icmp accept\n");
@@ -2127,6 +2617,28 @@ impl Reconciler {
                     Err(err) => {
                         failures += 1;
                         tracing::warn!(domain = %website.spec.domain, error = %err.message, "reconcile dns failed");
+                    }
+                }
+            }
+        }
+
+        if self.cfg.mail_enabled {
+            match self.sync_mail_config().await {
+                Ok(()) => applied += 1,
+                Err(err) => {
+                    failures += 1;
+                    tracing::warn!(error = %err.message, "reconcile mail configuration failed");
+                }
+            }
+            for mail in self.state.list_mail_domains().map_err(internal)? {
+                if !mail.enabled {
+                    continue;
+                }
+                match self.apply_webmail_vhost(&mail.domain).await {
+                    Ok(()) => applied += 1,
+                    Err(err) => {
+                        failures += 1;
+                        tracing::warn!(domain = %mail.domain, error = %err.message, "reconcile webmail failed");
                     }
                 }
             }

@@ -182,6 +182,84 @@ pub fn nginx_site(ctx: &NginxContext<'_>) -> String {
     out
 }
 
+/// Nginx vhost for the shared Roundcube webmail application.
+pub fn webmail_site(
+    domain: &str,
+    aliases: &[String],
+    cert_dir: Option<&Path>,
+    acme_root: &str,
+    webmail_root: &str,
+    php_socket: &str,
+) -> String {
+    let mut names = vec![domain.to_string()];
+    for alias in aliases {
+        if !names.contains(alias) {
+            names.push(alias.clone());
+        }
+    }
+    let server_name = names.join(" ");
+    let socket = if php_socket.starts_with("unix:") {
+        php_socket.to_string()
+    } else {
+        format!("unix:{php_socket}")
+    };
+    let mut out = String::with_capacity(2048);
+    let _ = writeln!(out, "# {MARKER}");
+    let _ = writeln!(out, "# webmail: {domain}");
+    out.push_str("server {\n");
+    out.push_str("    listen 80;\n");
+    let _ = writeln!(out, "    server_name {server_name};");
+    let _ = writeln!(
+        out,
+        "    location ^~ /.well-known/acme-challenge/ {{ root {acme_root}; }}"
+    );
+    if cert_dir.is_some() {
+        out.push_str("    location / { return 301 https://$host$request_uri; }\n");
+    } else {
+        webmail_location(&mut out, webmail_root, &socket);
+    }
+    out.push_str("}\n\n");
+
+    if let Some(cert_dir) = cert_dir {
+        let cert_dir = cert_dir.display();
+        out.push_str("server {\n");
+        out.push_str("    listen 443 ssl;\n");
+        out.push_str("    http2 on;\n");
+        let _ = writeln!(out, "    server_name {server_name};");
+        let _ = writeln!(out, "    ssl_certificate {cert_dir}/fullchain.pem;");
+        let _ = writeln!(out, "    ssl_certificate_key {cert_dir}/privkey.pem;");
+        out.push_str("    ssl_protocols TLSv1.2 TLSv1.3;\n");
+        out.push_str("    ssl_prefer_server_ciphers off;\n");
+        out.push_str("    ssl_session_cache shared:RYNXWEBMAIL:10m;\n");
+        out.push_str("    ssl_session_timeout 1d;\n");
+        out.push_str("    ssl_session_tickets off;\n");
+        out.push_str("    add_header Strict-Transport-Security \"max-age=31536000\" always;\n");
+        out.push_str("    add_header X-Content-Type-Options \"nosniff\" always;\n");
+        out.push_str("    add_header X-Frame-Options \"SAMEORIGIN\" always;\n");
+        out.push_str(
+            "    add_header Referrer-Policy \"strict-origin-when-cross-origin\" always;\n",
+        );
+        let _ = writeln!(out, "    access_log /var/log/nginx/{domain}.access.log;");
+        let _ = writeln!(out, "    error_log /var/log/nginx/{domain}.error.log;");
+        webmail_location(&mut out, webmail_root, &socket);
+        out.push_str("}\n");
+    }
+    out
+}
+
+fn webmail_location(out: &mut String, webmail_root: &str, socket: &str) {
+    let _ = writeln!(out, "    root {webmail_root};");
+    out.push_str("    index index.php;\n");
+    out.push_str("    client_max_body_size 32m;\n");
+    out.push_str("    location ~ /\\.(?!well-known) { deny all; }\n");
+    out.push_str("    location ~ ^/(config|temp|logs|SQL|bin|vendor)/ { deny all; }\n");
+    out.push_str("    location / { try_files $uri $uri/ /index.php?$query_string; }\n");
+    out.push_str("    location ~ \\.php$ {\n");
+    out.push_str("        include snippets/fastcgi-php.conf;\n");
+    let _ = writeln!(out, "        fastcgi_pass {socket};");
+    out.push_str("    }\n");
+}
+
 /// FPM pool for a hosting account. One process pool per account.
 pub fn php_fpm_pool(spec: &PhpPoolSpec, socket: &str, home: &str) -> String {
     let mut out = String::with_capacity(1024);
@@ -694,5 +772,24 @@ mod tests {
         assert!(unit.contains("User=acme"));
         assert!(unit.contains("ExecStart=gunicorn app:app --bind=127.0.0.1:4100"));
         assert!(unit.contains("NoNewPrivileges=true"));
+    }
+
+    #[test]
+    fn webmail_vhost_has_php_acme_and_tls() {
+        let conf = webmail_site(
+            "webmail.example.com",
+            &["mail.example.com".into(), "imap.example.com".into()],
+            Some(Path::new("/etc/letsencrypt/live/webmail.example.com")),
+            "/var/www/_acme",
+            "/usr/share/roundcube",
+            "/run/php/php8.5-fpm.sock",
+        );
+        assert!(conf.contains("server_name webmail.example.com mail.example.com imap.example.com;"));
+        assert!(conf.contains("location ^~ /.well-known/acme-challenge/"));
+        assert!(conf
+            .contains("ssl_certificate /etc/letsencrypt/live/webmail.example.com/fullchain.pem;"));
+        assert!(conf.contains("fastcgi_pass unix:/run/php/php8.5-fpm.sock;"));
+        assert!(conf.contains("root /usr/share/roundcube;"));
+        assert!(conf.contains("config|temp|logs"));
     }
 }
