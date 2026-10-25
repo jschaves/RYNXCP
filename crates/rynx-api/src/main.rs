@@ -77,6 +77,7 @@ async fn main() -> Result<()> {
             cfg.login_window_secs,
             cfg.login_lockout_secs,
         )),
+        cert_jobs: rynx_api::cert_jobs::new_store(),
     };
 
     if args.check {

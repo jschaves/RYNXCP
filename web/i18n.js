@@ -284,6 +284,16 @@
       "That email is already used by a panel user.",
     "Certificados que requieren atención": "Certificates need attention",
     "Revisar certificados": "Review certificates",
+    "Certificado SSL": "SSL certificate",
+    "Solicitando certificado...": "Requesting certificate...",
+    "HTTPS activo": "HTTPS active",
+    "Certificado emitido correctamente": "Certificate issued successfully",
+    "No se pudo emitir el certificado": "Could not issue the certificate",
+    "El sitio se creó, pero HTTPS no está activo.": "The site was created, but HTTPS is not active.",
+    "Reintentar": "Retry",
+    "Tiempo transcurrido": "Elapsed time",
+    "Comprobando estado...": "Checking status...",
+    "El proceso continúa en segundo plano.": "The process continues in the background.",
   };
 
   const PT = {
@@ -310,6 +320,16 @@
     "Estado": "Estado", "Email": "Email", "Rol": "Função", "Versión": "Versão",
     "Certificados que requieren atención": "Certificados que precisam de atenção",
     "Revisar certificados": "Revisar certificados",
+    "Certificado SSL": "Certificado SSL",
+    "Solicitando certificado...": "Solicitando certificado...",
+    "HTTPS activo": "HTTPS ativo",
+    "Certificado emitido correctamente": "Certificado emitido com sucesso",
+    "No se pudo emitir el certificado": "Não foi possível emitir o certificado",
+    "El sitio se creó, pero HTTPS no está activo.": "O site foi criado, mas o HTTPS não está ativo.",
+    "Reintentar": "Tentar novamente",
+    "Tiempo transcurrido": "Tempo decorrido",
+    "Comprobando estado...": "Verificando status...",
+    "El proceso continúa en segundo plano.": "O processo continua em segundo plano.",
   };
 
   const FR = {
@@ -337,6 +357,16 @@
     "Estado": "État", "Email": "E-mail", "Rol": "Rôle", "Versión": "Version",
     "Certificados que requieren atención": "Certificats à vérifier",
     "Revisar certificados": "Vérifier les certificats",
+    "Certificado SSL": "Certificat SSL",
+    "Solicitando certificado...": "Demande du certificat...",
+    "HTTPS activo": "HTTPS actif",
+    "Certificado emitido correctamente": "Certificat émis avec succès",
+    "No se pudo emitir el certificado": "Impossible d'émettre le certificat",
+    "El sitio se creó, pero HTTPS no está activo.": "Le site a été créé, mais HTTPS n'est pas actif.",
+    "Reintentar": "Réessayer",
+    "Tiempo transcurrido": "Temps écoulé",
+    "Comprobando estado...": "Vérification de l'état...",
+    "El proceso continúa en segundo plano.": "Le processus continue en arrière-plan.",
   };
 
   const AR = {
@@ -366,6 +396,16 @@
     "Versión": "الإصدار",
     "Certificados que requieren atención": "شهادات تحتاج إلى مراجعة",
     "Revisar certificados": "مراجعة الشهادات",
+    "Certificado SSL": "شهادة SSL",
+    "Solicitando certificado...": "جارٍ طلب الشهادة...",
+    "HTTPS activo": "HTTPS مفعّل",
+    "Certificado emitido correctamente": "تم إصدار الشهادة بنجاح",
+    "No se pudo emitir el certificado": "تعذّر إصدار الشهادة",
+    "El sitio se creó, pero HTTPS no está activo.": "تم إنشاء الموقع، لكن HTTPS غير مفعّل.",
+    "Reintentar": "إعادة المحاولة",
+    "Tiempo transcurrido": "الوقت المنقضي",
+    "Comprobando estado...": "جارٍ التحقق من الحالة...",
+    "El proceso continúa en segundo plano.": "تستمر العملية في الخلفية.",
   };
 
   const RU = {
@@ -394,6 +434,16 @@
     "Email": "Эл. почта", "Rol": "Роль", "Versión": "Версия",
     "Certificados que requieren atención": "Сертификаты требуют внимания",
     "Revisar certificados": "Проверить сертификаты",
+    "Certificado SSL": "Сертификат SSL",
+    "Solicitando certificado...": "Запрос сертификата...",
+    "HTTPS activo": "HTTPS активен",
+    "Certificado emitido correctamente": "Сертификат успешно выпущен",
+    "No se pudo emitir el certificado": "Не удалось выпустить сертификат",
+    "El sitio se creó, pero HTTPS no está activo.": "Сайт создан, но HTTPS не активен.",
+    "Reintentar": "Повторить",
+    "Tiempo transcurrido": "Затраченное время",
+    "Comprobando estado...": "Проверка состояния...",
+    "El proceso continúa en segundo plano.": "Процесс продолжается в фоновом режиме.",
   };
 
   const ZH = {
@@ -419,6 +469,16 @@
     "Estado": "状态", "Email": "电子邮件", "Rol": "角色", "Versión": "版本",
     "Certificados que requieren atención": "证书需要处理",
     "Revisar certificados": "查看证书",
+    "Certificado SSL": "SSL 证书",
+    "Solicitando certificado...": "正在申请证书...",
+    "HTTPS activo": "HTTPS 已启用",
+    "Certificado emitido correctamente": "证书已成功签发",
+    "No se pudo emitir el certificado": "无法签发证书",
+    "El sitio se creó, pero HTTPS no está activo.": "网站已创建，但 HTTPS 未启用。",
+    "Reintentar": "重试",
+    "Tiempo transcurrido": "已用时间",
+    "Comprobando estado...": "正在检查状态...",
+    "El proceso continúa en segundo plano.": "进程将在后台继续。",
   };
 
   const JA = {
@@ -447,6 +507,16 @@
     "Versión": "バージョン",
     "Certificados que requieren atención": "証明書の確認が必要です",
     "Revisar certificados": "証明書を確認",
+    "Certificado SSL": "SSL 証明書",
+    "Solicitando certificado...": "証明書を申請中...",
+    "HTTPS activo": "HTTPS 有効",
+    "Certificado emitido correctamente": "証明書が正常に発行されました",
+    "No se pudo emitir el certificado": "証明書を発行できませんでした",
+    "El sitio se creó, pero HTTPS no está activo.": "サイトは作成されましたが、HTTPS は有効ではありません。",
+    "Reintentar": "再試行",
+    "Tiempo transcurrido": "経過時間",
+    "Comprobando estado...": "ステータスを確認中...",
+    "El proceso continúa en segundo plano.": "処理はバックグラウンドで続行されます。",
   };
 
   const IT = {
@@ -489,6 +559,16 @@
     "No se detectó software.": "Nessun software rilevato.",
     "Certificados que requieren atención": "Certificati da controllare",
     "Revisar certificados": "Controlla i certificati",
+    "Certificado SSL": "Certificato SSL",
+    "Solicitando certificado...": "Richiesta del certificato...",
+    "HTTPS activo": "HTTPS attivo",
+    "Certificado emitido correctamente": "Certificato emesso correttamente",
+    "No se pudo emitir el certificado": "Impossibile emettere il certificato",
+    "El sitio se creó, pero HTTPS no está activo.": "Il sito è stato creato, ma HTTPS non è attivo.",
+    "Reintentar": "Riprova",
+    "Tiempo transcurrido": "Tempo trascorso",
+    "Comprobando estado...": "Verifica stato...",
+    "El proceso continúa en segundo plano.": "Il processo continua in background.",
   };
 
   const DE = {
@@ -531,6 +611,16 @@
     "No se detectó software.": "Keine Software erkannt.",
     "Certificados que requieren atención": "Zertifikate benötigen Aufmerksamkeit",
     "Revisar certificados": "Zertifikate prüfen",
+    "Certificado SSL": "SSL-Zertifikat",
+    "Solicitando certificado...": "Zertifikat wird angefordert...",
+    "HTTPS activo": "HTTPS aktiv",
+    "Certificado emitido correctamente": "Zertifikat erfolgreich ausgestellt",
+    "No se pudo emitir el certificado": "Zertifikat konnte nicht ausgestellt werden",
+    "El sitio se creó, pero HTTPS no está activo.": "Die Website wurde erstellt, aber HTTPS ist nicht aktiv.",
+    "Reintentar": "Erneut versuchen",
+    "Tiempo transcurrido": "Verstrichene Zeit",
+    "Comprobando estado...": "Status wird geprüft...",
+    "El proceso continúa en segundo plano.": "Der Vorgang läuft im Hintergrund weiter.",
   };
 
   const DICT = {

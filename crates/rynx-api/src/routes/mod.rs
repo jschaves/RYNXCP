@@ -61,6 +61,8 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/apps", get(apps::list).post(apps::create))
         .route("/api/v1/apps/{username}/{name}", delete(apps::delete))
         .route("/api/v1/certs", get(certs::list).post(certs::issue))
+        .route("/api/v1/certs/jobs", post(certs::start_job))
+        .route("/api/v1/certs/jobs/{id}", get(certs::job_status))
         .route("/api/v1/certs/renew", post(certs::renew))
         .route("/api/v1/backups", get(backups::list).post(backups::create))
         .route("/api/v1/backups/{id}", delete(backups::delete))

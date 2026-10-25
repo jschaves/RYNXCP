@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod authlog;
+pub mod cert_jobs;
 pub mod daemon;
 pub mod error;
 pub mod ratelimit;

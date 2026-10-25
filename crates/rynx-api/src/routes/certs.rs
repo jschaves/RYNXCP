@@ -1,10 +1,11 @@
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use serde::Deserialize;
 
 use rynx_proto::{Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
+use crate::cert_jobs::{self, CertJobView};
 use crate::error::ApiError;
 use crate::scope;
 use crate::state::ApiState;
@@ -12,6 +13,15 @@ use crate::state::ApiState;
 #[derive(Debug, Deserialize)]
 pub struct IssueRequest {
     pub domain: String,
+    pub email: String,
+    #[serde(default)]
+    pub staging: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JobRequest {
+    pub domain: String,
+    #[serde(default)]
     pub email: String,
     #[serde(default)]
     pub staging: bool,
@@ -48,6 +58,36 @@ pub async fn issue(
         )
         .await?;
     Ok(Json(response))
+}
+
+pub async fn start_job(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<JobRequest>,
+) -> Result<Json<CertJobView>, ApiError> {
+    auth.require_write()?;
+    let domain = body.domain.trim().to_string();
+    rynx_core::validate_domain(&domain).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    scope::ensure_domain(&state, &auth, &domain).await?;
+    let email = if body.email.trim().is_empty() {
+        auth.user.email.clone()
+    } else {
+        body.email.trim().to_string()
+    };
+    rynx_core::validate_email(&email).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let job = cert_jobs::start(&state, &domain, &email, body.staging, &auth.user.username).await;
+    Ok(Json(job))
+}
+
+pub async fn job_status(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<String>,
+) -> Result<Json<CertJobView>, ApiError> {
+    let job = cert_jobs::get(&state, &id, &auth.user.username)
+        .await
+        .ok_or_else(|| ApiError::NotFound("certificate job not found".into()))?;
+    Ok(Json(job))
 }
 
 #[derive(Debug, Deserialize)]

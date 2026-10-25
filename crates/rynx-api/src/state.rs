@@ -3,6 +3,7 @@ use std::sync::Arc;
 use rynx_core::ApiConfig;
 use rynx_panel::PanelDb;
 
+use crate::cert_jobs::CertJobs;
 use crate::daemon::DaemonClient;
 use crate::ratelimit::LoginLimiter;
 
@@ -12,4 +13,5 @@ pub struct ApiState {
     pub db: Arc<PanelDb>,
     pub daemon: Arc<DaemonClient>,
     pub limiter: Arc<LoginLimiter>,
+    pub cert_jobs: CertJobs,
 }

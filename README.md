@@ -57,6 +57,13 @@ and, if there is no `index.html` or `index.php`, a welcome page in the UI
 language of the panel user who created the site. Existing content is never
 overwritten.
 
+Creating an enabled site with `tls = "lets_encrypt"` also starts a certificate
+job immediately. The API returns the job in `cert_job`; the panel polls
+`GET /api/v1/certs/jobs/{id}` and shows the request, activation and final result
+(issuer and expiry on success, certbot/daemon output on failure). A failed
+issuance does not remove the site: it remains available over HTTP and the
+certificate page and warning banner show the problem.
+
 ## Architecture
 
 ```
@@ -324,6 +331,7 @@ GET|POST   /api/v1/websites          DELETE /api/v1/websites/{domain}
 GET|POST   /api/v1/php-pools         DELETE /api/v1/php-pools/{username}
 GET|POST   /api/v1/apps              DELETE /api/v1/apps/{username}/{name}
 GET|POST   /api/v1/certs             POST   /api/v1/certs/renew
+POST       /api/v1/certs/jobs        GET    /api/v1/certs/jobs/{id}
 GET|POST   /api/v1/backups           DELETE /api/v1/backups/{id}
 POST       /api/v1/backups/{id}/restore
 GET        /api/v1/dns               GET    /api/v1/dns/{domain}

@@ -829,11 +829,12 @@ function openWebsiteModal() {
       const managed = MANAGED.includes(engine);
       const app = managed ? val(form, 'app') : null;
       if (managed && !app) throw new Error('Selecciona una aplicación compatible o créala antes');
+      const domain = toAsciiDomain(val(form, 'domain'));
 
-      await api('/api/v1/websites', {
+      const result = await api('/api/v1/websites', {
         method: 'POST',
         body: {
-          domain: toAsciiDomain(val(form, 'domain')),
+          domain,
           username: val(form, 'username'),
           aliases: val(form, 'aliases').split(',').map((a) => toAsciiDomain(a)).filter(Boolean),
           runtime,
@@ -845,6 +846,9 @@ function openWebsiteModal() {
         },
       });
       toast('Sitio publicado');
+      if (result.cert_job) {
+        showCertJob(result.cert_job, domain, { email: S.user.email }).catch(() => {});
+      }
       await refresh();
     },
   });
@@ -1066,18 +1070,191 @@ function openCertModal() {
       <p class="hint full">El reto HTTP-01 se sirve desde el webroot ACME. Al emitirse, el vhost se re-renderiza con TLS.</p>
     </div>`,
     onSubmit: async (form) => {
-      await api('/api/v1/certs', {
+      const domain = val(form, 'domain');
+      const email = toAsciiEmail(val(form, 'email'));
+      const staging = bool(form, 'staging');
+      const job = await api('/api/v1/certs/jobs', {
         method: 'POST',
-        body: {
-          domain: val(form, 'domain'),
-          email: toAsciiEmail(val(form, 'email')),
-          staging: bool(form, 'staging'),
-        },
+        body: { domain, email, staging },
       });
-      toast('Certificado emitido');
-      await refresh();
+      await showCertJob(job, domain, { email, staging });
     },
   });
+}
+
+function showCertJob(job, domain, options = {}) {
+  const root = $('#modal-root');
+  const email = options.email || S.user.email || '';
+  const staging = Boolean(options.staging);
+  const started = Date.now();
+  let current = job;
+  let closed = false;
+  let done = false;
+  let pollTimer = null;
+  let elapsedTimer = null;
+  let resolveDone;
+  const finished = new Promise((resolve) => { resolveDone = resolve; });
+
+  root.innerHTML = `
+    <div class="modal-backdrop" data-cert-backdrop>
+      <div class="modal cert-progress" role="dialog" aria-modal="true">
+        <h2>${esc(T('Certificado SSL'))}</h2>
+        <p class="muted small mono">${esc(domain)}${staging ? ' · staging' : ''}</p>
+        <div class="cert-steps">
+          <div class="cert-step done" data-cert-step="site">
+            <span class="dot"></span>
+            <div><strong>${esc(T('Sitio publicado'))}</strong></div>
+          </div>
+          <div class="cert-step running" data-cert-step="request">
+            <span class="dot"></span>
+            <div><strong>${esc(T('Solicitando certificado...'))}</strong><small id="cert-job-message"></small></div>
+          </div>
+          <div class="cert-step" data-cert-step="https">
+            <span class="dot"></span>
+            <div><strong>${esc(T('HTTPS activo'))}</strong></div>
+          </div>
+        </div>
+        <div class="cert-progress-meta">
+          <span class="muted small">${esc(T('Tiempo transcurrido'))}: <strong id="cert-job-elapsed">0s</strong></span>
+          <span class="muted small" id="cert-job-state">${esc(T('Comprobando estado...'))}</span>
+        </div>
+        <div id="cert-job-result" class="cert-result"></div>
+        <p id="cert-job-note" class="hint">${esc(T('El proceso continúa en segundo plano.'))}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn ghost" data-cert-close>${esc(T('Cerrar'))}</button>
+          <button type="button" class="btn primary hidden" data-cert-retry>${esc(T('Reintentar'))}</button>
+        </div>
+      </div>
+    </div>`;
+
+  translateUi(root);
+
+  const setStep = (name, state) => {
+    const step = root.querySelector(`[data-cert-step="${name}"]`);
+    if (!step) return;
+    step.classList.remove('done', 'running', 'failed', 'hidden');
+    if (state) step.classList.add(state);
+  };
+
+  const finish = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(pollTimer);
+    clearInterval(elapsedTimer);
+    resolveDone(current);
+  };
+
+  const onKey = (event) => {
+    if (event.key === 'Escape') close();
+  };
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(pollTimer);
+    clearInterval(elapsedTimer);
+    document.removeEventListener('keydown', onKey);
+    if (root.querySelector('.cert-progress')) root.innerHTML = '';
+    finish();
+  };
+
+  const render = (next) => {
+    current = next;
+    const message = root.querySelector('#cert-job-message');
+    const state = root.querySelector('#cert-job-state');
+    const result = root.querySelector('#cert-job-result');
+    const retry = root.querySelector('[data-cert-retry]');
+    if (!message || !state || !result || !retry) return;
+    const note = root.querySelector('#cert-job-note');
+    if (next.status === 'succeeded') {
+      setStep('request', 'done');
+      setStep('https', 'done');
+      message.textContent = T('Certificado emitido correctamente');
+      state.textContent = T('Certificado emitido correctamente');
+      const cert = next.certificate || {};
+      const expires = cert.not_after ? fmtDate(cert.not_after) : '-';
+      result.innerHTML = `<div class="kv cert-summary">
+        <span>${esc(T('Emisor'))}</span><strong>${esc(cert.issuer || '-')}</strong>
+        <span>${esc(T('Vence'))}</span><strong>${esc(expires)}</strong>
+        <span>${esc(T('Estado'))}</span><span>${certBadge(cert.status || 'active')}</span>
+      </div>
+      <p class="hint"><a href="https://${esc(domain)}/" target="_blank" rel="noopener">https://${esc(domain)}/</a></p>`;
+      if (note) note.classList.add('hidden');
+      retry.classList.add('hidden');
+      finish();
+      toast(T('Certificado emitido correctamente'));
+      refresh().catch(() => {});
+    } else if (next.status === 'failed') {
+      setStep('request', 'failed');
+      setStep('https', 'hidden');
+      message.textContent = T('No se pudo emitir el certificado');
+      state.textContent = T('El sitio se creó, pero HTTPS no está activo.');
+      result.innerHTML = `<strong class="cert-failure">${esc(T('No se pudo emitir el certificado'))}</strong>
+        <pre class="cert-error">${esc(next.message || '')}</pre>
+        <p class="hint">${esc(T('El sitio se creó, pero HTTPS no está activo.'))}</p>`;
+      if (note) note.classList.add('hidden');
+      retry.classList.remove('hidden');
+      finish();
+      toast(T('No se pudo emitir el certificado'), 'error');
+      refresh().catch(() => {});
+    } else {
+      setStep('request', 'running');
+      setStep('https', '');
+      message.textContent = T('Comprobando estado...');
+      state.textContent = T('Comprobando estado...');
+    }
+  };
+
+  const poll = async () => {
+    if (closed || done) return;
+    try {
+      const next = await api(`/api/v1/certs/jobs/${encodeURIComponent(current.id)}`);
+      if (closed) return;
+      if (!root.querySelector('.cert-progress')) {
+        closed = true;
+        finish();
+        return;
+      }
+      render(next);
+      if (done) return;
+    } catch (err) {
+      if (closed) return;
+      const state = root.querySelector('#cert-job-state');
+      if (state) state.textContent = err.message;
+    }
+    pollTimer = setTimeout(poll, 1500);
+  };
+
+  root.querySelector('[data-cert-close]').addEventListener('click', close);
+  root.querySelector('[data-cert-backdrop]').addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) close();
+  });
+  root.querySelector('[data-cert-retry]').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const next = await api('/api/v1/certs/jobs', {
+        method: 'POST',
+        body: { domain, email, staging },
+      });
+      if (closed) return;
+      close();
+      await showCertJob(next, domain, { email, staging });
+    } catch (err) {
+      button.disabled = false;
+      toast(err.message, 'error');
+    }
+  });
+  document.addEventListener('keydown', onKey);
+
+  elapsedTimer = setInterval(() => {
+    const elapsed = root.querySelector('#cert-job-elapsed');
+    if (elapsed) elapsed.textContent = `${Math.floor((Date.now() - started) / 1000)}s`;
+  }, 1000);
+
+  render(job);
+  poll();
+  return finished;
 }
 
 /* ---------------- users ---------------- */
