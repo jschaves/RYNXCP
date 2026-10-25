@@ -1605,6 +1605,25 @@ impl Reconciler {
         Ok(())
     }
 
+    async fn dns_seed_aliases(&self, domain: &str) -> Result<(), WireError> {
+        let website = self
+            .state
+            .get_website(domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found(format!("website '{domain}' not found")))?;
+        let suffix = format!(".{domain}");
+        for alias in &website.spec.aliases {
+            let Some(label) = alias.strip_suffix(&suffix) else {
+                continue;
+            };
+            if label.is_empty() {
+                continue;
+            }
+            self.dns_put(domain, label, "CNAME", domain, None, true)?;
+        }
+        Ok(())
+    }
+
     async fn dns_seed_mail(&self, domain: &str) -> Result<(), WireError> {
         let mail_host = format!("mail.{domain}");
         let webmail_host = format!("webmail.{domain}");
@@ -1759,6 +1778,7 @@ impl Reconciler {
                 .map_err(internal)?;
             self.dns_seed_defaults(domain).await?;
         }
+        self.dns_seed_aliases(domain).await?;
         if enable_mail || self.cfg.mail_enabled {
             self.dns_seed_mail(domain).await?;
         }
