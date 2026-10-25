@@ -692,7 +692,7 @@ async function renderWebsites() {
 
   $('#view').innerHTML =
     sectionHead('Sitios web', writable ? `<button class="btn primary" data-action="website-new">Nuevo sitio</button>` : '') +
-    table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aǧn no hay virtual hosts.');
+    table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aún no hay virtual hosts.');
 }
 
 function openWebsiteModal() {
@@ -801,8 +801,8 @@ async function renderApps() {
   });
 
   $('#view').innerHTML =
-    sectionHead('Aplicaciones gestionadas', writable ? `<button class="btn primary" data-action="app-new">Nueva aplicaci��n</button>` : '') +
-    table(['Aplicaci��n', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
+    sectionHead('Aplicaciones gestionadas', writable ? `<button class="btn primary" data-action="app-new">Nueva aplicación</button>` : '') +
+    table(['Aplicación', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
 }
 
 function openAppModal() {
@@ -920,7 +920,7 @@ async function renderPhp() {
 
   $('#view').innerHTML =
     sectionHead('Pools PHP-FPM', writable ? `<button class="btn primary" data-action="php-new">Nuevo pool</button>` : '') +
-    table(['Cuenta', 'Versi��n', 'PM', 'Workers', 'Memoria', 'Socket', 'Estado', ''], rows, 'No hay pools; se crean automǭticamente al publicar un sitio PHP.');
+    table(['Cuenta', 'Versión', 'PM', 'Workers', 'Memoria', 'Socket', 'Estado', ''], rows, 'No hay pools; se crean automáticamente al publicar un sitio PHP.');
 }
 
 function openPhpModal() {
@@ -971,7 +971,7 @@ async function renderSsl() {
   const scoped = isScoped();
   const rows = S.data.certs.map((cert) => [
     td(`<div class="cell-title">${esc(cert.domain)}</div><div class="cell-sub mono">${esc(cert.path)}</div>`),
-    td(esc(cert.issuer || '�?"')),
+    td(esc(cert.issuer || '—')),
     td(esc(fmtDate(cert.not_after))),
     td(certBadge(cert.status)),
   ]);
@@ -1363,7 +1363,7 @@ async function renderDatabases() {
   ]);
   $('#view').innerHTML =
     sectionHead('Bases de datos por dominio', writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '') +
-    table(['Dominio', 'Usuario', 'Contrase��a', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
+    table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
 }
 
 function openDatabaseModal() {
@@ -1403,7 +1403,7 @@ async function renderFtp() {
   ]);
   $('#view').innerHTML =
     sectionHead('Usuarios FTP', writable ? '<button class="btn primary" data-action="ftp-new">Nuevo usuario FTP</button>' : '') +
-    table(['Login', 'Home (chroot)', 'Permisos', 'Contrase��a', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al document root del sitio.');
+    table(['Login', 'Home (chroot)', 'Permisos', 'Contraseña', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al document root del sitio.');
 }
 
 function openFtpModal() {
@@ -1536,7 +1536,7 @@ async function renderBackups() {
   ]);
   $('#view').innerHTML =
     sectionHead('Copias de seguridad', writable ? '<button class="btn primary" data-action="backup-new">Crear backup</button>' : '') +
-    table(['Cuenta', 'Fecha', 'Tama��o', 'Estado', 'Ruta', ''], rows, 'Aǧn no hay copias. Se conservan las ǧltimas 7 por cuenta.');
+    table(['Cuenta', 'Fecha', 'Tamaño', 'Estado', 'Ruta', ''], rows, 'Aún no hay copias. Se conservan las últimas 7 por cuenta.');
 }
 
 function openBackupModal() {
