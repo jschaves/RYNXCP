@@ -128,12 +128,12 @@ detect_public_ip() {
     printf '%s' "$ip"
     return 0
   fi
-  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/ {for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}' || true)"
   if is_ipv4 "$ip"; then
     printf '%s' "$ip"
     return 0
   fi
-  hostname -I 2>/dev/null | awk '{print $1}'
+  hostname -I 2>/dev/null | awk '{print $1}' || true
 }
 
 detect_host_default() {
@@ -144,7 +144,7 @@ detect_host_default() {
     printf '%s' "$fqdn"
     return 0
   fi
-  PUBLIC_IP="$(detect_public_ip)"
+  PUBLIC_IP="$(detect_public_ip || true)"
   if is_ipv4 "$PUBLIC_IP"; then
     printf '%s' "$PUBLIC_IP"
     return 0
@@ -225,8 +225,8 @@ fi
 is_domain "$HOST" || is_ipv4 "$HOST" || die "invalid host '$HOST' (use a FQDN or an IPv4 address)"
 
 if is_domain "$HOST"; then
-  [[ -n "$PUBLIC_IP" ]] || PUBLIC_IP="$(detect_public_ip)"
-  resolved="$(getent ahostsv4 "$HOST" 2>/dev/null | awk 'NR==1 {print $1}')"
+  [[ -n "$PUBLIC_IP" ]] || PUBLIC_IP="$(detect_public_ip || true)"
+  resolved="$(getent ahostsv4 "$HOST" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
   if [[ -z "$resolved" ]]; then
     warn "DNS for $HOST does not resolve yet; Let's Encrypt issuance will probably fail"
   elif is_ipv4 "$PUBLIC_IP" && [[ "$resolved" != "$PUBLIC_IP" ]]; then
@@ -267,7 +267,7 @@ fi
 SSH_PORT="$(
   grep -rhE '^[[:space:]]*Port[[:space:]]+[0-9]+' \
     /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
-    | awk '{print $2; exit}'
+    | awk '{print $2; exit}' || true
 )"
 SSH_PORT="${SSH_PORT:-22}"
 
