@@ -1885,6 +1885,9 @@ impl Reconciler {
             }
         }
         out.push_str("    tcp dport { 80, 443 } accept\n");
+        if self.cfg.panel_port != 80 && self.cfg.panel_port != 443 {
+            out.push_str(&format!("    tcp dport {} accept\n", self.cfg.panel_port));
+        }
         out.push_str("    tcp dport 53 accept\n");
         out.push_str("    udp dport 53 accept\n");
         out.push_str("    tcp dport { 21, 30000-50000 } accept\n");

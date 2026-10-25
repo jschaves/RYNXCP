@@ -93,6 +93,9 @@ pub struct DaemonConfig {
     pub firewall_enabled: bool,
     pub firewall_backend: String,
     pub firewall_ssh_port: u16,
+    /// TCP port where the panel vhost is published. Kept open in the default
+    /// nftables rules when it is not 80/443.
+    pub panel_port: u16,
     pub nft_bin: String,
 }
 
@@ -156,6 +159,7 @@ impl Default for DaemonConfig {
                 firewall_enabled: true,
                 firewall_backend: "sim".into(),
                 firewall_ssh_port: 22,
+                panel_port: 80,
                 nft_bin: "nft".into(),
             }
         } else {
@@ -225,6 +229,7 @@ impl Default for DaemonConfig {
                 firewall_enabled: false,
                 firewall_backend: "nftables".into(),
                 firewall_ssh_port: 22,
+                panel_port: 80,
                 nft_bin: "nft".into(),
             }
         }
@@ -438,6 +443,11 @@ pub fn validate_daemon_config(cfg: &DaemonConfig) -> CoreResult<()> {
     if cfg.firewall_ssh_port == 0 {
         return Err(crate::CoreError::Config(
             "firewall_ssh_port must be between 1 and 65535".into(),
+        ));
+    }
+    if cfg.panel_port == 0 {
+        return Err(crate::CoreError::Config(
+            "panel_port must be between 1 and 65535".into(),
         ));
     }
     if cfg.backup_retention == 0 {

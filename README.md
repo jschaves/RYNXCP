@@ -174,6 +174,10 @@ sudo RYNX_ADMIN_PASSWORD='Your-Strong-Pass1' \
   bash deploy/preinstall.sh --host panel.example.com --email admin@example.com --yes
 ```
 
+Add `--panel-port 2083` (or `RYNX_PANEL_PORT=2083`) to publish the panel on a
+custom port. Port 80 is still used for the ACME HTTP-01 challenge and redirects
+to the panel port.
+
 What it installs and configures:
 
 - Security updates plus `unattended-upgrades`.
@@ -189,7 +193,7 @@ What it installs and configures:
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
 
-The panel is published at `http(s)://<host>` and the administrator is created with
+The panel is published at `http(s)://<host>[:port]` and the administrator is created with
 the email/password you entered. Email DNS (`mail_enabled`) stays disabled until a
 real mail server exists; zones still include SPF/DKIM/DMARC records when mail records
 are provisioned from the UI.

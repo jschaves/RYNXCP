@@ -19,6 +19,7 @@ PANEL_USER="admin"
 HOST_ARG=""
 EMAIL_ARG=""
 PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
+PANEL_PORT="${RYNX_PANEL_PORT:-80}"
 ASSUME_YES=0
 NO_TLS=0
 SSH_PORT=""
@@ -40,6 +41,8 @@ Options:
   --email <address>     Admin email. Defaults to admin@<host> for domains.
   --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD env var to
                         avoid exposing it in the process list.
+  --panel-port <port>   Publish the panel on this TCP port (default 80).
+                        Port 80 is still used for the ACME challenge.
   --no-tls              Do not request a Let's Encrypt certificate.
   --yes                 Assume yes for confirmations (non-interactive).
   -h, --help            Show this help.
@@ -48,6 +51,7 @@ Environment:
   RYNX_ADMIN_PASSWORD  Admin password (recommended over --password).
   RYNX_HOST            Same as --host.
   RYNX_ADMIN_EMAIL     Same as --email.
+  RYNX_PANEL_PORT      Same as --panel-port.
 EOF
 }
 
@@ -60,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --host) HOST_ARG="${2:-}"; shift 2 ;;
     --email) EMAIL_ARG="${2:-}"; shift 2 ;;
     --password) PASSWORD_ARG="${2:-}"; shift 2 ;;
+    --panel-port) PANEL_PORT="${2:-}"; shift 2 ;;
     --no-tls) NO_TLS=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -72,6 +77,10 @@ done
 mkdir -p /var/log/rynxcp
 exec > >(tee -a "$LOG") 2>&1
 trap 'code=$?; printf "\n\033[1;31mFAILED\033[0m at line %s (exit %s). Log: %s\n" "$LINENO" "$code" "$LOG" >&2; exit "$code"' ERR
+
+[[ "$PANEL_PORT" =~ ^[0-9]+$ ]] || die "--panel-port must be numeric"
+PANEL_PORT=$((10#$PANEL_PORT))
+(( PANEL_PORT >= 1 && PANEL_PORT <= 65535 )) || die "--panel-port must be between 1 and 65535"
 
 # ---------------------------------------------------------------------------
 # Distribution detection
@@ -445,6 +454,7 @@ set_toml "$DAEMON_CONF" "ftp_enabled" "true"
 set_toml "$DAEMON_CONF" "firewall_enabled" "true"
 set_toml "$DAEMON_CONF" "firewall_backend" "\"nftables\""
 set_toml "$DAEMON_CONF" "firewall_ssh_port" "$SSH_PORT"
+set_toml "$DAEMON_CONF" "panel_port" "$PANEL_PORT"
 set_toml "$DAEMON_CONF" "tls_email" "\"$EMAIL\""
 # Email DNS requires a mail server; keep it disabled until one exists.
 set_toml "$DAEMON_CONF" "mail_enabled" "false"
@@ -454,9 +464,60 @@ fi
 
 set_toml "$API_CONF" "trust_proxy_headers" "true"
 
-# Nginx panel vhost (HTTP first; certbot upgrades it to TLS).
+# ---------------------------------------------------------------------------
+# Panel vhost
+#
+# Port 80 is always kept for the ACME HTTP-01 challenge. When --panel-port is
+# different from 80, the panel itself listens on that port (TLS when possible)
+# and port 80 only redirects.
+# ---------------------------------------------------------------------------
 PANEL_SITE="/etc/nginx/sites-available/rynxcp-panel"
-cat >"$PANEL_SITE" <<EOF
+
+panel_proxy_block() {
+  cat <<EOF
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 120s;
+    }
+EOF
+}
+
+panel_vhost_default() {
+  {
+    cat <<EOF
+# managed-by: RYNXCP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $HOST;
+
+    client_max_body_size 32m;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/_acme;
+        default_type "text/plain";
+    }
+
+EOF
+    panel_proxy_block
+    cat <<EOF
+}
+EOF
+  } >"$PANEL_SITE"
+}
+
+panel_vhost_http_custom() {
+  local http_suffix=""
+  if [[ "$PANEL_PORT" != "80" ]]; then
+    http_suffix=":$PANEL_PORT"
+  fi
+  {
+    cat <<EOF
 # managed-by: RYNXCP
 server {
     listen 80;
@@ -471,43 +532,156 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 120s;
+        return 301 http://\$host${http_suffix}\$request_uri;
     }
 }
-EOF
-ln -sfn "$PANEL_SITE" /etc/nginx/sites-enabled/rynxcp-panel
-nginx -t
-systemctl reload nginx
 
-if is_domain "$HOST" && (( NO_TLS == 0 )); then
-  log "Requesting the Let's Encrypt certificate for $HOST"
-  if certbot --nginx -d "$HOST" --non-interactive --agree-tos -m "$EMAIL" \
-      --redirect --keep-until-expiring; then
-    TLS_OK=1
-    PANEL_SCHEME="https"
-  elif [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
-    TLS_OK=1
-    PANEL_SCHEME="https"
-    warn "reusing the existing certificate for $HOST"
-  else
-    warn "certbot failed; the panel stays on HTTP. Fix DNS and run certbot later."
+server {
+    listen ${PANEL_PORT};
+    listen [::]:${PANEL_PORT};
+    server_name $HOST;
+
+    client_max_body_size 32m;
+
+EOF
+    panel_proxy_block
+    cat <<EOF
+}
+EOF
+  } >"$PANEL_SITE"
+}
+
+panel_vhost_tls_custom() {
+  local https_suffix=""
+  if [[ "$PANEL_PORT" != "443" ]]; then
+    https_suffix=":$PANEL_PORT"
   fi
-elif ! is_domain "$HOST"; then
-  warn "the panel host is an IP address; Let's Encrypt is not available and the panel will use HTTP"
+  {
+    cat <<EOF
+# managed-by: RYNXCP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $HOST;
+
+    client_max_body_size 32m;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/_acme;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host${https_suffix}\$request_uri;
+    }
+}
+
+server {
+    listen ${PANEL_PORT} ssl;
+    listen [::]:${PANEL_PORT} ssl;
+    server_name $HOST;
+    server_tokens off;
+    client_max_body_size 32m;
+
+    ssl_certificate     /etc/letsencrypt/live/$HOST/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$HOST/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:RYNXCP:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+EOF
+    panel_proxy_block
+    cat <<EOF
+}
+EOF
+  } >"$PANEL_SITE"
+}
+
+panel_reload() {
+  ln -sfn "$PANEL_SITE" /etc/nginx/sites-enabled/rynxcp-panel
+  nginx -t
+  systemctl reload nginx
+}
+
+if [[ "$PANEL_PORT" == "80" ]]; then
+  panel_vhost_default
+  panel_reload
+
+  if is_domain "$HOST" && (( NO_TLS == 0 )); then
+    log "Requesting the Let's Encrypt certificate for $HOST"
+    if certbot --nginx -d "$HOST" --non-interactive --agree-tos -m "$EMAIL" \
+        --redirect --keep-until-expiring; then
+      TLS_OK=1
+      PANEL_SCHEME="https"
+    elif [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
+      TLS_OK=1
+      PANEL_SCHEME="https"
+      warn "reusing the existing certificate for $HOST"
+    else
+      warn "certbot failed; the panel stays on HTTP. Fix DNS and run certbot later."
+    fi
+  elif ! is_domain "$HOST"; then
+    warn "the panel host is an IP address; Let's Encrypt is not available and the panel will use HTTP"
+  fi
+else
+  if is_domain "$HOST" && (( NO_TLS == 0 )); then
+    if [[ -f "/etc/letsencrypt/live/$HOST/fullchain.pem" ]]; then
+      TLS_OK=1
+      PANEL_SCHEME="https"
+    else
+      log "Publishing HTTP on port 80 for the ACME challenge"
+      panel_vhost_http_custom
+      panel_reload
+
+      log "Requesting the Let's Encrypt certificate for $HOST"
+      if certbot certonly --webroot -w /var/www/_acme -d "$HOST" \
+          --non-interactive --agree-tos -m "$EMAIL" \
+          --keep-until-expiring --deploy-hook "systemctl reload nginx"; then
+        TLS_OK=1
+        PANEL_SCHEME="https"
+      else
+        warn "certbot failed; the panel stays on HTTP. Fix DNS and run certbot later."
+      fi
+    fi
+
+    if (( TLS_OK == 1 )); then
+      panel_vhost_tls_custom
+    else
+      panel_vhost_http_custom
+    fi
+    panel_reload
+  else
+    if ! is_domain "$HOST"; then
+      warn "the panel host is an IP address; Let's Encrypt is not available and the panel will use HTTP"
+    fi
+    panel_vhost_http_custom
+    panel_reload
+  fi
 fi
 
 if (( TLS_OK == 1 )); then
   set_toml "$API_CONF" "secure_cookies" "true"
-  set_toml "$API_CONF" "public_url" "\"https://$HOST\""
+  if [[ "$PANEL_PORT" == "443" ]]; then
+    set_toml "$API_CONF" "public_url" "\"https://$HOST\""
+  else
+    set_toml "$API_CONF" "public_url" "\"https://$HOST:$PANEL_PORT\""
+  fi
 else
   set_toml "$API_CONF" "secure_cookies" "false"
-  set_toml "$API_CONF" "public_url" "\"http://$HOST\""
+  if [[ "$PANEL_PORT" == "80" ]]; then
+    set_toml "$API_CONF" "public_url" "\"http://$HOST\""
+  else
+    set_toml "$API_CONF" "public_url" "\"http://$HOST:$PANEL_PORT\""
+  fi
+fi
+
+PANEL_URL="${PANEL_SCHEME}://${HOST}"
+if { [[ "$PANEL_SCHEME" == "https" && "$PANEL_PORT" != "443" ]] || \
+     [[ "$PANEL_SCHEME" == "http" && "$PANEL_PORT" != "80" ]]; }; then
+  PANEL_URL="${PANEL_URL}:${PANEL_PORT}"
 fi
 
 log "Restarting RYNXCP"
@@ -547,8 +721,17 @@ if ! nft list table inet rynxcp >/dev/null 2>&1; then
 fi
 
 if (( TLS_OK == 1 )); then
-  curl -fsS --max-time 15 "https://$HOST/api/v1/health" >/dev/null || \
-    warn "HTTPS health check failed; verify DNS and the certificate manually"
+  panel_ok=0
+  for _ in $(seq 1 10); do
+    if curl -fsS --max-time 5 "$PANEL_URL/api/v1/health" >/dev/null 2>&1; then
+      panel_ok=1
+      break
+    fi
+    sleep 1
+  done
+  if (( panel_ok == 0 )); then
+    warn "HTTPS health check failed; verify DNS, the certificate and the firewall"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -559,7 +742,7 @@ cat <<EOF
 
 RYNXCP is ready.
 
-  Panel:    ${PANEL_SCHEME}://${HOST}
+  Panel:    ${PANEL_URL}
   User:     ${PANEL_USER}
   Email:    ${EMAIL}
   Password: (the value you entered; it was not logged)

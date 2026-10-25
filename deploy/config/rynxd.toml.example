@@ -77,4 +77,7 @@ ftp_readonly_user = "rynxftp"
 firewall_enabled = false
 firewall_backend = "nftables"
 firewall_ssh_port = 22
+# TCP port used to publish the panel vhost. Non-80/443 values are added to the
+# default nftables allowlist so the panel stays reachable.
+panel_port = 80
 nft_bin = "nft"
