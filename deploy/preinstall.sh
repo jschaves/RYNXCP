@@ -464,6 +464,16 @@ if [[ "${RYNX_SKIP_MAIL:-0}" != "1" ]]; then
 fi
 if is_domain "$HOST"; then
   set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
+  if [[ -z "$PUBLIC_IP" ]]; then
+    PUBLIC_IP="$(detect_public_ip || true)"
+  fi
+  if is_ipv4 "$PUBLIC_IP"; then
+    log "Creating the panel DNS zone for $HOST"
+    bash "$ROOT_DIR/deploy/panel-dns-zone.sh" "$HOST" "$PUBLIC_IP" || \
+      warn "the panel DNS zone could not be created; configure ns1.$HOST manually"
+  else
+    warn "no public IPv4 detected; the panel DNS zone for $HOST was not created"
+  fi
 fi
 
 set_toml "$API_CONF" "trust_proxy_headers" "true"
