@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS panel_users (
     role          TEXT NOT NULL,
     active        INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
+    updated_at    TEXT NOT NULL,
+    account       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -97,6 +98,8 @@ pub struct UserView {
     pub active: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// Hosting account linked to this panel user, when it was auto-created.
+    pub account: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +200,7 @@ fn map_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserView> {
         active: row.get::<_, i64>(4)? != 0,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        account: row.get(7)?,
     })
 }
 
@@ -219,6 +223,18 @@ impl PanelDb {
         if !has_impersonation {
             conn.execute("ALTER TABLE sessions ADD COLUMN impersonated_by TEXT", [])?;
         }
+        let has_account: bool = conn
+            .prepare("PRAGMA table_info(panel_users)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .any(|name| name == "account");
+        if !has_account {
+            conn.execute("ALTER TABLE panel_users ADD COLUMN account TEXT", [])?;
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_panel_users_account ON panel_users(account);
+             CREATE INDEX IF NOT EXISTS idx_panel_users_email_lower ON panel_users(lower(email));",
+        )?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -241,12 +257,12 @@ impl PanelDb {
     ) -> Result<Option<UserRecord>, PanelError> {
         let record = conn
             .query_row(
-                "SELECT id, username, email, role, active, created_at, updated_at, password_hash \
+                "SELECT id, username, email, role, active, created_at, updated_at, account, password_hash \
                  FROM panel_users WHERE username = ?1",
                 params![username],
                 |row| {
                     let view = map_user(row)?;
-                    let password_hash: String = row.get(7)?;
+                    let password_hash: String = row.get(8)?;
                     Ok(UserRecord {
                         view,
                         password_hash,
@@ -292,6 +308,32 @@ impl PanelDb {
         password: &str,
         role: Role,
     ) -> Result<UserView, PanelError> {
+        self.create_user_inner(policy, username, email, password, role, None)
+    }
+
+    /// Create a panel user linked to a hosting account. The link lets the
+    /// admin impersonate the account owner from the Accounts view.
+    pub fn create_account_user(
+        &self,
+        policy: &PasswordPolicy,
+        username: &str,
+        email: &str,
+        password: &str,
+        role: Role,
+        account: &str,
+    ) -> Result<UserView, PanelError> {
+        self.create_user_inner(policy, username, email, password, role, Some(account))
+    }
+
+    fn create_user_inner(
+        &self,
+        policy: &PasswordPolicy,
+        username: &str,
+        email: &str,
+        password: &str,
+        role: Role,
+        account: Option<&str>,
+    ) -> Result<UserView, PanelError> {
         validate_panel_username(username).map_err(|e| PanelError::Validation(e.to_string()))?;
         validate_email(email).map_err(|e| PanelError::Validation(e.to_string()))?;
         validate_password_with(policy, password, username, email)?;
@@ -316,9 +358,9 @@ impl PanelDb {
         let now = now_rfc3339();
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO panel_users (id, username, email, password_hash, role, active, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
-            params![id, username, email, hash, role.as_str(), now],
+            "INSERT INTO panel_users (id, username, email, password_hash, role, active, created_at, updated_at, account) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7)",
+            params![id, username, email, hash, role.as_str(), now, account],
         )?;
         Ok(UserView {
             id,
@@ -328,6 +370,7 @@ impl PanelDb {
             active: true,
             created_at: now.clone(),
             updated_at: now,
+            account: account.map(str::to_string),
         })
     }
 
@@ -358,6 +401,36 @@ impl PanelDb {
         Ok(self.get_user(&conn, username)?.map(|record| record.view))
     }
 
+    pub fn find_user_by_account(&self, account: &str) -> Result<Option<UserView>, PanelError> {
+        let conn = self.conn()?;
+        let record = conn
+            .query_row(
+                "SELECT id, username, email, role, active, created_at, updated_at, account \
+                 FROM panel_users WHERE account = ?1",
+                params![account],
+                map_user,
+            )
+            .optional()?;
+        Ok(record)
+    }
+
+    pub fn find_user_by_email(&self, email: &str) -> Result<Option<UserView>, PanelError> {
+        let conn = self.conn()?;
+        let record = conn
+            .query_row(
+                "SELECT id, username, email, role, active, created_at, updated_at, account \
+                 FROM panel_users WHERE lower(email) = lower(?1)",
+                params![email],
+                map_user,
+            )
+            .optional()?;
+        Ok(record)
+    }
+
+    pub fn email_exists(&self, email: &str) -> Result<bool, PanelError> {
+        Ok(self.find_user_by_email(email)?.is_some())
+    }
+
     pub fn count_owners(&self) -> Result<i64, PanelError> {
         let conn = self.conn()?;
         let count: i64 = conn.query_row(
@@ -371,7 +444,7 @@ impl PanelDb {
     pub fn list_users(&self) -> Result<Vec<UserView>, PanelError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, username, email, role, active, created_at, updated_at \
+            "SELECT id, username, email, role, active, created_at, updated_at, account \
              FROM panel_users ORDER BY username",
         )?;
         let rows = stmt.query_map([], map_user)?;
@@ -525,7 +598,7 @@ impl PanelDb {
         let conn = self.conn()?;
         let row = conn
             .query_row(
-                "SELECT s.csrf_token, s.expires_at, s.last_seen, s.impersonated_by, u.id, u.username, u.email, u.role, u.active, u.created_at, u.updated_at \
+                "SELECT s.csrf_token, s.expires_at, s.last_seen, s.impersonated_by, u.id, u.username, u.email, u.role, u.active, u.created_at, u.updated_at, u.account \
                  FROM sessions s JOIN panel_users u ON u.id = s.user_id WHERE s.token_hash = ?1",
                 params![token_hash],
                 |row| {
@@ -543,6 +616,7 @@ impl PanelDb {
                             active: row.get::<_, i64>(8)? != 0,
                             created_at: row.get(9)?,
                             updated_at: row.get(10)?,
+                            account: row.get(11)?,
                         },
                     ))
                 },
@@ -734,6 +808,33 @@ mod tests {
             .authenticate("ghost", "Very-Strong-Pass1")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn links_account_users_and_checks_email() {
+        let (_dir, db) = temp_db();
+        let policy = PasswordPolicy::default();
+        let user = db
+            .create_account_user(
+                &policy,
+                "acme",
+                "acme@example.com",
+                "Very-Strong-Pass1",
+                Role::Viewer,
+                "acme",
+            )
+            .unwrap();
+        assert_eq!(user.account.as_deref(), Some("acme"));
+        assert!(db.email_exists("ACME@example.com").unwrap());
+        assert_eq!(
+            db.find_user_by_account("acme").unwrap().unwrap().username,
+            "acme"
+        );
+        assert!(db.find_user_by_email("acme@example.com").unwrap().is_some());
+        assert!(matches!(
+            db.create_user("bob", "acme@example.com", "Very-Strong-Pass1", Role::Viewer),
+            Err(PanelError::Conflict(_))
+        ));
     }
 
     #[test]

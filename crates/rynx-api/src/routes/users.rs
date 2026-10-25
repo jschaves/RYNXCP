@@ -3,10 +3,26 @@ use axum::{Extension, Json};
 use serde::Deserialize;
 
 use rynx_panel::{Role, UserView};
+use rynx_proto::{Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
 use crate::error::ApiError;
 use crate::state::ApiState;
+
+/// Returns the hosting account that already uses this email, if any.
+async fn account_with_email(
+    state: &ApiState,
+    email: &str,
+    actor: &str,
+) -> Result<Option<String>, ApiError> {
+    match state.daemon.call(Request::AccountList, actor).await? {
+        DaemonResponse::Accounts { accounts } => Ok(accounts
+            .into_iter()
+            .find(|account| account.spec.email.eq_ignore_ascii_case(email))
+            .map(|account| account.spec.username)),
+        _ => Ok(None),
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateUser {
@@ -46,6 +62,14 @@ pub async fn create(
     let role = body.role.unwrap_or(Role::Operator);
     if role == Role::Owner && !auth.is_owner() {
         return Err(ApiError::Forbidden);
+    }
+    if account_with_email(&state, &body.email, &auth.user.username)
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::Conflict(
+            "Ese email ya está en uso por una cuenta de hosting.".into(),
+        ));
     }
     let policy =
         rynx_core::PasswordPolicy::new(state.cfg.password_min_len, state.cfg.password_min_classes);
@@ -110,6 +134,16 @@ pub async fn update(
         state
             .db
             .set_password_with_policy(&policy, &username, &password)?;
+    }
+
+    if let Some(email) = &body.email {
+        if let Some(account) = account_with_email(&state, email, &auth.user.username).await? {
+            if target.account.as_deref() != Some(account.as_str()) {
+                return Err(ApiError::Conflict(
+                    "Ese email ya está en uso por una cuenta de hosting.".into(),
+                ));
+            }
+        }
     }
 
     if let Some(email) = body.email {

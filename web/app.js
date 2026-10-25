@@ -392,8 +392,9 @@ function openModal(options) {
     submit.disabled = true;
     try {
       await options.onSubmit(form);
-      close();
       document.removeEventListener('keydown', onKey);
+      // A submit handler may have replaced the modal (e.g. showOutput).
+      if (root.contains(form)) close();
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -554,8 +555,20 @@ async function renderOverview() {
 
 async function renderAccounts() {
   await loadList('accounts');
+  if (isAdmin()) await loadList('users');
   const rows = S.data.accounts.map((account) => {
     const spec = account.spec;
+    const panelUser = isAdmin()
+      ? (S.data.users || []).find((user) => user.account === spec.username)
+      : null;
+    const actions = [];
+    if (isAdmin()) {
+      actions.push(panelUser
+        ? btn('Entrar', 'impersonate', panelUser.username, 'tiny ghost')
+        : btn('Crear acceso', 'account-panel-access', spec.username, 'tiny ghost'));
+    }
+    actions.push(btn(spec.enabled ? 'Suspender' : 'Activar', 'account-toggle', spec.username));
+    actions.push(btn('Eliminar', 'account-delete', spec.username, 'tiny danger'));
     return [
       td(`<div class="cell-title">${esc(spec.username)}</div><div class="cell-sub">${esc(spec.email)}</div>`),
       td(`<span class="chip">UID ${esc(account.uid)}</span>`),
@@ -563,10 +576,7 @@ async function renderAccounts() {
       td(spec.php_version ? `PHP ${esc(spec.php_version)}` : '<span class="muted">—</span>'),
       td(statusBadge(spec.enabled)),
       td(`<span class="mono small">${esc(account.home)}</span>`),
-      td([
-        btn(spec.enabled ? 'Suspender' : 'Activar', 'account-toggle', spec.username),
-        btn('Eliminar', 'account-delete', spec.username, 'tiny danger'),
-      ].join(''), 'actions'),
+      td(actions.join(''), 'actions'),
     ];
   });
 
@@ -585,19 +595,35 @@ function openAccountModal() {
       ${fInput('disk_limit_mb', 'Cuota de disco (MB)', { type: 'number', value: 1024, min: 64, required: true })}
       ${fSelect('php_version', 'PHP por defecto', [{ value: '', label: '— sin pool —' }, ...RUNTIMES.php.versions.map((v) => ({ value: v, label: `PHP ${v}` }))], { value: '8.3' })}
       <div class="full">${fCheck('enabled', 'Cuenta activa', true)}</div>
+      ${fSelect('panel_access', 'Acceso al panel del cliente', [
+        { value: 'viewer', label: 'Solo lectura (viewer)' },
+        { value: 'operator', label: 'Operador (puede gestionar todo)' },
+        { value: 'none', label: 'Sin acceso al panel' },
+      ], { value: 'viewer', help: 'El operador puede gestionar todas las cuentas; para clientes usa solo lectura.' })}
     </div>`,
     onSubmit: async (form) => {
-      await api('/api/v1/accounts', {
-        method: 'POST',
-        body: {
-          username: val(form, 'username').toLowerCase(),
-          email: val(form, 'email'),
-          disk_limit_mb: num(form, 'disk_limit_mb', 1024),
-          php_version: val(form, 'php_version') || null,
-          enabled: bool(form, 'enabled'),
-        },
-      });
-      toast('Cuenta creada');
+      const access = val(form, 'panel_access');
+      const body = {
+        username: val(form, 'username').toLowerCase(),
+        email: val(form, 'email'),
+        disk_limit_mb: num(form, 'disk_limit_mb', 1024),
+        php_version: val(form, 'php_version') || null,
+        enabled: bool(form, 'enabled'),
+        panel_access: access !== 'none',
+      };
+      if (access !== 'none') body.panel_role = access;
+      const result = await api('/api/v1/accounts', { method: 'POST', body });
+      if (result.panel_password) {
+        showOutput(
+          'Cuenta y acceso creados',
+          `usuario del panel: ${result.panel_user.username}\n` +
+            `contraseña: ${result.panel_password}\n\n` +
+            `Entra en ${location.origin} con esas credenciales.\n` +
+            'Guarda la contraseña ahora; no se volverá a mostrar.',
+        );
+      } else {
+        toast('Cuenta creada');
+      }
       await refresh();
     },
   });
@@ -946,7 +972,7 @@ async function renderUsers() {
   const rows = S.data.users.map((user) => {
     const self = user.username === S.user.username;
     return [
-      td(`<div class="cell-title">${esc(user.username)}</div>${self ? '<div class="cell-sub">tú</div>' : ''}`),
+      td(`<div class="cell-title">${esc(user.username)}</div>${user.account ? `<div class="cell-sub">cuenta: ${esc(user.account)}</div>` : ''}${self ? '<div class="cell-sub">tú</div>' : ''}`),
       td(esc(user.email)),
       td(badge(user.role, user.role === 'owner' ? 'info' : '')),
       td(user.active ? badge('activo', 'ok') : badge('deshabilitado', 'warn')),
@@ -1078,6 +1104,26 @@ async function handleAction(action, id) {
         body: { ...account.spec, enabled: !account.spec.enabled },
       });
       toast(account.spec.enabled ? 'Cuenta suspendida' : 'Cuenta activada');
+      return refresh();
+    }
+    case 'account-panel-access': {
+      const account = S.data.accounts.find((a) => a.spec.username === id);
+      if (!account) throw new Error('Cuenta no encontrada');
+      const result = await api('/api/v1/accounts', {
+        method: 'POST',
+        body: { ...account.spec, panel_access: true, panel_role: 'viewer' },
+      });
+      if (result.panel_password) {
+        showOutput(
+          'Acceso al panel creado',
+          `usuario: ${result.panel_user.username}\n` +
+            `contraseña: ${result.panel_password}\n\n` +
+            `Entra en ${location.origin}.\n` +
+            'El acceso es de solo lectura (viewer).',
+        );
+      } else {
+        toast('El acceso ya existía');
+      }
       return refresh();
     }
     case 'account-delete': {

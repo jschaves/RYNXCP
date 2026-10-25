@@ -65,6 +65,10 @@ fn common_server_body(ctx: &NginxContext<'_>, out: &mut String) {
         out,
         "    add_header Permissions-Policy \"geolocation=(), camera=(), microphone=()\" always;"
     );
+    let _ = writeln!(
+        out,
+        "    add_header Content-Security-Policy \"frame-ancestors 'self'; object-src 'none'; base-uri 'self'\" always;"
+    );
     let _ = writeln!(out, "    location ^~ /.well-known/acme-challenge/ {{");
     let _ = writeln!(out, "        root {};", ctx.acme_root);
     let _ = writeln!(out, "        default_type \"text/plain\";");

@@ -192,6 +192,15 @@ impl Reconciler {
 
     async fn account_create(&self, spec: AccountSpec, actor: &str) -> Result<Response, WireError> {
         validate_account_spec(&spec).map_err(invalid)?;
+        let accounts = self.state.list_accounts().map_err(internal)?;
+        if accounts.iter().any(|account| {
+            account.spec.username != spec.username
+                && account.spec.email.eq_ignore_ascii_case(&spec.email)
+        }) {
+            return Err(WireError::conflict(
+                "email is already used by another account",
+            ));
+        }
         let existing = self.state.get_account(&spec.username).map_err(internal)?;
         let uid = match &existing {
             Some(account) => account.uid,
