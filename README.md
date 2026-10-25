@@ -28,6 +28,12 @@ reconciliation engine and UI are original.
 | Programs | Installed software inventory, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
 
+Creating a hosting account can also create a linked panel user (viewer by
+default, operator optional) with a generated password. The Accounts view exposes
+an "Entrar" action that impersonates that user. Emails are unique across panel
+users and hosting accounts, so an administrator email cannot be reused for an
+account. Linked users follow the account when it is suspended or deleted.
+
 ## Architecture
 
 ```
