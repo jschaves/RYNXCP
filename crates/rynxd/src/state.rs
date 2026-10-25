@@ -1195,6 +1195,7 @@ fn map_website(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebsiteView> {
             docroot: row.get(6)?,
             tls,
             enabled: row.get::<_, i64>(8)? != 0,
+            locale: None,
         },
         document_root: row.get(9)?,
         created_at: row.get(10)?,

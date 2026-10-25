@@ -809,6 +809,7 @@ function openWebsiteModal() {
           docroot: val(form, 'docroot'),
           tls: val(form, 'tls'),
           enabled: bool(form, 'enabled'),
+          locale: window.RYNX_I18N ? window.RYNX_I18N.getLanguage() : 'en',
         },
       });
       toast('Sitio publicado');

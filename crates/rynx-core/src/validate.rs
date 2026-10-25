@@ -273,6 +273,14 @@ pub fn validate_website_spec(spec: &WebsiteSpec) -> CoreResult<()> {
     validate_username(&spec.username)?;
     validate_docroot(&spec.docroot)?;
     validate_runtime(&spec.runtime)?;
+    if let Some(locale) = &spec.locale {
+        if !matches!(
+            locale.as_str(),
+            "es" | "en" | "pt" | "fr" | "ar" | "ru" | "zh" | "ja" | "it" | "de"
+        ) {
+            return Err(invalid("unsupported locale"));
+        }
+    }
 
     if spec.aliases.len() > 20 {
         return Err(invalid("too many domain aliases"));

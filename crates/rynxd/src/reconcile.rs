@@ -489,6 +489,25 @@ impl Reconciler {
             .ensure_docroot(&spec.username, account.uid, &docroot_path)
             .await
             .map_err(exec_error)?;
+
+        if matches!(&spec.runtime, Runtime::Static | Runtime::Php { .. }) {
+            let php = matches!(&spec.runtime, Runtime::Php { .. });
+            if let Err(err) = self
+                .exec
+                .ensure_welcome(
+                    &spec.username,
+                    account.uid,
+                    &docroot_path,
+                    &spec.domain,
+                    spec.locale.as_deref().unwrap_or("en"),
+                    php,
+                )
+                .await
+            {
+                tracing::warn!(domain = %spec.domain, error = %err, "welcome page creation failed");
+            }
+        }
+
         let docroot = docroot_path.display().to_string();
 
         let (app_port, php_socket) = match &spec.runtime {

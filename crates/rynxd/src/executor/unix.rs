@@ -220,6 +220,33 @@ impl Executor for RealExecutor {
         self.make_dir(path, 0o755, uid, gid)
     }
 
+    async fn ensure_welcome(
+        &self,
+        username: &str,
+        uid: u32,
+        docroot: &Path,
+        domain: &str,
+        locale: &str,
+        php: bool,
+    ) -> ExecResult<()> {
+        let html = docroot.join("index.html");
+        let php_file = docroot.join("index.php");
+        if html.exists() || php_file.exists() {
+            return Ok(());
+        }
+        let path = if php { php_file } else { html };
+        let content = rynx_core::templates::welcome_page(locale, domain);
+        std::fs::write(&path, content)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
+            let gid = self.gid_for(username)?;
+            let _ = chown(&path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)));
+        }
+        Ok(())
+    }
+
     async fn apply_site(&self, domain: &str, content: &str, enable: bool) -> ExecResult<()> {
         let filename = format!("{domain}.conf");
         let path = self.cfg.nginx_sites_dir.join(&filename);

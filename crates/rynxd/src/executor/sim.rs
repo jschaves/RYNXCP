@@ -121,6 +121,27 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn ensure_welcome(
+        &self,
+        username: &str,
+        uid: u32,
+        docroot: &Path,
+        domain: &str,
+        locale: &str,
+        php: bool,
+    ) -> ExecResult<()> {
+        let _ = username;
+        let _ = uid;
+        let html = docroot.join("index.html");
+        let php_file = docroot.join("index.php");
+        if html.exists() || php_file.exists() {
+            return Ok(());
+        }
+        let path = if php { php_file } else { html };
+        std::fs::write(path, rynx_core::templates::welcome_page(locale, domain))?;
+        Ok(())
+    }
+
     async fn apply_site(&self, domain: &str, content: &str, enable: bool) -> ExecResult<()> {
         std::fs::create_dir_all(&self.cfg.nginx_sites_dir)?;
         let path = self.cfg.nginx_sites_dir.join(format!("{domain}.conf"));

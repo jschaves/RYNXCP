@@ -430,6 +430,9 @@ pub struct WebsiteSpec {
     pub docroot: String,
     pub tls: TlsMode,
     pub enabled: bool,
+    /// UI language of the creator, used for the initial welcome page.
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -769,6 +772,7 @@ mod tests {
             docroot: "public_html".into(),
             tls: TlsMode::LetsEncrypt,
             enabled: true,
+            locale: Some("es".into()),
         });
         let bytes = crate::encode(&req).unwrap();
         let back: Request = crate::decode(&bytes).unwrap();

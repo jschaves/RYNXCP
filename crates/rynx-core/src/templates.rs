@@ -338,6 +338,108 @@ fn shell_quote_value(value: &str) -> String {
     }
 }
 
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// Initial welcome page for a newly created Static or PHP site.
+pub fn welcome_page(locale: &str, domain: &str) -> String {
+    let code = match locale {
+        "es" | "en" | "pt" | "fr" | "ar" | "ru" | "zh" | "ja" | "it" | "de" => locale,
+        _ => "en",
+    };
+    let (title, message, hint) = match code {
+        "es" => (
+            "Sitio publicado",
+            "¡Bienvenido! Tu sitio ya está en línea.",
+            "Sube tus archivos a la carpeta del sitio para reemplazar esta página.",
+        ),
+        "pt" => (
+            "Site publicado",
+            "Bem-vindo! Seu site está no ar.",
+            "Envie seus arquivos para a pasta do site para substituir esta página.",
+        ),
+        "fr" => (
+            "Site publié",
+            "Bienvenue ! Votre site est en ligne.",
+            "Téléversez vos fichiers dans le dossier du site pour remplacer cette page.",
+        ),
+        "ar" => (
+            "تم نشر الموقع",
+            "مرحبًا! موقعك الآن على الإنترنت.",
+            "ارفع ملفاتك إلى مجلد الموقع لاستبدال هذه الصفحة.",
+        ),
+        "ru" => (
+            "Сайт опубликован",
+            "Добро пожаловать! Ваш сайт уже в сети.",
+            "Загрузите файлы в папку сайта, чтобы заменить эту страницу.",
+        ),
+        "zh" => (
+            "网站已发布",
+            "欢迎！你的网站已经上线。",
+            "将文件上传到网站目录即可替换此页面。",
+        ),
+        "ja" => (
+            "サイトを公開しました",
+            "ようこそ！サイトは公開中です。",
+            "サイトのフォルダにファイルをアップロードすると、このページを置き換えられます。",
+        ),
+        "it" => (
+            "Sito pubblicato",
+            "Benvenuto! Il tuo sito è online.",
+            "Carica i file nella cartella del sito per sostituire questa pagina.",
+        ),
+        "de" => (
+            "Website veröffentlicht",
+            "Willkommen! Deine Website ist online.",
+            "Lade deine Dateien in den Website-Ordner hoch, um diese Seite zu ersetzen.",
+        ),
+        _ => (
+            "Site published",
+            "Welcome! Your site is online.",
+            "Upload your files to the site folder to replace this page.",
+        ),
+    };
+    let mut out = String::with_capacity(2048);
+    out.push_str("<!doctype html>\n");
+    let _ = writeln!(
+        out,
+        "<html lang=\"{code}\"{}>",
+        if code == "ar" { " dir=\"rtl\"" } else { "" }
+    );
+    out.push_str("<head>\n<meta charset=\"utf-8\">\n");
+    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+    let _ = writeln!(
+        out,
+        "<title>{} · {}</title>",
+        escape_html(title),
+        escape_html(domain)
+    );
+    out.push_str("<style>\n");
+    out.push_str(":root { color-scheme: dark; --accent: #57e6a1; }\n");
+    out.push_str("* { box-sizing: border-box; }\n");
+    out.push_str("body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #070a0f; color: #e6edf4; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }\n");
+    out.push_str("main { width: min(640px, calc(100% - 32px)); padding: 32px; border: 1px solid #1e2b3a; border-radius: 16px; background: #0e141c; }\n");
+    out.push_str(".kicker { color: var(--accent); text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }\n");
+    out.push_str("h1 { margin: .35em 0 .5em; font-size: clamp(28px, 6vw, 44px); }\n");
+    out.push_str("p { line-height: 1.6; }\n");
+    out.push_str("code { color: var(--accent); word-break: break-all; }\n");
+    out.push_str(".hint { color: #8ea3b8; font-size: 14px; }\n");
+    out.push_str("</style>\n</head>\n<body>\n<main>\n");
+    out.push_str("<p class=\"kicker\">RYNXCP</p>\n");
+    let _ = writeln!(out, "<h1>{}</h1>", escape_html(title));
+    let _ = writeln!(out, "<p>{}</p>", escape_html(message));
+    let _ = writeln!(out, "<p><code>{}</code></p>", escape_html(domain));
+    let _ = writeln!(out, "<p class=\"hint\">{}</p>", escape_html(hint));
+    out.push_str("</main>\n</body>\n</html>\n");
+    out
+}
+
 pub fn nginx_filename(domain: &str) -> String {
     format!("{domain}.conf")
 }
@@ -518,6 +620,16 @@ mod tests {
         let conf = nginx_site(&c);
         assert!(conf.contains("include snippets/fastcgi-php.conf;"));
         assert!(!conf.contains("try_files $uri =404;"));
+    }
+
+    #[test]
+    fn welcome_page_is_localized() {
+        let es = welcome_page("es", "example.com");
+        assert!(es.contains("Bienvenido"));
+        assert!(es.contains("example.com"));
+        assert!(welcome_page("en", "example.com").contains("Welcome"));
+        assert!(welcome_page("ar", "example.com").contains("dir=\"rtl\""));
+        assert!(welcome_page("xx", "example.com").contains("Welcome"));
     }
 
     #[test]

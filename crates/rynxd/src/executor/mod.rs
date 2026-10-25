@@ -72,6 +72,17 @@ pub trait Executor: Send + Sync {
     async fn remove_account(&self, username: &str, purge: bool) -> ExecResult<()>;
     async fn ensure_docroot(&self, username: &str, uid: u32, path: &Path) -> ExecResult<()>;
 
+    #[allow(clippy::too_many_arguments)]
+    async fn ensure_welcome(
+        &self,
+        username: &str,
+        uid: u32,
+        docroot: &Path,
+        domain: &str,
+        locale: &str,
+        php: bool,
+    ) -> ExecResult<()>;
+
     async fn apply_site(&self, domain: &str, content: &str, enable: bool) -> ExecResult<()>;
     async fn remove_site(&self, domain: &str) -> ExecResult<()>;
 

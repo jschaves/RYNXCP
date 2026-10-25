@@ -48,6 +48,11 @@ domains automatically (for example `laniñadelasmargaritas.es` becomes
 `xn--laniadelasmargaritas-66b.es`). The installer also converts Unicode panel
 and MagicRita domain arguments; direct API/CLI calls must use the Punycode form.
 
+When a Static or PHP site is first applied, the daemon creates its document root
+and, if there is no `index.html` or `index.php`, a welcome page in the UI
+language of the panel user who created the site. Existing content is never
+overwritten.
+
 ## Architecture
 
 ```
