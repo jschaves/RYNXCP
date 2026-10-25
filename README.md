@@ -1,5 +1,9 @@
 # RYNXCP
 
+<p align="center">
+  <img src="logo-readme.jpg" alt="RYNXCP" width="360" />
+</p>
+
 A **from-scratch hosting control panel written in Rust** for Debian/Ubuntu VPS and
 dedicated servers. It follows a declarative model: you describe the desired state
 (accounts, sites, runtimes, DNS, databases, FTP, backups, firewall) and the daemon
