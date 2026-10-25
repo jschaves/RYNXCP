@@ -372,7 +372,11 @@ log "Enabling services"
 systemctl enable --now nginx
 systemctl enable --now php8.5-fpm
 systemctl enable --now mariadb
-systemctl enable --now bind9
+# On current Debian/Ubuntu, named.service is the real unit and bind9.service
+# is an alias, so "systemctl enable bind9" fails with "linked unit file".
+systemctl enable --now named 2>/dev/null || \
+  systemctl enable --now bind9 2>/dev/null || \
+  warn "BIND9 could not be enabled automatically"
 systemctl enable --now pure-ftpd
 systemctl enable --now fail2ban
 systemctl enable --now nftables >/dev/null 2>&1 || true
