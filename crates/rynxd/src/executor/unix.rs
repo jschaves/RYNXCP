@@ -2,12 +2,12 @@
 //! a scrubbed environment and no shell.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use async_trait::async_trait;
 use nix::unistd::{chown, Gid, Uid, User};
 use time::{format_description::well_known::Rfc3339, macros::format_description, OffsetDateTime};
 use tokio::io::AsyncWriteExt;
-use tokio::process::Stdio;
 
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
