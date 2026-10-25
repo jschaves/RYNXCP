@@ -184,6 +184,22 @@ pub async fn delete(
             ));
         }
     }
+    if let Some(account) = target.account.clone() {
+        match state
+            .daemon
+            .call(
+                Request::AccountDelete {
+                    username: account,
+                    purge: true,
+                },
+                &auth.user.username,
+            )
+            .await
+        {
+            Ok(_) | Err(ApiError::NotFound(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
     state.db.delete_user(&username)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }

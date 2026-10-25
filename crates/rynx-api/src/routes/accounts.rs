@@ -11,9 +11,13 @@ use crate::error::ApiError;
 use crate::scope;
 use crate::state::ApiState;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PurgeQuery {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub purge: bool,
 }
 

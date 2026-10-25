@@ -1209,8 +1209,8 @@ async function handleAction(action, id) {
       return refresh();
     }
     case 'account-delete': {
-      if (!confirm(`¿Eliminar la cuenta ${id}? El home se conserva en disco.`)) return;
-      await api(`/api/v1/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!confirm(`¿Eliminar la cuenta ${id}? Se borrarán el home, sitios, apps, bases de datos, DNS, FTP, certificados y backups.`)) return;
+      await api(`/api/v1/accounts/${encodeURIComponent(id)}?purge=true`, { method: 'DELETE' });
       toast('Cuenta eliminada');
       return refresh();
     }
@@ -1270,7 +1270,7 @@ async function handleAction(action, id) {
       return;
     }
     case 'user-delete': {
-      if (!confirm(`¿Eliminar al usuario ${id}?`)) return;
+      if (!confirm(`¿Eliminar al usuario ${id}? Si tiene una cuenta de hosting, también se borrarán su cuenta y todos sus datos.`)) return;
       await api(`/api/v1/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Usuario eliminado');
       return refresh();

@@ -129,6 +129,7 @@ pub trait Executor: Send + Sync {
     async fn create_backup(&self, paths: &[String], dest: &Path) -> ExecResult<u64>;
     async fn restore_backup(&self, archive: &Path, username: &str, uid: u32) -> ExecResult<()>;
     async fn delete_backup_file(&self, path: &Path) -> ExecResult<()>;
+    async fn remove_backup_dir(&self, username: &str) -> ExecResult<()>;
 
     async fn apply_zone(&self, domain: &str, content: &str) -> ExecResult<()>;
     async fn remove_zone(&self, domain: &str) -> ExecResult<()>;

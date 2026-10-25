@@ -383,6 +383,14 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn remove_backup_dir(&self, username: &str) -> ExecResult<()> {
+        let dir = self.cfg.backup_dir.join(username);
+        if dir.exists() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        Ok(())
+    }
+
     async fn apply_zone(&self, domain: &str, content: &str) -> ExecResult<()> {
         std::fs::create_dir_all(&self.cfg.bind_zones_dir)?;
         write_managed(

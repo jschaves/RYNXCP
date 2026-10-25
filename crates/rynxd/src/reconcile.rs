@@ -350,6 +350,7 @@ impl Reconciler {
                 .remove_site(&website.spec.domain)
                 .await
                 .map_err(exec_error)?;
+            let _ = self.exec.remove_cert(&website.spec.domain).await;
             if self.cfg.dns_enabled {
                 self.dns_remove_zone(&website.spec.domain).await;
             }
@@ -377,6 +378,12 @@ impl Reconciler {
                 .await;
             let _ = self.state.delete_database(&database.id);
         }
+
+        for backup in self.state.backups_for(username).map_err(internal)? {
+            let _ = self.exec.delete_backup_file(Path::new(&backup.path)).await;
+            let _ = self.state.delete_backup(&backup.id);
+        }
+        let _ = self.exec.remove_backup_dir(username).await;
 
         for app in self
             .state
@@ -585,6 +592,7 @@ impl Reconciler {
             let _ = self.exec.remove_ftp_user(&ftp.login).await;
             let _ = self.state.delete_ftp(&ftp.id);
         }
+        let _ = self.exec.remove_cert(domain).await;
         self.exec.remove_site(domain).await.map_err(exec_error)?;
         if self.cfg.dns_enabled {
             self.dns_remove_zone(domain).await;
