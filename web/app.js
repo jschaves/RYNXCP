@@ -159,6 +159,27 @@ function T(text) {
   return window.RYNX_I18N ? window.RYNX_I18N.tr(text) : text;
 }
 
+function toAsciiDomain(value) {
+  const raw = String(value || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.$/, '');
+  if (!raw) return '';
+  try {
+    return new URL(`http://${raw}`).hostname.replace(/\.$/, '');
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function toAsciiEmail(value) {
+  const raw = String(value || '').trim();
+  const at = raw.lastIndexOf('@');
+  if (at <= 0) return raw;
+  return `${raw.slice(0, at + 1)}${toAsciiDomain(raw.slice(at + 1))}`;
+}
+
 function translateUi(root) {
   if (window.RYNX_I18N) window.RYNX_I18N.translateDom(root || document.body);
 }
@@ -659,7 +680,7 @@ function openAccountModal() {
       const access = val(form, 'panel_access');
       const body = {
         username: val(form, 'username').toLowerCase(),
-        email: val(form, 'email'),
+        email: toAsciiEmail(val(form, 'email')),
         disk_limit_mb: num(form, 'disk_limit_mb', 1024),
         php_version: val(form, 'php_version') || null,
         enabled: bool(form, 'enabled'),
@@ -780,9 +801,9 @@ function openWebsiteModal() {
       await api('/api/v1/websites', {
         method: 'POST',
         body: {
-          domain: val(form, 'domain').toLowerCase(),
+          domain: toAsciiDomain(val(form, 'domain')),
           username: val(form, 'username'),
-          aliases: val(form, 'aliases').split(',').map((a) => a.trim().toLowerCase()).filter(Boolean),
+          aliases: val(form, 'aliases').split(',').map((a) => toAsciiDomain(a)).filter(Boolean),
           runtime,
           app,
           docroot: val(form, 'docroot'),
@@ -1016,7 +1037,7 @@ function openCertModal() {
         method: 'POST',
         body: {
           domain: val(form, 'domain'),
-          email: val(form, 'email'),
+          email: toAsciiEmail(val(form, 'email')),
           staging: bool(form, 'staging'),
         },
       });
@@ -1067,7 +1088,7 @@ function openUserModal() {
         method: 'POST',
         body: {
           username: val(form, 'username').toLowerCase(),
-          email: val(form, 'email'),
+          email: toAsciiEmail(val(form, 'email')),
           password: val(form, 'password'),
           role: val(form, 'role'),
         },

@@ -43,6 +43,11 @@ browser language, falls back to English (US), remembers the choice in
 localStorage, and exposes a language selector on the login screen and in the
 top bar.
 
+Domains are stored as Punycode (IDN A-labels). The web UI converts Unicode
+domains automatically (for example `laniñadelasmargaritas.es` becomes
+`xn--laniadelasmargaritas-66b.es`). The installer also converts Unicode panel
+and MagicRita domain arguments; direct API/CLI calls must use the Punycode form.
+
 ## Architecture
 
 ```
