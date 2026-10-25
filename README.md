@@ -38,9 +38,10 @@ account's sites, apps, PHP pools, databases, FTP, DNS, certificates and backups,
 and global views (users, firewall, console, system, monitor, audit) are denied.
 
 The web UI is available in Spanish, English (US), Portuguese, French, Arabic
-(with RTL), Russian, Chinese and Japanese. It defaults to the browser language,
-falls back to English (US), remembers the choice in localStorage, and exposes a
-language selector on the login screen and in the top bar.
+(with RTL), Russian, Chinese, Japanese, Italian and German. It defaults to the
+browser language, falls back to English (US), remembers the choice in
+localStorage, and exposes a language selector on the login screen and in the
+top bar.
 
 ## Architecture
 
