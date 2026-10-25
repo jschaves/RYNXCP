@@ -321,10 +321,11 @@ fi
 apt-cache show php8.5-fpm >/dev/null 2>&1 || die "PHP 8.5 is not available for $DISTRO_CODENAME; check the PHP repository"
 
 log "Installing web, database, DNS, FTP, mail tooling, firewall and runtimes"
+# PHP 8.5 compiles OPcache into the runtime: there is no php8.5-opcache package.
 apt-get install -y --no-install-recommends \
   nginx certbot python3-certbot-nginx \
   php8.5-fpm php8.5-cli php8.5-common php8.5-mysql php8.5-curl php8.5-mbstring \
-  php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath php8.5-opcache \
+  php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath \
   mariadb-server bind9 bind9-utils bind9-dnsutils \
   pure-ftpd opendkim opendkim-tools \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
