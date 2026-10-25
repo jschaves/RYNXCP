@@ -291,20 +291,33 @@ apt-get install -y --no-install-recommends \
   nftables fail2ban logrotate unattended-upgrades
 
 # ---------------------------------------------------------------------------
-# PHP 8.5 from the security-maintained repositories
+# PHP 8.5 package source
+#
+# Ubuntu 26.04 LTS (resolute) and newer already ship PHP 8.5 in the
+# distribution repositories. The Ondrej PPA does not publish a resolute
+# suite (its maintainer moved 26.04+ to packages.sury.org), so adding it
+# there makes "apt-get update" fail and aborts this script. Only add a
+# third-party repository when the distribution does not provide PHP 8.5.
 # ---------------------------------------------------------------------------
-log "Adding the PHP 8.5 repository (Ondrej/Sury, security-maintained)"
-if [[ "$DISTRO_ID" == "ubuntu" ]]; then
-  apt-get install -y software-properties-common
-  add-apt-repository -y ppa:ondrej/php
+log "Configuring the PHP 8.5 package source"
+if apt-cache show php8.5-fpm >/dev/null 2>&1; then
+  log "PHP 8.5 is provided by ${PRETTY_NAME:-$DISTRO_ID}; no third-party repository needed"
 else
-  install -d -m 0755 /usr/share/keyrings
-  curl -fsSL --max-time 60 https://packages.sury.org/php/apt.gpg \
-    -o /usr/share/keyrings/sury-php.gpg
-  printf 'deb [signed-by=/usr/share/keyrings/sury-php.gpg] https://packages.sury.org/php/ %s main\n' \
-    "$DISTRO_CODENAME" > /etc/apt/sources.list.d/sury-php.list
+  if [[ "$DISTRO_ID" == "ubuntu" ]]; then
+    if [[ "$DISTRO_CODENAME" == "resolute" ]]; then
+      die "PHP 8.5 is not available from the Ubuntu 26.04 repositories; enable the 'universe' component and retry"
+    fi
+    apt-get install -y software-properties-common
+    add-apt-repository -y ppa:ondrej/php
+  else
+    install -d -m 0755 /usr/share/keyrings
+    curl -fsSL --max-time 60 https://packages.sury.org/php/apt.gpg \
+      -o /usr/share/keyrings/sury-php.gpg
+    printf 'deb [signed-by=/usr/share/keyrings/sury-php.gpg] https://packages.sury.org/php/ %s main\n' \
+      "$DISTRO_CODENAME" > /etc/apt/sources.list.d/sury-php.list
+  fi
+  apt-get update
 fi
-apt-get update
 apt-cache show php8.5-fpm >/dev/null 2>&1 || die "PHP 8.5 is not available for $DISTRO_CODENAME; check the PHP repository"
 
 log "Installing web, database, DNS, FTP, mail tooling, firewall and runtimes"
