@@ -83,6 +83,11 @@ if [[ -f /etc/bind/named.conf.local ]]; then
   if ! grep -q 'named.conf.rynxcp' /etc/bind/named.conf.local; then
     echo 'include "/etc/bind/named.conf.rynxcp";' >> /etc/bind/named.conf.local
   fi
+  if [[ -f "${ROOT_DIR}/deploy/bind-public.sh" ]]; then
+    echo "==> enabling public authoritative DNS in BIND"
+    bash "${ROOT_DIR}/deploy/bind-public.sh" || \
+      echo "warning: BIND public DNS configuration failed; check /etc/bind/named.conf.options" >&2
+  fi
 fi
 
 echo "==> installing fail2ban integration"

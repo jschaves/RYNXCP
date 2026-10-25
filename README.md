@@ -243,6 +243,9 @@ What it installs and configures:
 - DNS, database, FTP and firewall enabled; the SSH port is detected from
   `sshd_config` and always kept open. Mail ports 25/110/143/465/587/993/995 and
   4190 are allowed by the nftables rules.
+- Public authoritative BIND via `deploy/bind-public.sh`: external queries are
+  allowed (`allow-query any`) while recursion stays limited to localhost. The
+  nameserver A records/glue still have to be created at the registrar.
 - A panel virtual host and, for a domain with working DNS, a Let's Encrypt
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
