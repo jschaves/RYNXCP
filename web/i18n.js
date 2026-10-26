@@ -320,6 +320,33 @@
     "Catch-all actualizado": "Catch-all updated",
     "Todos los sitios ya tienen correo activado": "Every site already has mail enabled",
     "Sitio no encontrado": "Site not found",
+    "¿Olvidaste tu contraseña?": "Forgot your password?",
+    "Escribe el email de tu cuenta. Si existe, recibirás un enlace para restablecer la contraseña.":
+      "Enter your account email. If it exists, you will receive a password reset link.",
+    "Enviar enlace": "Send link",
+    "Volver": "Back",
+    "Repite la contraseña": "Repeat password",
+    "Cambiar contraseña": "Change password",
+    "Elige una contraseña nueva. El enlace caduca en 60 minutos y solo puede usarse una vez.":
+      "Choose a new password. The link expires in 60 minutes and can only be used once.",
+    "Las contraseñas no coinciden": "Passwords do not match",
+    "Contraseña actualizada; ya puedes iniciar sesión": "Password updated; you can now sign in",
+    "Si el email existe, recibirás un enlace para restablecer la contraseña.":
+      "If the email exists, you will receive a password reset link.",
+    "Correo del panel": "Panel email",
+    "Servidor SMTP": "SMTP server",
+    "Remitente": "Sender",
+    "Avisos": "Alerts",
+    "URL pública": "Public URL",
+    "Enviar prueba": "Send test",
+    "Probar correo del panel": "Test panel email",
+    "Destinatario": "Recipient",
+    "Vacío usa smtp_alert_to o tu email de usuario.":
+      "Empty uses smtp_alert_to or your user email.",
+    "Se usa Postfix local para credenciales, restablecimiento de contraseña y avisos de certificados. SPF, DKIM y DMARC se publican en la zona del dominio del panel.":
+      "Local Postfix is used for credentials, password resets and certificate alerts. SPF, DKIM and DMARC are published in the panel domain zone.",
+    "Configura smtp_enabled y smtp_from en /etc/rynxcp/api.toml.":
+      "Configure smtp_enabled and smtp_from in /etc/rynxcp/api.toml.",
   };
 
   const PT = {

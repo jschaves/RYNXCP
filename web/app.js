@@ -10,6 +10,7 @@ const S = {
   system: null,
   mode: null,
   impersonatedBy: null,
+  resetToken: null,
   data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], mailDomains: [], mailAccounts: [] },
 };
 
@@ -230,7 +231,36 @@ async function api(path, options = {}) {
   return data;
 }
 
+async function publicPost(path, body) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data && data.error ? data.error.message : `Error HTTP ${response.status}`);
+  }
+  return data;
+}
+
 /* ---------------- session ---------------- */
+
+function showLoginForm(mode = 'login') {
+  const login = $('#login-form');
+  const forgot = $('#forgot-form');
+  const reset = $('#reset-form');
+  if (!login || !forgot || !reset) return;
+  login.classList.toggle('hidden', mode !== 'login');
+  forgot.classList.toggle('hidden', mode !== 'forgot');
+  reset.classList.toggle('hidden', mode !== 'reset');
+  translateUi(document.body);
+  const form = mode === 'reset' ? reset : mode === 'forgot' ? forgot : login;
+  const field = mode === 'login' ? 'username' : mode === 'forgot' ? 'email' : 'password';
+  const input = form.elements[field];
+  if (input) setTimeout(() => input.focus(), 30);
+}
 
 function showLogin() {
   S.user = null;
@@ -239,9 +269,7 @@ function showLogin() {
   S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
-  translateUi(document.body);
-  const input = $('#login-form').elements.username;
-  if (input) setTimeout(() => input.focus(), 30);
+  showLoginForm(S.resetToken ? 'reset' : 'login');
 }
 
 function enterApp() {
@@ -1604,6 +1632,14 @@ async function renderSystem() {
   const info = await loadSystem();
   const memUsed = info.mem_total_kb - info.mem_available_kb;
   const diskUsed = info.disk_total_kb - info.disk_available_kb;
+  let mail = null;
+  if (isAdmin()) {
+    try {
+      mail = await api('/api/v1/system/email');
+    } catch {
+      mail = null;
+    }
+  }
 
   let html = `<div class="grid cols-2">
     <div class="card">
@@ -1643,7 +1679,48 @@ async function renderSystem() {
     </p>
   </div>`;
 
+  if (mail) {
+    html += `<div class="card">
+      <div class="section-head"><h2>Correo del panel</h2>
+        ${mail.enabled ? badge('activo', 'ok') : badge('desactivado', 'warn')}
+      </div>
+      <dl class="kv" style="margin-top:14px">
+        <dt>Servidor SMTP</dt><dd class="mono">${esc(mail.host)}:${esc(mail.port)}</dd>
+        <dt>TLS</dt><dd>${esc(mail.tls)}</dd>
+        <dt>Remitente</dt><dd>${esc(mail.from || '-')}</dd>
+        <dt>Avisos</dt><dd>${esc(mail.alert_to || '-')}</dd>
+        <dt>URL pública</dt><dd>${esc(mail.public_url || '-')}</dd>
+      </dl>
+      <p class="muted small" style="margin:14px 0 0">
+        Se usa Postfix local para credenciales, restablecimiento de contraseña y avisos de certificados.
+        SPF, DKIM y DMARC se publican en la zona del dominio del panel.
+      </p>
+      ${mail.enabled
+        ? '<div class="row-inline" style="margin-top:14px"><button class="btn primary" data-action="email-test">Enviar prueba</button></div>'
+        : '<p class="muted small" style="margin:14px 0 0">Configura smtp_enabled y smtp_from en /etc/rynxcp/api.toml.</p>'}
+    </div>`;
+  }
+
   $('#view').innerHTML = html;
+}
+
+function openEmailTestModal() {
+  openModal({
+    title: 'Probar correo del panel',
+    submitLabel: 'Enviar prueba',
+    html: `<div class="stack">${fInput('to', 'Destinatario', {
+      type: 'email',
+      placeholder: 'admin@example.com',
+      help: 'Vacío usa smtp_alert_to o tu email de usuario.',
+    })}</div>`,
+    onSubmit: async (form) => {
+      const result = await api('/api/v1/system/email/test', {
+        method: 'POST',
+        body: { to: val(form, 'to') || null },
+      });
+      toast(`Correo de prueba enviado a ${result.to}`);
+    },
+  });
 }
 
 /* ---------------- actions ---------------- */
@@ -1786,6 +1863,8 @@ async function handleAction(action, id) {
       toast(result.message || 'Estado re-aplicado');
       return refresh();
     }
+    case 'email-test':
+      return openEmailTestModal();
     case 'impersonate': {
       const data = await api(`/api/v1/users/${encodeURIComponent(id)}/impersonate`, { method: 'POST' });
       S.user = data.user;
@@ -2405,30 +2484,81 @@ window.RYNX_ON_LANG_CHANGE = () => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(location.search);
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  S.resetToken = params.get('reset_token') || hash.get('reset_token') || null;
+
   $('#login-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
     try {
-      const response = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          username: val(form, 'username'),
-          password: form.elements.password.value,
-        }),
+      const data = await publicPost('/api/v1/auth/login', {
+        username: val(form, 'username'),
+        password: form.elements.password.value,
       });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(data && data.error ? data.error.message : `Error HTTP ${response.status}`);
-      }
       S.user = data.user;
       S.csrf = data.csrf_token;
       S.impersonatedBy = data.impersonated_by || null;
       form.reset();
       enterApp();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('#forgot-open').addEventListener('click', () => showLoginForm('forgot'));
+
+  $('#forgot-cancel').addEventListener('click', () => showLoginForm('login'));
+
+  $('#forgot-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await publicPost('/api/v1/auth/forgot-password', {
+        email: toAsciiEmail(val(form, 'email')),
+      });
+      form.reset();
+      showLoginForm('login');
+      toast('Si el email existe, recibirás un enlace para restablecer la contraseña.');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('#reset-cancel').addEventListener('click', () => {
+    S.resetToken = null;
+    if (location.search || location.hash) history.replaceState(null, '', location.pathname);
+    showLoginForm('login');
+  });
+
+  $('#reset-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const password = form.elements.password.value;
+    if (password !== form.elements.confirm.value) {
+      toast('Las contraseñas no coinciden', 'error');
+      return;
+    }
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await publicPost('/api/v1/auth/reset-password', {
+        token: S.resetToken || '',
+        password,
+      });
+      S.resetToken = null;
+      if (location.search || location.hash) history.replaceState(null, '', location.pathname);
+      form.reset();
+      showLoginForm('login');
+      toast('Contraseña actualizada; ya puedes iniciar sesión');
     } catch (err) {
       toast(err.message, 'error');
     } finally {

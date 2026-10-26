@@ -67,6 +67,10 @@ async fn main() -> Result<()> {
         )
     })?);
 
+    let mailer = rynx_api::email::Mailer::from_config(&cfg)
+        .context("invalid panel SMTP configuration")?
+        .map(Arc::new);
+
     let state = ApiState {
         cfg: Arc::new(cfg.clone()),
         db,
@@ -77,7 +81,14 @@ async fn main() -> Result<()> {
             cfg.login_window_secs,
             cfg.login_lockout_secs,
         )),
+        reset_limiter: Arc::new(LoginLimiter::new(
+            5,
+            1000,
+            cfg.login_window_secs.max(900),
+            cfg.login_lockout_secs.max(900),
+        )),
         cert_jobs: rynx_api::cert_jobs::new_store(),
+        mailer,
     };
 
     if args.check {

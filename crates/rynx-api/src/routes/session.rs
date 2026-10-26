@@ -23,6 +23,17 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub password: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SessionResponse {
     pub user: UserView,
@@ -129,6 +140,104 @@ pub async fn login(
     );
 
     finish_login(&state, user, &ip, &headers, None)
+}
+
+/// Public password-reset request. The response is always generic to avoid
+/// disclosing whether an email belongs to an active panel user.
+pub async fn forgot_password(
+    State(state): State<ApiState>,
+    connect: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ForgotPasswordRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    check_origin(&headers, &state.cfg)?;
+    let ip = client_ip(&headers, Some(&connect), state.cfg.trust_proxy_headers);
+    let key = format!("forgot|{ip}");
+    if state.reset_limiter.retry_after(&[&key]).is_some() {
+        return Err(ApiError::RateLimited);
+    }
+    state.reset_limiter.record_failure(&[&key]);
+
+    let email = body.email.trim().to_ascii_lowercase();
+    if email.len() <= 254 && rynx_core::validate_email(&email).is_ok() {
+        if let Some((token, user)) = state.db.create_password_reset(&email, 3600)? {
+            if state.mailer.is_some() {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = crate::email::send_password_reset(
+                        &state,
+                        &user.email,
+                        &user.username,
+                        &token,
+                    )
+                    .await
+                    {
+                        tracing::warn!(
+                            user = %user.username,
+                            error = %err,
+                            "password reset email could not be sent"
+                        );
+                    }
+                });
+            } else {
+                tracing::warn!(
+                    user = %user.username,
+                    "password reset requested but SMTP is disabled"
+                );
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn reset_password(
+    State(state): State<ApiState>,
+    connect: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<ResetPasswordRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    check_origin(&headers, &state.cfg)?;
+    let ip = client_ip(&headers, Some(&connect), state.cfg.trust_proxy_headers);
+    let key = format!("reset|{ip}");
+    if state.reset_limiter.retry_after(&[&key]).is_some() {
+        return Err(ApiError::RateLimited);
+    }
+    state.reset_limiter.record_failure(&[&key]);
+
+    if body.token.len() != 64 || body.password.is_empty() || body.password.len() > 256 {
+        return Err(ApiError::BadRequest(
+            "invalid or expired reset token".into(),
+        ));
+    }
+    let policy =
+        rynx_core::PasswordPolicy::new(state.cfg.password_min_len, state.cfg.password_min_classes);
+    let Some(username) = state
+        .db
+        .consume_password_reset(&policy, &body.token, &body.password)?
+    else {
+        return Err(ApiError::BadRequest(
+            "invalid or expired reset token".into(),
+        ));
+    };
+
+    state.reset_limiter.reset(&key);
+    let _ = state.db.record_auth_event(
+        &username,
+        &ip,
+        &user_agent(&headers),
+        "success",
+        "password_reset",
+    );
+    authlog::log(
+        &state.cfg.auth_log,
+        "password_reset",
+        &username,
+        &ip,
+        &user_agent(&headers),
+        None,
+    );
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 /// Admin-only impersonation. Creates a dedicated session for the target user

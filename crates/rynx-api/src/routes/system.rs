@@ -1,5 +1,6 @@
 use axum::extract::State;
 use axum::{Extension, Json};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use rynx_proto::{Request, Response as DaemonResponse};
@@ -48,4 +49,72 @@ pub async fn reconcile(
         .call(Request::ReconcileAll, &auth.user.username)
         .await?;
     Ok(Json(response))
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmailStatus {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub tls: String,
+    pub from: Option<String>,
+    pub alert_to: Option<String>,
+    pub public_url: Option<String>,
+}
+
+pub async fn email_status(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Result<Json<EmailStatus>, ApiError> {
+    auth.require_admin()?;
+    auth.require_global()?;
+    Ok(Json(EmailStatus {
+        enabled: state.mailer.is_some(),
+        host: state.cfg.smtp_host.clone(),
+        port: state.cfg.smtp_port,
+        tls: state.cfg.smtp_tls.clone(),
+        from: state.cfg.smtp_from.clone(),
+        alert_to: state.cfg.smtp_alert_to.clone(),
+        public_url: state.cfg.public_url.clone(),
+    }))
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct EmailTestRequest {
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+pub async fn email_test(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<EmailTestRequest>,
+) -> Result<Json<Value>, ApiError> {
+    auth.require_admin()?;
+    auth.require_global()?;
+    let mailer = state
+        .mailer
+        .as_deref()
+        .ok_or_else(|| ApiError::Conflict("SMTP is not configured".into()))?;
+    let to = body
+        .to
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| state.cfg.smtp_alert_to.clone())
+        .unwrap_or_else(|| auth.user.email.clone());
+    rynx_core::validate_email(&to).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    let body = format!(
+        "Este es un correo de prueba de RYNXCP.\n\n\
+         Si lo has recibido, el panel puede enviar credenciales, avisos y enlaces \
+         de restablecimiento de contraseña.\n\n\
+         Servidor SMTP local: {}:{} (TLS: {}).\n",
+        state.cfg.smtp_host, state.cfg.smtp_port, state.cfg.smtp_tls
+    );
+    mailer
+        .send(&to, "Prueba de correo de RYNXCP", &body)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(json!({ "ok": true, "to": to })))
 }

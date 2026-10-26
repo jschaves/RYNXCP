@@ -5,7 +5,8 @@
 # repository, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban, nftables,
 # Node.js, Python, Ruby, Java, Go and .NET when available), builds RYNXCP,
 # installs the panel, asks for the panel host, admin email and password, and
-# publishes the panel behind Nginx with optional Let's Encrypt TLS.
+# publishes the panel behind Nginx with optional Let's Encrypt TLS. It also
+# enables panel notifications through local Postfix with outbound SPF/DKIM/DMARC.
 #
 # Usage:
 #   sudo bash deploy/preinstall.sh
@@ -27,6 +28,7 @@ DISTRO_ID=""
 DISTRO_CODENAME=""
 PUBLIC_IP=""
 HOST=""
+DKIM_SELECTOR=""
 PANEL_SCHEME="http"
 TLS_OK=0
 LOG="/var/log/rynxcp/preinstall.log"
@@ -461,6 +463,7 @@ set_toml "$DAEMON_CONF" "mail_enabled" "false"
 if [[ "${RYNX_SKIP_MAIL:-0}" != "1" ]]; then
   log "Installing the Postfix/Dovecot/Roundcube mail stack"
   bash "$ROOT_DIR/deploy/mail-setup.sh"
+  DKIM_SELECTOR="mail"
 fi
 if is_domain "$HOST"; then
   set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
@@ -469,7 +472,7 @@ if is_domain "$HOST"; then
   fi
   if is_ipv4 "$PUBLIC_IP"; then
     log "Creating the panel DNS zone for $HOST"
-    bash "$ROOT_DIR/deploy/panel-dns-zone.sh" "$HOST" "$PUBLIC_IP" || \
+    bash "$ROOT_DIR/deploy/panel-dns-zone.sh" "$HOST" "$PUBLIC_IP" "$DKIM_SELECTOR" || \
       warn "the panel DNS zone could not be created; configure ns1.$HOST manually"
   else
     warn "no public IPv4 detected; the panel DNS zone for $HOST was not created"
@@ -692,6 +695,22 @@ else
   fi
 fi
 
+# Transactional panel email through local Postfix. Only domains can have a
+# DKIM-signing sender, so IP-based installs keep SMTP disabled.
+if is_domain "$HOST" && [[ -n "$DKIM_SELECTOR" ]]; then
+  set_toml "$API_CONF" "smtp_enabled" "true"
+  set_toml "$API_CONF" "smtp_host" "\"127.0.0.1\""
+  set_toml "$API_CONF" "smtp_port" "25"
+  set_toml "$API_CONF" "smtp_from" "\"noreply@$HOST\""
+  set_toml "$API_CONF" "smtp_alert_to" "\"$EMAIL\""
+  set_toml "$API_CONF" "smtp_tls" "\"none\""
+  if [[ "${EMAIL##*@}" == "$HOST" ]]; then
+    warn "the admin email is in $HOST, which has no MX by design; certificate alerts may bounce. Use --email with an external mailbox or change smtp_alert_to."
+  fi
+else
+  set_toml "$API_CONF" "smtp_enabled" "false"
+fi
+
 PANEL_URL="${PANEL_SCHEME}://${HOST}"
 if { [[ "$PANEL_SCHEME" == "https" && "$PANEL_PORT" != "443" ]] || \
      [[ "$PANEL_SCHEME" == "http" && "$PANEL_PORT" != "80" ]]; }; then
@@ -752,6 +771,10 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 PHP_VERSION="$(php -r 'echo PHP_VERSION;' 2>/dev/null || true)"
+PANEL_MAIL_SUMMARY="disabled"
+if is_domain "$HOST" && [[ -n "$DKIM_SELECTOR" ]]; then
+  PANEL_MAIL_SUMMARY="noreply@$HOST via 127.0.0.1:25 (SPF/DKIM/DMARC)"
+fi
 cat <<EOF
 
 RYNXCP is ready.
@@ -762,6 +785,7 @@ RYNXCP is ready.
   Password: (the value you entered; it was not logged)
   PHP:      ${PHP_VERSION:-8.5}
   SSH port: ${SSH_PORT} (always allowed by the firewall)
+  Panel mail: ${PANEL_MAIL_SUMMARY}
 
 Installed:
   Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
@@ -780,6 +804,8 @@ Next steps:
   3. Create a website, open "Correo" and activate mail for its domain. RYNXCP
      provisions MX/SPF/DKIM/DMARC/SRV/TLS-RPT and starts the webmail SSL job.
   4. Log in, open "Programas" to review updates and "Consola" for diagnostics.
+  5. Open "Sistema > Correo del panel" and send a test message; then use
+     "¿Olvidaste tu contraseña?" to verify password-reset delivery.
 
 Log: $LOG
 EOF

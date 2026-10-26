@@ -324,6 +324,16 @@ pub struct ApiConfig {
     pub session_idle_secs: i64,
     pub trust_proxy_headers: bool,
     pub public_url: Option<String>,
+    /// Outbound transactional email for the panel. The default targets a local
+    /// Postfix instance over loopback, so no credentials or TLS are needed.
+    pub smtp_enabled: bool,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_from: Option<String>,
+    pub smtp_alert_to: Option<String>,
+    /// Only `none` is supported; TLS is provided by the local SMTP hop or a
+    /// future relay implementation.
+    pub smtp_tls: String,
     pub log_level: String,
 }
 
@@ -351,6 +361,12 @@ impl Default for ApiConfig {
                 session_idle_secs: 3600,
                 trust_proxy_headers: false,
                 public_url: None,
+                smtp_enabled: false,
+                smtp_host: "127.0.0.1".into(),
+                smtp_port: 25,
+                smtp_from: None,
+                smtp_alert_to: None,
+                smtp_tls: "none".into(),
                 log_level: "info,tower_http=info".into(),
             }
         } else {
@@ -374,6 +390,12 @@ impl Default for ApiConfig {
                 session_idle_secs: 3600,
                 trust_proxy_headers: false,
                 public_url: None,
+                smtp_enabled: false,
+                smtp_host: "127.0.0.1".into(),
+                smtp_port: 25,
+                smtp_from: None,
+                smtp_alert_to: None,
+                smtp_tls: "none".into(),
                 log_level: "info,tower_http=info".into(),
             }
         }

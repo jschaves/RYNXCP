@@ -88,6 +88,9 @@ postconf -e "myorigin = \$myhostname"
 postconf -e "inet_interfaces = all"
 postconf -e "inet_protocols = all"
 postconf -e "mydestination = localhost, localhost.localdomain"
+# The panel submits transactional mail over loopback. Keep relay rights
+# limited to localhost so this is not an open relay.
+postconf -e "mynetworks = 127.0.0.0/8 [::1]/128"
 postconf -e "alias_maps = hash:/etc/aliases"
 postconf -e "alias_database = hash:/etc/aliases"
 postconf -e "virtual_mailbox_domains = hash:${POSTFIX_MAIL_DIR}/domains"

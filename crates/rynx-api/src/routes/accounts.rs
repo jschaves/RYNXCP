@@ -153,6 +153,20 @@ pub async fn create(
         panel_password = Some(password);
     }
 
+    if let (Some(user), Some(password)) = (panel_user.as_ref(), panel_password.as_deref()) {
+        if user.active {
+            if let Err(err) =
+                crate::email::send_credentials(&state, &user.email, &user.username, password).await
+            {
+                tracing::warn!(
+                    user = %user.username,
+                    error = %err,
+                    "panel credential email could not be sent"
+                );
+            }
+        }
+    }
+
     Ok(Json(CreateAccountResponse {
         account: response,
         panel_user,

@@ -26,7 +26,30 @@
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <button class="btn primary wide" type="submit">Entrar</button>
+        <button class="btn ghost wide" type="button" id="forgot-open">¿Olvidaste tu contraseña?</button>
         <p class="muted small">Sesión protegida con cookies HttpOnly, CSRF y Argon2id.</p>
+      </form>
+      <form id="forgot-form" class="stack hidden">
+        <p class="muted small">Escribe el email de tu cuenta. Si existe, recibirás un enlace para restablecer la contraseña.</p>
+        <label class="field">
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="email" required />
+        </label>
+        <button class="btn primary wide" type="submit">Enviar enlace</button>
+        <button class="btn ghost wide" type="button" id="forgot-cancel">Volver</button>
+      </form>
+      <form id="reset-form" class="stack hidden">
+        <p class="muted small">Elige una contraseña nueva. El enlace caduca en 60 minutos y solo puede usarse una vez.</p>
+        <label class="field">
+          <span>Nueva contraseña</span>
+          <input name="password" type="password" autocomplete="new-password" minlength="12" required />
+        </label>
+        <label class="field">
+          <span>Repite la contraseña</span>
+          <input name="confirm" type="password" autocomplete="new-password" minlength="12" required />
+        </label>
+        <button class="btn primary wide" type="submit">Cambiar contraseña</button>
+        <button class="btn ghost wide" type="button" id="reset-cancel">Volver</button>
       </form>
     </div>
   </div>

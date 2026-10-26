@@ -86,7 +86,7 @@ try {
         username = 'acme'; email = 'acme@example.com'; disk_limit_mb = 2048
         php_version = '8.3'; enabled = $true
     }
-    if ($account.kind -ne 'account') { throw 'unexpected account response' }
+    if ($account.account.kind -ne 'account') { throw 'unexpected account response' }
 
     $app = PostJson '/api/v1/apps' @{
         username = 'acme'; name = 'api'; runtime = @{ engine = 'node'; version = '22' }
@@ -127,13 +127,13 @@ try {
         username = 'acme'; email = 'acme@example.com'; disk_limit_mb = 2048
         php_version = '8.3'; enabled = $false
     }
-    if ($suspended.account.spec.enabled) { throw 'account was not suspended' }
+    if ($suspended.account.account.spec.enabled) { throw 'account was not suspended' }
     if (Test-Path $siteConf) { throw 'suspended account still has an enabled vhost' }
     $resumed = PostJson '/api/v1/accounts' @{
         username = 'acme'; email = 'acme@example.com'; disk_limit_mb = 2048
         php_version = '8.3'; enabled = $true
     }
-    if (-not $resumed.account.spec.enabled) { throw 'account was not resumed' }
+    if (-not $resumed.account.account.spec.enabled) { throw 'account was not resumed' }
     if (-not (Test-Path $siteConf)) { throw 'resumed account vhost was not restored' }
 
     Write-Host '==> dns'
@@ -214,6 +214,19 @@ try {
     $events = RequestJson 'GET' '/api/v1/security/auth-events?limit=50'
     if ($events.events.Count -lt 1) { throw 'auth events missing' }
 
+    Write-Host '==> panel email endpoints'
+    $mailStatus = RequestJson 'GET' '/api/v1/system/email'
+    if ($mailStatus.enabled) { throw 'SMTP should be disabled in the smoke configuration' }
+    $forgot = Invoke-RestMethod -Uri "$base/api/v1/auth/forgot-password" -Method Post `
+        -ContentType 'application/json' `
+        -Body (@{ email = 'admin@example.com' } | ConvertTo-Json)
+    if (-not $forgot.ok) { throw 'forgot-password did not return a generic ok' }
+    ExpectStatus 400 {
+        Invoke-RestMethod -Uri "$base/api/v1/auth/reset-password" -Method Post `
+            -ContentType 'application/json' `
+            -Body (@{ token = ('0' * 64); password = 'Reset-Strong-Pass2' } | ConvertTo-Json)
+    }
+
     $viewer = PostJson '/api/v1/users' @{
         username = 'viewer1'; email = 'viewer1@example.com'; password = 'Viewer-Strong-Pass3'; role = 'viewer'
     }
@@ -274,7 +287,7 @@ try {
     $null = RequestJson 'DELETE' "/api/v1/backups/$($backup.backup.id)"
 
     Write-Host ''
-    Write-Host 'SMOKE OK: auth, RBAC, CSRF, accounts, runtimes, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, audit, reconcile.'
+    Write-Host 'SMOKE OK: auth, RBAC, CSRF, accounts, runtimes, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }

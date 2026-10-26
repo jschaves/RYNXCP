@@ -116,6 +116,8 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/system/updates", get(programs::updates))
         .route("/api/v1/system/updates/apply", post(programs::apply))
         .route("/api/v1/system", get(system::info))
+        .route("/api/v1/system/email", get(system::email_status))
+        .route("/api/v1/system/email/test", post(system::email_test))
         .route("/api/v1/audit", get(audit_route::list))
         .route("/api/v1/reconcile", post(system::reconcile))
         .route_layer(middleware::from_fn_with_state(
@@ -125,6 +127,11 @@ pub fn router(state: ApiState) -> Router {
 
     let public = Router::new()
         .route("/api/v1/auth/login", post(session::login))
+        .route(
+            "/api/v1/auth/forgot-password",
+            post(session::forgot_password),
+        )
+        .route("/api/v1/auth/reset-password", post(session::reset_password))
         .route("/api/v1/health", get(system::health))
         .route("/api/v1/meta", get(system::meta))
         .route("/api/v1", get(system::meta));

@@ -16,6 +16,17 @@ session_ttl_secs = 28800
 trust_proxy_headers = false
 # public_url = "https://panel.example.com"
 
+# ---- transactional panel email (local Postfix) ----
+# Used for credential delivery, password resets and certificate alerts.
+# The pre-installer enables this for FQDN hosts and publishes SPF/DKIM/DMARC.
+smtp_enabled = false
+smtp_host = "127.0.0.1"
+smtp_port = 25
+# smtp_from = "noreply@panel.example.com"
+# smtp_alert_to = "admin@panel.example.com"
+# Only "none" is supported: the loopback hop is trusted and not encrypted.
+smtp_tls = "none"
+
 log_level = "info,tower_http=info"
 
 # ---- brute-force protection ----

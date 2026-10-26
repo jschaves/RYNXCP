@@ -110,11 +110,16 @@ async fn spawn(
 
     let jobs = state.cert_jobs.clone();
     let daemon = state.daemon.clone();
+    let mailer = state.mailer.clone();
+    let alert_to = state.cfg.smtp_alert_to.clone();
     let actor = actor.to_string();
     tokio::spawn(async move {
         let result = daemon.call(request, &actor).await;
-        let mut jobs = jobs.lock().await;
-        if let Some(job) = jobs.get_mut(&id) {
+        let outcome = {
+            let mut jobs = jobs.lock().await;
+            let Some(job) = jobs.get_mut(&id) else {
+                return;
+            };
             match result {
                 Ok(Response::Cert { cert }) => {
                     job.view.status = "succeeded".into();
@@ -131,15 +136,38 @@ async fn spawn(
                 }
             }
             job.finished = Some(Instant::now());
-            if job.view.status == "failed" {
-                tracing::warn!(
-                    domain = %job.view.domain,
-                    error = %job.view.message,
-                    "certificate job failed"
+            (
+                job.view.status.clone(),
+                job.view.domain.clone(),
+                job.view.message.clone(),
+            )
+        };
+
+        if outcome.0 == "failed" {
+            tracing::warn!(
+                domain = %outcome.1,
+                error = %outcome.2,
+                "certificate job failed"
+            );
+            if let (Some(mailer), Some(to)) = (mailer, alert_to) {
+                let body = format!(
+                    "La emisión del certificado TLS para {domain} ha fallado.\n\n\
+                     Detalle: {message}\n\n\
+                     Revisa Certificados en el panel y los logs de rynxd.\n",
+                    domain = outcome.1,
+                    message = outcome.2,
                 );
-            } else {
-                tracing::info!(domain = %job.view.domain, "certificate job succeeded");
+                let subject = format!("[RYNXCP] Falló el certificado de {}", outcome.1);
+                if let Err(err) = mailer.send(&to, &subject, &body).await {
+                    tracing::warn!(
+                        domain = %outcome.1,
+                        error = %err,
+                        "certificate alert email could not be sent"
+                    );
+                }
             }
+        } else {
+            tracing::info!(domain = %outcome.1, "certificate job succeeded");
         }
     });
     view

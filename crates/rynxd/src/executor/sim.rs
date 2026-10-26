@@ -14,7 +14,7 @@ use rynx_proto::{
     SystemInfo,
 };
 
-use super::{ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
+use super::{merge_dkim_table, ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
 
 pub struct SimExecutor {
     cfg: DaemonConfig,
@@ -546,13 +546,13 @@ impl Executor for SimExecutor {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(path, keytable)?;
+            std::fs::write(path, merge_dkim_table(path, keytable))?;
         }
         if let Some(path) = &self.cfg.opendkim_signingtable {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(path, signingtable)?;
+            std::fs::write(path, merge_dkim_table(path, signingtable))?;
         }
         Ok(())
     }

@@ -52,6 +52,37 @@ impl From<CoreError> for ExecError {
 
 pub type ExecResult<T> = Result<T, ExecError>;
 
+/// Merge service-managed panel entries into a generated OpenDKIM table.
+///
+/// Reconcile rewrites KeyTable/SigningTable from managed DNS zones. The panel
+/// hostname is not one of those zones, so its entries live in a sidecar file
+/// (`KeyTable.panel` / `SigningTable.panel`) that is appended on every write.
+pub(crate) fn merge_dkim_table(path: &Path, content: &str) -> String {
+    let Some(name) = path.file_name() else {
+        return content.to_string();
+    };
+    let panel = path.with_file_name(format!("{}.panel", name.to_string_lossy()));
+    let Ok(extra) = std::fs::read_to_string(panel) else {
+        return content.to_string();
+    };
+    let mut out = content.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    for line in extra.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || out.lines().any(|existing| existing.trim() == line)
+        {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct UnitStatus {
     pub active: bool,

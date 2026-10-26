@@ -82,6 +82,15 @@ pub async fn create(
         &body.password,
         role,
     )?;
+    if let Err(err) =
+        crate::email::send_credentials(&state, &user.email, &user.username, &body.password).await
+    {
+        tracing::warn!(
+            user = %user.username,
+            error = %err,
+            "credential email could not be sent"
+        );
+    }
     Ok(Json(user))
 }
 

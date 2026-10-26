@@ -16,7 +16,7 @@ use rynx_proto::{
     SystemInfo,
 };
 
-use super::{ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
+use super::{merge_dkim_table, ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
 
 const SAFE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const VMAIL_ROOT: &str = "/var/vmail";
@@ -1134,7 +1134,7 @@ impl Executor for RealExecutor {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(path, keytable)?;
+            std::fs::write(path, merge_dkim_table(path, keytable))?;
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o640));
             if let Some(user) = &owner {
@@ -1145,7 +1145,7 @@ impl Executor for RealExecutor {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(path, signingtable)?;
+            std::fs::write(path, merge_dkim_table(path, signingtable))?;
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o640));
             if let Some(user) = &owner {

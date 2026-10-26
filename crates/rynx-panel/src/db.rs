@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES panel_users(id) ON DELETE CASCADE,
+    created_at  INTEGER NOT NULL,
+    expires_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_expiry ON password_resets(expires_at);
+
 CREATE TABLE IF NOT EXISTS panel_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -482,6 +491,10 @@ impl PanelDb {
             "DELETE FROM sessions WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
             params![username],
         )?;
+        let _ = conn.execute(
+            "DELETE FROM password_resets WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
+            params![username],
+        );
         Ok(())
     }
 
@@ -505,6 +518,10 @@ impl PanelDb {
         if changed == 0 {
             return Err(PanelError::NotFound(username.into()));
         }
+        let _ = conn.execute(
+            "DELETE FROM password_resets WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
+            params![username],
+        );
         Ok(())
     }
 
@@ -522,6 +539,10 @@ impl PanelDb {
                 "DELETE FROM sessions WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
                 params![username],
             )?;
+            let _ = conn.execute(
+                "DELETE FROM password_resets WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
+                params![username],
+            );
         }
         Ok(())
     }
@@ -548,6 +569,102 @@ impl PanelDb {
             return Err(PanelError::NotFound(username.into()));
         }
         Ok(())
+    }
+
+    /// Create a single-use password-reset token for an active user.
+    ///
+    /// Returns `None` for unknown or disabled accounts so callers can reply
+    /// generically without exposing whether an email is registered.
+    pub fn create_password_reset(
+        &self,
+        email: &str,
+        ttl_secs: i64,
+    ) -> Result<Option<(String, UserView)>, PanelError> {
+        let Some(user) = self.find_user_by_email(email)? else {
+            return Ok(None);
+        };
+        if !user.active {
+            return Ok(None);
+        }
+        let conn = self.conn()?;
+        let token = random_hex(32);
+        let token_hash = sha256_hex(token.as_bytes());
+        let now = now_unix();
+        let expires_at = now + ttl_secs.clamp(300, 24 * 60 * 60);
+        conn.execute(
+            "DELETE FROM password_resets WHERE user_id = ?1",
+            params![user.id],
+        )?;
+        conn.execute(
+            "INSERT INTO password_resets (token_hash, user_id, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![token_hash, user.id, now, expires_at],
+        )?;
+        let _ = conn.execute(
+            "DELETE FROM password_resets WHERE expires_at < ?1",
+            params![now],
+        );
+        Ok(Some((token, user)))
+    }
+
+    /// Consume a reset token and atomically replace the password.
+    ///
+    /// Invalid, expired or already-used tokens return `Ok(None)`. A weak new
+    /// password returns a validation error and leaves the token usable.
+    pub fn consume_password_reset(
+        &self,
+        policy: &PasswordPolicy,
+        token: &str,
+        password: &str,
+    ) -> Result<Option<String>, PanelError> {
+        if token.len() != 64 || !token.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return Ok(None);
+        }
+        let token_hash = sha256_hex(token.as_bytes());
+        let mut conn = self.conn()?;
+        let row: Option<(String, String, String, i64)> = conn
+            .query_row(
+                "SELECT u.id, u.username, u.email, r.expires_at \
+                 FROM password_resets r JOIN panel_users u ON u.id = r.user_id \
+                 WHERE r.token_hash = ?1 AND u.active = 1",
+                params![token_hash],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let Some((user_id, username, email, expires_at)) = row else {
+            return Ok(None);
+        };
+        if expires_at <= now_unix() {
+            let _ = conn.execute(
+                "DELETE FROM password_resets WHERE token_hash = ?1",
+                params![token_hash],
+            );
+            return Ok(None);
+        }
+        validate_password_with(policy, password, &username, &email)?;
+        let hash = hash_password(password)?;
+        let tx = conn.transaction()?;
+        let consumed = tx.execute(
+            "DELETE FROM password_resets WHERE token_hash = ?1 AND user_id = ?2 AND expires_at > ?3",
+            params![token_hash, user_id, now_unix()],
+        )?;
+        if consumed == 0 {
+            return Ok(None);
+        }
+        let changed = tx.execute(
+            "UPDATE panel_users SET password_hash = ?2, updated_at = ?3 WHERE id = ?1",
+            params![user_id, hash, now_rfc3339()],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        tx.execute("DELETE FROM sessions WHERE user_id = ?1", params![user_id])?;
+        tx.execute(
+            "DELETE FROM password_resets WHERE user_id = ?1",
+            params![user_id],
+        )?;
+        tx.commit()?;
+        Ok(Some(username))
     }
 
     pub fn create_session(
@@ -901,6 +1018,75 @@ mod tests {
         assert!(db.lookup_session(&session.token, 3600).unwrap().is_none());
         assert!(db
             .authenticate("admin", "Another-Strong-Pass2")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn password_reset_tokens_are_single_use() {
+        let (_dir, db) = temp_db();
+        let user = db
+            .create_user(
+                "admin",
+                "admin@example.com",
+                "Very-Strong-Pass1",
+                Role::Owner,
+            )
+            .unwrap();
+        let session = db
+            .create_session(&user.id, 3600, "127.0.0.1", "test", None)
+            .unwrap();
+        let (token, target) = db
+            .create_password_reset("ADMIN@example.com", 3600)
+            .unwrap()
+            .unwrap();
+        assert_eq!(target.username, "admin");
+        assert!(db
+            .create_password_reset("ghost@example.com", 3600)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            db.consume_password_reset(&PasswordPolicy::default(), &token, "Reset-Strong-Pass2")
+                .unwrap()
+                .as_deref(),
+            Some("admin")
+        );
+        assert!(db.lookup_session(&session.token, 3600).unwrap().is_none());
+        assert!(db
+            .authenticate("admin", "Reset-Strong-Pass2")
+            .unwrap()
+            .is_some());
+        assert!(db
+            .consume_password_reset(&PasswordPolicy::default(), &token, "Again-Strong-Pass3")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn new_reset_token_invalidates_previous_one() {
+        let (_dir, db) = temp_db();
+        db.create_user(
+            "admin",
+            "admin@example.com",
+            "Very-Strong-Pass1",
+            Role::Owner,
+        )
+        .unwrap();
+        let (first, _) = db
+            .create_password_reset("admin@example.com", 3600)
+            .unwrap()
+            .unwrap();
+        let (second, _) = db
+            .create_password_reset("admin@example.com", 3600)
+            .unwrap()
+            .unwrap();
+        assert_ne!(first, second);
+        assert!(db
+            .consume_password_reset(&PasswordPolicy::default(), &first, "Reset-Strong-Pass2")
+            .unwrap()
+            .is_none());
+        assert!(db
+            .consume_password_reset(&PasswordPolicy::default(), &second, "Reset-Strong-Pass2")
             .unwrap()
             .is_some());
     }
