@@ -1362,6 +1362,20 @@ impl Executor for RealExecutor {
         std::fs::create_dir_all(POSTFIX_MAIL_DIR)?;
         std::fs::create_dir_all(DOVECOT_MAIL_DIR)?;
         std::fs::create_dir_all(MAIL_CERT_DIR)?;
+
+        // The Dovecot auth process runs as the dovecot user and must traverse
+        // its configuration directory to read the passwd-file.
+        let dovecot_dir = PathBuf::from(DOVECOT_MAIL_DIR);
+        let mut dovecot_dir_mode = 0o755;
+        if let Some(user) = User::from_name("dovecot").ok().flatten() {
+            if chown(&dovecot_dir, Some(Uid::from_raw(0)), Some(user.gid)).is_ok() {
+                dovecot_dir_mode = 0o750;
+            }
+        }
+        std::fs::set_permissions(
+            &dovecot_dir,
+            std::fs::Permissions::from_mode(dovecot_dir_mode),
+        )?;
         let domains_path = PathBuf::from(POSTFIX_MAIL_DIR).join("domains");
         let mailboxes_path = PathBuf::from(POSTFIX_MAIL_DIR).join("mailboxes");
         let aliases_path = PathBuf::from(POSTFIX_MAIL_DIR).join("aliases");

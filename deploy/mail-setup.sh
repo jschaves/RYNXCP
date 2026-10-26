@@ -82,6 +82,7 @@ log "Creating mail directories and default TLS certificate"
 install -d -m 0755 /etc/ssl/rynxcp "$MAIL_CERT_DIR"
 install -d -m 0750 "$POSTFIX_MAIL_DIR" "$DOVECOT_MAIL_DIR"
 chown root:postfix "$POSTFIX_MAIL_DIR" 2>/dev/null || true
+chown root:dovecot "$DOVECOT_MAIL_DIR" 2>/dev/null || true
 install -d -m 0750 /etc/opendkim /etc/opendkim/keys
 if [[ ! -s "$MAIL_CERT_DIR/default.crt" || ! -s "$MAIL_CERT_DIR/default.key" ]]; then
   openssl req -x509 -nodes -newkey rsa:3072 -days 3650 \
