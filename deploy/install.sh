@@ -77,6 +77,20 @@ if [[ -d /etc/pure-ftpd/conf ]]; then
   echo yes > /etc/pure-ftpd/conf/NoAnonymous
   echo /etc/pure-ftpd/pureftpd.pdb > /etc/pure-ftpd/conf/PureDB
   echo "30000 50000" > /etc/pure-ftpd/conf/PassivePortRange
+  tls_cert=/etc/ssl/private/pure-ftpd.pem
+  if [[ ! -s "$tls_cert" ]]; then
+    [[ -d /etc/ssl/private ]] || install -d -m 0750 /etc/ssl/private
+    tls_dir="$(mktemp -d)"
+    openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+      -subj "/CN=$(hostname -f 2>/dev/null || hostname)" \
+      -keyout "$tls_dir/pure-ftpd.key" -out "$tls_dir/pure-ftpd.crt" >/dev/null 2>&1
+    cat "$tls_dir/pure-ftpd.crt" "$tls_dir/pure-ftpd.key" > "$tls_cert"
+    rm -rf "$tls_dir"
+  fi
+  chmod 0600 "$tls_cert"
+  echo 1 > /etc/pure-ftpd/conf/TLS
+  echo "$tls_cert" > /etc/pure-ftpd/conf/CertFile
+  systemctl restart pure-ftpd >/dev/null 2>&1 || true
 fi
 if [[ -f /etc/bind/named.conf.local ]]; then
   [[ -f /etc/bind/named.conf.rynxcp ]] || install -m 0644 /dev/null /etc/bind/named.conf.rynxcp
