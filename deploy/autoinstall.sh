@@ -287,6 +287,24 @@ fi
 [[ -f "$REPO_DIR/Cargo.toml" && -f "$REPO_DIR/deploy/preinstall.sh" ]] || \
   die "$REPO_DIR is not a RYNXCP checkout"
 
+# Older checkouts imported the std MetadataExt trait, which does not apply to
+# cap-std metadata. Repair them before building so installs keep working until
+# the checkout is updated.
+apply_linux_metadata_fix() {
+  local file="$REPO_DIR/crates/rynxd/src/executor/unix.rs"
+  [[ -f "$file" ]] || return 0
+  grep -q 'use std::os::unix::fs::MetadataExt;' "$file" || return 0
+  log "Applying the Linux metadata build fix to the checkout"
+  sed -i '/^use std::os::unix::fs::MetadataExt;$/d' "$file"
+  sed -i 's|^use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};$|use cap_std::fs::{Dir, MetadataExt, OpenOptions as CapOpenOptions};|' "$file"
+  sed -i 's|OffsetDateTime::from(value)\.format|OffsetDateTime::from(value.into_std()).format|' "$file"
+  grep -q 'MetadataExt' "$file" || die "could not repair the Linux metadata imports in $file"
+  grep -q 'value.into_std()' "$file" || die "could not repair the Linux metadata time conversion in $file"
+  return 0
+}
+
+apply_linux_metadata_fix
+
 # ---------------------------------------------------------------------------
 # Run the upstream one-shot installer
 # ---------------------------------------------------------------------------
