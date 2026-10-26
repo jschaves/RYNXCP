@@ -51,8 +51,8 @@ top bar.
 
 Domains are stored as Punycode (IDN A-labels). The web UI converts Unicode
 domains automatically (for example `laniñadelasmargaritas.es` becomes
-`xn--laniadelasmargaritas-66b.es`). The installer also converts Unicode panel
-domain arguments; direct API/CLI calls must use the Punycode form.
+`xn--laniadelasmargaritas-66b.es`); direct API/CLI calls must use the Punycode
+form.
 
 When a Static or PHP site is first applied, the daemon creates its document root
 and, if there is no `index.html` or `index.php`, a welcome page in the UI
