@@ -281,6 +281,10 @@ done
 require_root
 detect_os
 
+# Wait for unattended-upgrades or other apt clients instead of failing.
+install -d -m 0755 /etc/apt/apt.conf.d
+printf 'DPkg::Lock::Timeout "600";\n' >/etc/apt/apt.conf.d/99rynxcp-lock
+
 if [[ -n "$PANEL_HOST" ]]; then
   PANEL_HOST="${PANEL_HOST#http://}"
   PANEL_HOST="${PANEL_HOST#https://}"

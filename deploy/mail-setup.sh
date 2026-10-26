@@ -59,6 +59,8 @@ fi
 
 log "Installing mail packages"
 export DEBIAN_FRONTEND=noninteractive
+install -d -m 0755 /etc/apt/apt.conf.d
+printf 'DPkg::Lock::Timeout "600";\n' >/etc/apt/apt.conf.d/99rynxcp-lock
 echo "postfix postfix/main_mailer_type select Internet Site" | debconf-set-selections
 echo "postfix postfix/mailname string ${HOSTNAME_FQDN}" | debconf-set-selections
 apt-get update

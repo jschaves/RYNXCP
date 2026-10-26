@@ -291,6 +291,10 @@ log "SSH port kept open in the firewall: $SSH_PORT"
 # ---------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 
+# Wait for unattended-upgrades or other apt clients instead of failing.
+install -d -m 0755 /etc/apt/apt.conf.d
+printf 'DPkg::Lock::Timeout "600";\n' >/etc/apt/apt.conf.d/99rynxcp-lock
+
 log "Refreshing APT metadata and applying security updates"
 apt-get update
 apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade

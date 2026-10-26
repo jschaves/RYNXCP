@@ -121,6 +121,10 @@ trap 'code=$?; printf "\n\033[1;31mFAILED\033[0m at line %s (exit %s). Log: %s\n
 export DEBIAN_FRONTEND=noninteractive
 export GIT_TERMINAL_PROMPT=0
 
+# Wait for unattended-upgrades or other apt clients instead of failing.
+install -d -m 0755 /etc/apt/apt.conf.d
+printf 'DPkg::Lock::Timeout "600";\n' >/etc/apt/apt.conf.d/99rynxcp-lock
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
