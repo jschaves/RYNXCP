@@ -1754,6 +1754,12 @@ impl Executor for RealExecutor {
             &["mkdb".to_string(), pdb, "-f".into(), passwd_file],
         )
         .await?;
+        let auth_dir = Path::new("/etc/pure-ftpd/auth");
+        std::fs::create_dir_all(auth_dir)?;
+        let auth_link = auth_dir.join("10puredb");
+        if std::fs::symlink_metadata(&auth_link).is_err() {
+            let _ = std::os::unix::fs::symlink("/etc/pure-ftpd/conf/PureDB", &auth_link);
+        }
         let _ = self.reload_unit(&self.cfg.pure_ftpd_unit).await;
         Ok(())
     }

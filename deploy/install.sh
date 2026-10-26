@@ -77,6 +77,8 @@ if [[ -d /etc/pure-ftpd/conf ]]; then
   echo yes > /etc/pure-ftpd/conf/NoAnonymous
   echo /etc/pure-ftpd/pureftpd.pdb > /etc/pure-ftpd/conf/PureDB
   echo "30000 50000" > /etc/pure-ftpd/conf/PassivePortRange
+  install -d -m 0755 /etc/pure-ftpd/auth
+  ln -sfn /etc/pure-ftpd/conf/PureDB /etc/pure-ftpd/auth/10puredb
   tls_cert=/etc/ssl/private/pure-ftpd.pem
   if [[ ! -s "$tls_cert" ]]; then
     [[ -d /etc/ssl/private ]] || install -d -m 0750 /etc/ssl/private
