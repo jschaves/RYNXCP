@@ -9,7 +9,7 @@ use rynx_core::audit::AuditLog;
 use rynx_core::config::validate_daemon_config;
 use rynx_core::crypto::load_or_create_token;
 use rynx_core::DaemonConfig;
-use rynx_proto::DAEMON_VERSION;
+use rynx_proto::{Request, DAEMON_VERSION};
 
 use rynxd::executor;
 use rynxd::reconciler::Reconciler;
@@ -119,6 +119,15 @@ async fn main() -> Result<()> {
                 if let Err(err) = sampler.sample_metrics().await {
                     tracing::warn!(error = %err.message, "metrics sample failed");
                 }
+            }
+        });
+    }
+
+    {
+        let startup = reconciler.clone();
+        tokio::spawn(async move {
+            if let Err(err) = startup.dispatch(Request::ReconcileAll, "system").await {
+                tracing::warn!(error = %err.message, "initial reconcile failed");
             }
         });
     }
