@@ -63,6 +63,29 @@ try {
         Invoke-RestMethod @params
     }
 
+    function PackageBody($pkg) {
+        @{
+            name = [string]$pkg.name
+            account_mb = [int]$pkg.account_mb
+            bandwidth_mb = [int]$pkg.bandwidth_mb
+            backups = [int]$pkg.backups
+            incremental_backup = [bool]$pkg.incremental_backup
+            web_domains = [int]$pkg.web_domains
+            web_aliases = [int]$pkg.web_aliases
+            web_backend = [string]$pkg.web_backend
+            nginx_template = [string]$pkg.nginx_template
+            dns_template = [string]$pkg.dns_template
+            dns_zones = [int]$pkg.dns_zones
+            dns_records = [int]$pkg.dns_records
+            nameservers = @($pkg.nameservers)
+            mail_domains = [int]$pkg.mail_domains
+            mail_accounts = [int]$pkg.mail_accounts
+            mail_rate_limit = [int]$pkg.mail_rate_limit
+            databases = [int]$pkg.databases
+            system_databases = [int]$pkg.system_databases
+        }
+    }
+
     function ExpectStatus([int]$expected, [scriptblock]$action) {
         try {
             & $action | Out-Null
@@ -242,6 +265,36 @@ try {
     if ($restored.user.username -ne 'admin' -or $restored.impersonated_by) { throw 'stop impersonation failed' }
     $headers['x-csrf-token'] = $restored.csrf_token
 
+    Write-Host '==> packages'
+    $packages = @(RequestJson 'GET' '/api/v1/packages')
+    if ($packages.Count -ne 1 -or -not $packages[0].is_default) {
+        throw 'the default package was not seeded'
+    }
+    $defaultPackage = $packages[0]
+    $newPackage = PostJson '/api/v1/packages' @{
+        name = 'Smoke Plan'; account_mb = 500; bandwidth_mb = 0; backups = 2
+        incremental_backup = $true; web_domains = 10; web_aliases = 20
+        web_backend = 'php'; nginx_template = 'hosting'; dns_template = 'child-ns'
+        dns_zones = 0; dns_records = 0; nameservers = @('ns1.example.tld', 'ns2.example.tld')
+        mail_domains = 5; mail_accounts = 10; mail_rate_limit = 0
+        databases = 3; system_databases = 0
+    }
+    if ($newPackage.name -ne 'Smoke Plan' -or $newPackage.is_default -or $newPackage.account_mb -ne 500) {
+        throw 'package creation failed'
+    }
+    $updateBody = PackageBody $newPackage
+    $updateBody.account_mb = 200
+    $updatedPackage = RequestJson 'PATCH' "/api/v1/packages/$($newPackage.id)" $updateBody
+    if ($updatedPackage.account_mb -ne 200 -or -not $updatedPackage.incremental_backup) {
+        throw 'package update failed'
+    }
+    $defaultBody = PackageBody $defaultPackage
+    $defaultBody.account_mb = 1
+    $editedDefault = RequestJson 'PATCH' "/api/v1/packages/$($defaultPackage.id)" $defaultBody
+    if (-not $editedDefault.is_default) { throw 'the default package lost its flag' }
+    ExpectStatus 409 { RequestJson 'DELETE' "/api/v1/packages/$($defaultPackage.id)" }
+    $null = RequestJson 'DELETE' "/api/v1/packages/$($newPackage.id)"
+
     Write-Host '==> security checks'
     ExpectStatus 400 {
         PostJson '/api/v1/accounts' @{
@@ -287,11 +340,8 @@ try {
     $null = RequestJson 'DELETE' "/api/v1/backups/$($backup.backup.id)"
 
     Write-Host ''
-    Write-Host 'SMOKE OK: auth, RBAC, CSRF, accounts, runtimes, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
+    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
 }
-
-
-

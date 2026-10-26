@@ -32,6 +32,7 @@ reconciliation engine and UI are original.
 | Console | Closed-list privileged actions with output and audit trail |
 | Programs | Installed software inventory, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
+| Packages | Reusable hosting plans with resource limits, templates and a seeded editable default |
 
 Creating a hosting account can also create a linked panel user (viewer by
 default, operator scoped to that account) with a generated password. The Accounts view exposes
@@ -51,7 +52,7 @@ top bar.
 Domains are stored as Punycode (IDN A-labels). The web UI converts Unicode
 domains automatically (for example `laniñadelasmargaritas.es` becomes
 `xn--laniadelasmargaritas-66b.es`). The installer also converts Unicode panel
-and MagicRita domain arguments; direct API/CLI calls must use the Punycode form.
+domain arguments; direct API/CLI calls must use the Punycode form.
 
 When a Static or PHP site is first applied, the daemon creates its document root
 and, if there is no `index.html` or `index.php`, a welcome page in the UI
@@ -112,6 +113,38 @@ The daemon preserves panel DKIM entries by appending
 `/etc/opendkim/KeyTable.panel` and `SigningTable.panel` whenever it rewrites the
 main OpenDKIM tables.
 
+## Packages
+
+Administrators manage hosting plans from **Administración > Paquetes**. The view
+lists every package with its main limits and exposes **Nuevo paquete**; each row
+can be edited and non-default packages can be deleted. The seeded **Por defecto**
+package is editable but cannot be deleted.
+
+Each package stores:
+
+| Section | Fields |
+| --- | --- |
+| General | name, account MB, bandwidth, backups (1-3) and incremental backup |
+| Web | web domain/alias limits, backend (static, PHP-FPM, Node.js, Python, Ruby, Java, .NET, Go) and Nginx proxy template (Caching, Hosting, Suspended) |
+| DNS | template (child-ns, no-mail, Gmail, Office 365, Zoho), calculated zone/record counters and nameserver list |
+| Email | email domain/account limits and rate limit |
+| Databases | database limit |
+| System | system database limit |
+
+Every numeric limit accepts 0-1000. **0 means unlimited**, and the form exposes a
+**Sin límite** button on every field where that applies. Nameservers start with
+`ns1.example.tld` and `ns2.example.tld`; the form can add more. DNS zone and
+record counters are calculated and shown read-only.
+
+Packages live in `panel.db` (`/var/lib/rynxcp/panel/panel.db`) and are seeded on
+first API start, so a clean installation already contains the editable default
+package. The auto-installers need no extra step: they start the API, which
+creates the table and the default plan. The API is admin-only:
+
+```
+GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
+```
+
 Creating an enabled site with `tls = "lets_encrypt"` also starts a certificate
 job immediately. The API returns the job in `cert_job`; the panel polls
 `GET /api/v1/certs/jobs/{id}` and shows the request, activation and final result
@@ -143,7 +176,7 @@ certificate page and warning banner show the problem.
 
 Two databases are separated on purpose:
 
-- `panel.db`: panel users, Argon2id hashes, sessions and authentication events.
+- `panel.db`: panel users, Argon2id hashes, sessions, authentication events and hosting packages.
 - `state.db`: desired hosting state. Only the daemon writes to it.
 
 Compromising the web API does not grant direct write access to hosting state.
@@ -297,6 +330,8 @@ What it installs and configures:
 - Panel SMTP on `127.0.0.1:25` with `noreply@<panel-host>`, used for credential
   emails, password resets and certificate alerts. The **Sistema** view exposes a
   delivery test.
+- The panel database is initialized on first start, including the editable
+  **Por defecto** package available under **Administración > Paquetes**.
 - A panel virtual host and, for a domain with working DNS, a Let's Encrypt
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
@@ -432,6 +467,7 @@ GET        /api/v1/system/updates    POST   /api/v1/system/updates/apply
 GET        /api/v1/system/email      POST   /api/v1/system/email/test
 POST       /api/v1/console
 GET|POST   /api/v1/users             PATCH|DELETE /api/v1/users/{username}
+GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
 POST       /api/v1/reconcile
 ```
 
@@ -441,7 +477,7 @@ POST       /api/v1/reconcile
 crates/
   rynx-proto/   versioned CBOR protocol and shared models
   rynx-core/    config, validation, policy, crypto, audit, templates
-  rynx-panel/   panel identity, Argon2id, sessions, RBAC, auth events
+  rynx-panel/   panel identity, Argon2id, sessions, RBAC, auth events, packages
   rynxd/        root daemon, Linux/simulation executor, reconciliation
   rynx-api/     Axum, security, CSRF, rate limits, SPA
   rynx-cli/     rynxctl

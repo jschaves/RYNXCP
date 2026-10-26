@@ -18,6 +18,7 @@ pub mod firewall;
 pub mod ftp;
 pub mod mail;
 pub mod monitor;
+pub mod packages;
 pub mod php;
 pub mod programs;
 pub mod security;
@@ -46,6 +47,14 @@ pub fn router(state: ApiState) -> Router {
         .route(
             "/api/v1/users/{username}",
             patch(users::update).delete(users::delete),
+        )
+        .route(
+            "/api/v1/packages",
+            get(packages::list).post(packages::create),
+        )
+        .route(
+            "/api/v1/packages/{id}",
+            patch(packages::update).delete(packages::delete),
         )
         .route(
             "/api/v1/accounts",

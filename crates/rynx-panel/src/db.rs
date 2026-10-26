@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use rynx_core::crypto::{now_rfc3339, now_unix, random_hex, sha256_hex};
 use rynx_core::{validate_email, validate_panel_username, PasswordPolicy};
 
+use crate::packages::{default_package, normalize_and_validate, PackageInput, PackageView};
 use crate::role::Role;
 
 pub const SESSION_COOKIE: &str = "rynx_session";
@@ -74,6 +75,33 @@ CREATE TABLE IF NOT EXISTS auth_events (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_events_at ON auth_events(at_unix);
 CREATE INDEX IF NOT EXISTS idx_auth_events_outcome ON auth_events(outcome, at_unix);
+
+CREATE TABLE IF NOT EXISTS packages (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    is_default         INTEGER NOT NULL DEFAULT 0,
+    account_mb         INTEGER NOT NULL DEFAULT 0,
+    bandwidth_mb       INTEGER NOT NULL DEFAULT 0,
+    backups            INTEGER NOT NULL DEFAULT 3,
+    incremental_backup INTEGER NOT NULL DEFAULT 0,
+    web_domains        INTEGER NOT NULL DEFAULT 0,
+    web_aliases        INTEGER NOT NULL DEFAULT 0,
+    web_backend        TEXT NOT NULL DEFAULT 'php',
+    nginx_template     TEXT NOT NULL DEFAULT 'hosting',
+    dns_template       TEXT NOT NULL DEFAULT 'child-ns',
+    dns_zones          INTEGER NOT NULL DEFAULT 0,
+    dns_records        INTEGER NOT NULL DEFAULT 0,
+    nameservers        TEXT NOT NULL DEFAULT '["ns1.example.tld","ns2.example.tld"]',
+    mail_domains       INTEGER NOT NULL DEFAULT 0,
+    mail_accounts      INTEGER NOT NULL DEFAULT 0,
+    mail_rate_limit    INTEGER NOT NULL DEFAULT 0,
+    databases          INTEGER NOT NULL DEFAULT 0,
+    system_databases   INTEGER NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_name_lower ON packages(lower(name));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_default ON packages(is_default) WHERE is_default = 1;
 "#;
 
 #[derive(Debug, thiserror::Error)]
@@ -244,6 +272,8 @@ impl PanelDb {
             "CREATE INDEX IF NOT EXISTS idx_panel_users_account ON panel_users(account);
              CREATE INDEX IF NOT EXISTS idx_panel_users_email_lower ON panel_users(lower(email));",
         )?;
+        drop(conn);
+        db.ensure_default_package()?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -889,6 +919,257 @@ impl PanelDb {
             )
             .optional()?)
     }
+
+    /// Ensures the seeded editable "Por defecto" package exists.
+    pub fn ensure_default_package(&self) -> Result<(), PanelError> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM packages WHERE is_default = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        if count > 0 {
+            return Ok(());
+        }
+        let existing: Option<String> = conn
+            .query_row(
+                "SELECT id FROM packages WHERE lower(name) = lower('Por defecto') LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            conn.execute(
+                "UPDATE packages SET is_default = 1, updated_at = ?2 WHERE id = ?1",
+                params![id, now_rfc3339()],
+            )?;
+            return Ok(());
+        }
+        let input = default_package();
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO packages (id, name, is_default, account_mb, bandwidth_mb, backups, \
+                 incremental_backup, web_domains, web_aliases, web_backend, nginx_template, \
+                 dns_template, dns_zones, dns_records, nameservers, mail_domains, mail_accounts, \
+                 mail_rate_limit, databases, system_databases, created_at, updated_at) \
+             VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                 ?17, ?18, ?19, ?20, ?21)",
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                input.name,
+                input.account_mb,
+                input.bandwidth_mb,
+                input.backups,
+                input.incremental_backup as i64,
+                input.web_domains,
+                input.web_aliases,
+                input.web_backend,
+                input.nginx_template,
+                input.dns_template,
+                input.dns_zones,
+                input.dns_records,
+                serde_json::to_string(&input.nameservers).unwrap_or_else(|_| "[]".into()),
+                input.mail_domains,
+                input.mail_accounts,
+                input.mail_rate_limit,
+                input.databases,
+                input.system_databases,
+                now,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_packages(&self) -> Result<Vec<PackageView>, PanelError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, is_default, account_mb, bandwidth_mb, backups, incremental_backup, \
+                    web_domains, web_aliases, web_backend, nginx_template, dns_template, dns_zones, \
+                    dns_records, nameservers, mail_domains, mail_accounts, mail_rate_limit, \
+                    databases, system_databases, created_at, updated_at \
+             FROM packages ORDER BY is_default DESC, lower(name) ASC",
+        )?;
+        let rows = stmt.query_map([], map_package)?;
+        let mut packages = Vec::new();
+        for row in rows {
+            packages.push(row?);
+        }
+        Ok(packages)
+    }
+
+    pub fn get_package(&self, id: &str) -> Result<Option<PackageView>, PanelError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, name, is_default, account_mb, bandwidth_mb, backups, incremental_backup, \
+                        web_domains, web_aliases, web_backend, nginx_template, dns_template, dns_zones, \
+                        dns_records, nameservers, mail_domains, mail_accounts, mail_rate_limit, \
+                        databases, system_databases, created_at, updated_at \
+                 FROM packages WHERE id = ?1",
+                params![id],
+                map_package,
+            )
+            .optional()?)
+    }
+
+    pub fn create_package(&self, input: PackageInput) -> Result<PackageView, PanelError> {
+        let input = normalize_and_validate(input)?;
+        let conn = self.conn()?;
+        if package_name_exists(&conn, &input.name, None)? {
+            return Err(PanelError::Conflict(format!(
+                "a package named '{}' already exists",
+                input.name
+            )));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO packages (id, name, is_default, account_mb, bandwidth_mb, backups, \
+                 incremental_backup, web_domains, web_aliases, web_backend, nginx_template, \
+                 dns_template, dns_zones, dns_records, nameservers, mail_domains, mail_accounts, \
+                 mail_rate_limit, databases, system_databases, created_at, updated_at) \
+             VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
+                 ?17, ?18, ?19, ?20, ?21)",
+            params![
+                id,
+                input.name,
+                input.account_mb,
+                input.bandwidth_mb,
+                input.backups,
+                input.incremental_backup as i64,
+                input.web_domains,
+                input.web_aliases,
+                input.web_backend,
+                input.nginx_template,
+                input.dns_template,
+                input.dns_zones,
+                input.dns_records,
+                serde_json::to_string(&input.nameservers).unwrap_or_else(|_| "[]".into()),
+                input.mail_domains,
+                input.mail_accounts,
+                input.mail_rate_limit,
+                input.databases,
+                input.system_databases,
+                now,
+                now,
+            ],
+        )?;
+        self.get_package(&id)?
+            .ok_or_else(|| PanelError::NotFound(format!("package '{id}' not found")))
+    }
+
+    pub fn update_package(&self, id: &str, input: PackageInput) -> Result<PackageView, PanelError> {
+        let input = normalize_and_validate(input)?;
+        let conn = self.conn()?;
+        if conn
+            .query_row("SELECT 1 FROM packages WHERE id = ?1", params![id], |_| {
+                Ok(())
+            })
+            .optional()?
+            .is_none()
+        {
+            return Err(PanelError::NotFound(format!("package '{id}' not found")));
+        }
+        if package_name_exists(&conn, &input.name, Some(id))? {
+            return Err(PanelError::Conflict(format!(
+                "a package named '{}' already exists",
+                input.name
+            )));
+        }
+        conn.execute(
+            "UPDATE packages SET name = ?2, account_mb = ?3, bandwidth_mb = ?4, backups = ?5, \
+                 incremental_backup = ?6, web_domains = ?7, web_aliases = ?8, web_backend = ?9, \
+                 nginx_template = ?10, dns_template = ?11, dns_zones = ?12, dns_records = ?13, \
+                 nameservers = ?14, mail_domains = ?15, mail_accounts = ?16, mail_rate_limit = ?17, \
+                 databases = ?18, system_databases = ?19, updated_at = ?20 \
+             WHERE id = ?1",
+            params![
+                id,
+                input.name,
+                input.account_mb,
+                input.bandwidth_mb,
+                input.backups,
+                input.incremental_backup as i64,
+                input.web_domains,
+                input.web_aliases,
+                input.web_backend,
+                input.nginx_template,
+                input.dns_template,
+                input.dns_zones,
+                input.dns_records,
+                serde_json::to_string(&input.nameservers).unwrap_or_else(|_| "[]".into()),
+                input.mail_domains,
+                input.mail_accounts,
+                input.mail_rate_limit,
+                input.databases,
+                input.system_databases,
+                now_rfc3339(),
+            ],
+        )?;
+        self.get_package(id)?
+            .ok_or_else(|| PanelError::NotFound(format!("package '{id}' not found")))
+    }
+
+    pub fn delete_package(&self, id: &str) -> Result<(), PanelError> {
+        let existing = self
+            .get_package(id)?
+            .ok_or_else(|| PanelError::NotFound(format!("package '{id}' not found")))?;
+        if existing.is_default {
+            return Err(PanelError::Conflict(
+                "the default package cannot be deleted".into(),
+            ));
+        }
+        let conn = self.conn()?;
+        conn.execute("DELETE FROM packages WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+}
+
+fn package_name_exists(
+    conn: &Connection,
+    name: &str,
+    exclude_id: Option<&str>,
+) -> Result<bool, PanelError> {
+    let found: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM packages WHERE lower(name) = lower(?1) \
+             AND (?2 IS NULL OR id <> ?2) LIMIT 1",
+            params![name, exclude_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
+}
+
+fn map_package(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackageView> {
+    let nameservers: String = row.get(14)?;
+    Ok(PackageView {
+        id: row.get(0)?,
+        is_default: row.get::<_, i64>(2)? != 0,
+        package: PackageInput {
+            name: row.get(1)?,
+            account_mb: row.get(3)?,
+            bandwidth_mb: row.get(4)?,
+            backups: row.get(5)?,
+            incremental_backup: row.get::<_, i64>(6)? != 0,
+            web_domains: row.get(7)?,
+            web_aliases: row.get(8)?,
+            web_backend: row.get(9)?,
+            nginx_template: row.get(10)?,
+            dns_template: row.get(11)?,
+            dns_zones: row.get(12)?,
+            dns_records: row.get(13)?,
+            nameservers: serde_json::from_str(&nameservers).unwrap_or_default(),
+            mail_domains: row.get(15)?,
+            mail_accounts: row.get(16)?,
+            mail_rate_limit: row.get(17)?,
+            databases: row.get(18)?,
+            system_databases: row.get(19)?,
+        },
+        created_at: row.get(20)?,
+        updated_at: row.get(21)?,
+    })
 }
 
 #[cfg(test)]
@@ -1089,5 +1370,51 @@ mod tests {
             .consume_password_reset(&PasswordPolicy::default(), &second, "Reset-Strong-Pass2")
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn seeds_the_default_package() {
+        let (_dir, db) = temp_db();
+        let packages = db.list_packages().unwrap();
+        assert_eq!(packages.len(), 1);
+        let default = &packages[0];
+        assert!(default.is_default);
+        assert_eq!(default.package.name, "Por defecto");
+        assert_eq!(default.package.backups, 3);
+        assert_eq!(default.package.mail_rate_limit, 200);
+        assert_eq!(
+            default.package.nameservers,
+            vec!["ns1.example.tld", "ns2.example.tld"]
+        );
+    }
+
+    #[test]
+    fn creates_updates_and_protects_packages() {
+        let (_dir, db) = temp_db();
+        let mut input = default_package();
+        input.name = "Starter".into();
+        input.account_mb = 500;
+        let created = db.create_package(input).unwrap();
+        assert!(!created.is_default);
+        assert_eq!(created.package.account_mb, 500);
+
+        let mut update = created.package.clone();
+        update.mail_accounts = 25;
+        let updated = db.update_package(&created.id, update).unwrap();
+        assert_eq!(updated.package.mail_accounts, 25);
+
+        let mut duplicate = default_package();
+        duplicate.name = "starter".into();
+        assert!(matches!(
+            db.create_package(duplicate),
+            Err(PanelError::Conflict(_))
+        ));
+
+        db.delete_package(&created.id).unwrap();
+        let default_id = db.list_packages().unwrap()[0].id.clone();
+        assert!(matches!(
+            db.delete_package(&default_id),
+            Err(PanelError::Conflict(_))
+        ));
     }
 }

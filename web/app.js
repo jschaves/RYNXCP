@@ -11,7 +11,7 @@ const S = {
   mode: null,
   impersonatedBy: null,
   resetToken: null,
-  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], mailDomains: [], mailAccounts: [] },
+  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], mailDomains: [], mailAccounts: [] },
 };
 
 const RUNTIMES = {
@@ -41,6 +41,7 @@ const NAV_ITEMS = [
   { id: 'backups', label: 'Backups', group: 'Operación' },
   { id: 'monitor', label: 'Monitor', group: 'Operación' },
   { id: 'users', label: 'Usuarios', group: 'Administración', admin: true },
+  { id: 'packages', label: 'Paquetes', group: 'Administración', admin: true },
   { id: 'security', label: 'Seguridad', group: 'Administración', admin: true },
   { id: 'firewall', label: 'Cortafuegos', group: 'Administración', admin: true },
   { id: 'programs', label: 'Programas', group: 'Administración', admin: true },
@@ -67,6 +68,7 @@ const TITLES = {
   mail: ['Correo', 'Dominios, buzones, webmail y seguridad DNS'],
   ssl: ['Certificados', 'Emisión y estado de certificados Let\'s Encrypt'],
   users: ['Usuarios del panel', 'Acceso al panel con roles y sesiones revocables'],
+  packages: ['Paquetes', 'Planes de hosting y límites de recursos; 0 significa sin límite'],
   audit: ['Auditoría', 'Registro append-only encadenado por SHA-256'],
   system: ['Sistema', 'Información del nodo y reconciliación de estado'],
 };
@@ -376,6 +378,7 @@ const renderers = {
   php: renderPhp,
   ssl: renderSsl,
   users: renderUsers,
+  packages: renderPackages,
   audit: renderAudit,
   system: renderSystem,
 };
@@ -422,6 +425,7 @@ const LIST_ENDPOINTS = {
   programs: ['/api/v1/system/programs', 'programs'],
   updates: ['/api/v1/system/updates', 'updates'],
   users: ['/api/v1/users', null],
+  packages: ['/api/v1/packages', null],
 };
 
 async function loadList(key) {
@@ -547,6 +551,27 @@ function fCheck(name, label, checked = true) {
 
 function fTextarea(name, label, opts = {}) {
   return field(name, label, `<textarea name="${esc(name)}" placeholder="${esc(opts.placeholder || '')}">${esc(opts.value || '')}</textarea>`, opts.help, opts.full);
+}
+
+/* ---------------- package helpers ---------------- */
+
+function limitText(value) {
+  return Number(value) === 0 ? T('Sin límite') : String(value);
+}
+
+function formSection(title, help = '') {
+  return `<div class="form-section"><h3>${esc(title)}</h3>${help ? `<p class="hint">${esc(help)}</p>` : ''}</div>`;
+}
+
+function pkgNumber(name, label, opts = {}) {
+  const min = opts.min === undefined ? 0 : opts.min;
+  const max = opts.max === undefined ? 1000 : opts.max;
+  const value = opts.value === undefined ? 1 : opts.value;
+  const disabled = opts.disabled ? ' disabled' : '';
+  const input = `<div class="limit-row"><input name="${esc(name)}" type="number" min="${min}" max="${max}" step="1" value="${esc(value)}"${disabled}>` +
+    (opts.unlimited === false ? '' : `<button type="button" class="btn tiny ghost" data-limit="${esc(name)}"${disabled}>${esc(T('Sin límite'))}</button>`) +
+    '</div>';
+  return field(name, label, input, opts.help, opts.full);
 }
 
 /* ---------------- shared cell builders ---------------- */
@@ -1603,6 +1628,160 @@ function openUserModal() {
   });
 }
 
+/* ---------------- packages ---------------- */
+
+async function renderPackages() {
+  await loadList('packages');
+  const rows = S.data.packages.map((pkg) => [
+    td(`<div class="cell-title">${esc(pkg.name)}</div>${pkg.is_default ? `<div class="cell-sub">${esc(T('Por defecto'))}</div>` : ''}`),
+    td(esc(limitText(pkg.account_mb))),
+    td(esc(limitText(pkg.bandwidth_mb))),
+    td(esc(pkg.backups)),
+    td(esc(limitText(pkg.web_domains))),
+    td(esc(limitText(pkg.mail_accounts))),
+    td(esc(limitText(pkg.databases))),
+    td([
+      btn(T('Editar'), 'package-edit', pkg.id),
+      pkg.is_default ? '' : btn(T('Eliminar'), 'package-delete', pkg.id, 'tiny danger'),
+    ].join(''), 'actions'),
+  ]);
+
+  $('#view').innerHTML =
+    sectionHead('Paquetes', `<button class="btn primary" data-action="package-new">${T('Nuevo paquete')}</button>`) +
+    `<p class="hint" style="margin:0 0 14px">${esc(T('0 significa sin límite. El paquete Por defecto es editable pero no se puede eliminar.'))}</p>` +
+    table(
+      ['Paquete', 'Cuenta (MB)', 'Ancho de banda', 'Backups', 'Dominios web', 'Cuentas de email', 'Bases de datos', ''],
+      rows,
+      'Aún no hay paquetes.',
+    );
+}
+
+function openPackageModal(pkg = null) {
+  const backendOptions = [
+    { value: 'static', label: 'Estático' },
+    { value: 'php', label: 'PHP (FPM)' },
+    { value: 'node', label: 'Node.js (systemd)' },
+    { value: 'python', label: 'Python (WSGI/ASGI)' },
+    { value: 'ruby', label: 'Ruby' },
+    { value: 'java', label: 'Java (JAR)' },
+    { value: 'dotnet', label: '.NET' },
+    { value: 'go', label: 'Go (binario compilado)' },
+  ];
+  const nginxOptions = [
+    { value: 'caching', label: 'Caching' },
+    { value: 'hosting', label: 'Hosting' },
+    { value: 'suspended', label: 'Suspended' },
+  ];
+  const dnsOptions = [
+    { value: 'child-ns', label: 'child-ns' },
+    { value: 'no-mail', label: 'No mail' },
+    { value: 'gmail', label: 'Gmail' },
+    { value: 'office365', label: 'Office 365' },
+    { value: 'zoho', label: 'Zoho' },
+  ];
+  const yesNo = [
+    { value: '0', label: 'No' },
+    { value: '1', label: 'Sí' },
+  ];
+  const pick = (field, fallback) => (pkg && pkg[field] !== undefined ? pkg[field] : fallback);
+
+  openModal({
+    title: pkg ? `Editar paquete · ${pkg.name}` : 'Nuevo paquete',
+    submitLabel: pkg ? 'Guardar cambios' : 'Crear paquete',
+    html: `<div class="form-grid">
+      ${formSection('General', 'Los límites van de 0 a 1000. 0 significa sin límite.')}
+      ${fInput('name', 'Nombre del paquete', { required: true, value: pick('name', ''), placeholder: 'Starter' })}
+      ${pkgNumber('account_mb', 'Cuenta (MB)', { value: pick('account_mb', 1) })}
+      ${pkgNumber('bandwidth_mb', 'Ancho de banda', { value: pick('bandwidth_mb', 1) })}
+      ${pkgNumber('backups', 'Backups', { min: 1, max: 3, value: pick('backups', 1), unlimited: false, help: 'Entre 1 y 3.' })}
+      ${fSelect('incremental_backup', 'Backup incremental', yesNo, { value: pick('incremental_backup', false) ? '1' : '0' })}
+
+      ${formSection('Web')}
+      ${pkgNumber('web_domains', 'Dominios web', { value: pick('web_domains', 1) })}
+      ${pkgNumber('web_aliases', 'Alias web', { value: pick('web_aliases', 1) })}
+      ${fSelect('web_backend', 'Backend', backendOptions, { value: pick('web_backend', 'php') })}
+      ${fSelect('nginx_template', 'Plantilla proxy Nginx', nginxOptions, { value: pick('nginx_template', 'hosting') })}
+
+      ${formSection('DNS')}
+      ${fSelect('dns_template', 'Plantilla DNS', dnsOptions, { value: pick('dns_template', 'child-ns') })}
+      ${pkgNumber('dns_zones', 'Zonas DNS', { value: pick('dns_zones', 0), disabled: true, unlimited: false, help: 'Valor calculado; no editable.' })}
+      ${pkgNumber('dns_records', 'Registros DNS (por dominio)', { value: pick('dns_records', 0), disabled: true, unlimited: false, help: 'Valor calculado; no editable.' })}
+      <div class="field full">
+        <span>Servidores de nombre</span>
+        <div class="stack" id="package-ns"></div>
+        <button type="button" class="btn ghost tiny" data-add-ns>Añadir nombre de servidor</button>
+        <small class="hint">Se usan como ns1/ns2 del dominio; puedes añadir más.</small>
+      </div>
+
+      ${formSection('Correo')}
+      ${pkgNumber('mail_domains', 'Dominios de email', { value: pick('mail_domains', 1) })}
+      ${pkgNumber('mail_accounts', 'Cuentas de email (por dominio)', { value: pick('mail_accounts', 5) })}
+      ${pkgNumber('mail_rate_limit', 'Límite de tasas', { value: pick('mail_rate_limit', 0) })}
+
+      ${formSection('Bases de datos')}
+      ${pkgNumber('databases', 'Bases de datos', { value: pick('databases', 0) })}
+
+      ${formSection('Sistema')}
+      ${pkgNumber('system_databases', 'Bases de datos', { value: pick('system_databases', 0), help: 'Límite de bases de datos del sistema.' })}
+    </div>`,
+    onMount: (form) => {
+      const nsRoot = form.querySelector('#package-ns');
+      const addNameserver = (value = '') => {
+        const row = document.createElement('div');
+        row.className = 'limit-row';
+        row.innerHTML = `<input name="nameservers" type="text" value="${esc(value)}" placeholder="ns1.example.tld">`;
+        nsRoot.appendChild(row);
+      };
+      const initial = pkg && Array.isArray(pkg.nameservers) && pkg.nameservers.length
+        ? pkg.nameservers
+        : ['ns1.example.tld', 'ns2.example.tld'];
+      initial.forEach(addNameserver);
+      form.querySelector('[data-add-ns]').addEventListener('click', () => addNameserver(''));
+
+      form.querySelectorAll('[data-limit]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const input = form.elements[button.dataset.limit];
+          if (input) input.value = '0';
+        });
+      });
+    },
+    onSubmit: async (form) => {
+      const nameservers = Array.from(form.querySelectorAll('input[name="nameservers"]'))
+        .map((input) => input.value.trim())
+        .filter(Boolean);
+      const payload = {
+        name: val(form, 'name'),
+        account_mb: num(form, 'account_mb'),
+        bandwidth_mb: num(form, 'bandwidth_mb'),
+        backups: num(form, 'backups', 1),
+        incremental_backup: val(form, 'incremental_backup') === '1',
+        web_domains: num(form, 'web_domains'),
+        web_aliases: num(form, 'web_aliases'),
+        web_backend: val(form, 'web_backend'),
+        nginx_template: val(form, 'nginx_template'),
+        dns_template: val(form, 'dns_template'),
+        dns_zones: num(form, 'dns_zones'),
+        dns_records: num(form, 'dns_records'),
+        nameservers,
+        mail_domains: num(form, 'mail_domains'),
+        mail_accounts: num(form, 'mail_accounts'),
+        mail_rate_limit: num(form, 'mail_rate_limit'),
+        databases: num(form, 'databases'),
+        system_databases: num(form, 'system_databases'),
+      };
+      if (!payload.name) throw new Error('El nombre del paquete es obligatorio');
+      if (pkg) {
+        await api(`/api/v1/packages/${encodeURIComponent(pkg.id)}`, { method: 'PATCH', body: payload });
+        toast('Paquete actualizado');
+      } else {
+        await api('/api/v1/packages', { method: 'POST', body: payload });
+        toast('Paquete creado');
+      }
+      await refresh();
+    },
+  });
+}
+
 function isOwner() {
   return S.user && S.user.role === 'owner';
 }
@@ -1960,6 +2139,22 @@ async function handleAction(action, id) {
       if (!confirm('¿Actualizar todos los paquetes del sistema ahora? Puede reiniciar servicios.')) return;
       const result = await api('/api/v1/system/updates/apply', { method: 'POST' });
       showOutput('Actualización completada', result.output || 'Sin salida.');
+      return refresh();
+    }
+    case 'package-new':
+      return openPackageModal();
+    case 'package-edit': {
+      const pkg = S.data.packages.find((item) => item.id === id);
+      if (!pkg) throw new Error('Paquete no encontrado');
+      return openPackageModal(pkg);
+    }
+    case 'package-delete': {
+      const pkg = S.data.packages.find((item) => item.id === id);
+      if (!pkg) throw new Error('Paquete no encontrado');
+      if (pkg.is_default) throw new Error('El paquete Por defecto no se puede eliminar');
+      if (!confirm(`¿Eliminar el paquete ${pkg.name}?`)) return;
+      await api(`/api/v1/packages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      toast('Paquete eliminado');
       return refresh();
     }
     default:
