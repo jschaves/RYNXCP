@@ -26,7 +26,16 @@ use crate::executor::{ExecError, Executor, MailAccountConfig};
 use crate::state::StateStore;
 
 const WEBMAIL_ROOT: &str = "/usr/share/roundcube";
+const WEBMAIL_PUBLIC_ROOT: &str = "/usr/share/roundcube/public_html";
 const WEBMAIL_PHP_SOCKET: &str = "/run/php/php8.5-fpm.sock";
+
+fn webmail_root() -> &'static str {
+    if Path::new(WEBMAIL_PUBLIC_ROOT).is_dir() {
+        WEBMAIL_PUBLIC_ROOT
+    } else {
+        WEBMAIL_ROOT
+    }
+}
 
 fn exec_error(err: ExecError) -> WireError {
     match err {
@@ -1219,7 +1228,7 @@ impl Reconciler {
             &aliases,
             cert,
             &self.cfg.acme_root.display().to_string(),
-            WEBMAIL_ROOT,
+            webmail_root(),
             WEBMAIL_PHP_SOCKET,
         );
         self.exec
