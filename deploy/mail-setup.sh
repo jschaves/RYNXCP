@@ -168,7 +168,9 @@ cat >"$DOVECOT_CONF" <<EOF
 # Dovecot 2.4 configuration.
 protocols = imap pop3 lmtp sieve
 mail_driver = maildir
+mail_home = ${VMAIL_ROOT}/%{user | domain}/%{user | username}
 mail_path = ${VMAIL_ROOT}/%{user | domain}/%{user | username}/Maildir
+mail_inbox_path = ${VMAIL_ROOT}/%{user | domain}/%{user | username}/Maildir
 mail_uid = ${MAIL_UID}
 mail_gid = ${MAIL_GID}
 first_valid_uid = ${MAIL_UID}

@@ -1398,7 +1398,9 @@ impl Executor for RealExecutor {
                  # Dovecot 2.4 configuration.\n\
                  protocols = imap pop3 lmtp sieve\n\
                  mail_driver = maildir\n\
+                 mail_home = /var/vmail/%{user | domain}/%{user | username}\n\
                  mail_path = /var/vmail/%{user | domain}/%{user | username}/Maildir\n\
+                 mail_inbox_path = /var/vmail/%{user | domain}/%{user | username}/Maildir\n\
                  mail_uid = 5000\n\
                  mail_gid = 5000\n\
                  first_valid_uid = 5000\n\
