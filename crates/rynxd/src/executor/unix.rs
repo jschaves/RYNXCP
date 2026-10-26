@@ -1432,6 +1432,7 @@ impl Executor for RealExecutor {
                    quota = yes\n\
                  }\n\
                  protocol lmtp {\n\
+                   auth_username_format = %{user}\n\
                    mail_plugins {\n\
                      sieve = yes\n\
                    }\n\
@@ -1484,7 +1485,10 @@ impl Executor for RealExecutor {
                      group = postfix\n\
                    }\n\
                  }\n\
-                 protocol lmtp { mail_plugins = $mail_plugins quota sieve }\n\
+                 protocol lmtp {\n\
+                   auth_username_format = %u\n\
+                   mail_plugins = $mail_plugins quota sieve\n\
+                 }\n\
                  protocol imap { mail_plugins = $mail_plugins quota }\n\
                  protocol pop3 { mail_plugins = $mail_plugins quota }\n\
                  plugin {\n\

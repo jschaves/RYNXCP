@@ -202,6 +202,7 @@ mail_plugins {
   quota = yes
 }
 protocol lmtp {
+  auth_username_format = %{user}
   mail_plugins {
     sieve = yes
   }
@@ -254,7 +255,10 @@ service lmtp {
     group = postfix
   }
 }
-protocol lmtp { mail_plugins = \$mail_plugins quota sieve }
+protocol lmtp {
+  auth_username_format = %u
+  mail_plugins = \$mail_plugins quota sieve
+}
 protocol imap { mail_plugins = \$mail_plugins quota }
 protocol pop3 { mail_plugins = \$mail_plugins quota }
 plugin {
