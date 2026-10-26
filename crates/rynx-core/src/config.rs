@@ -159,7 +159,7 @@ impl Default for DaemonConfig {
                 firewall_enabled: true,
                 firewall_backend: "sim".into(),
                 firewall_ssh_port: 22,
-                panel_port: 80,
+                panel_port: 2083,
                 nft_bin: "nft".into(),
             }
         } else {
@@ -229,7 +229,7 @@ impl Default for DaemonConfig {
                 firewall_enabled: false,
                 firewall_backend: "nftables".into(),
                 firewall_ssh_port: 22,
-                panel_port: 80,
+                panel_port: 2083,
                 nft_bin: "nft".into(),
             }
         }

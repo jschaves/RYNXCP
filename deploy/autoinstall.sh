@@ -40,7 +40,7 @@ DIR="${RYNXCP_DIR:-/opt/rynxcp-src}"
 HOST_ARG="${RYNX_HOST:-}"
 EMAIL_ARG="${RYNX_ADMIN_EMAIL:-}"
 PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
-PANEL_PORT="${RYNX_PANEL_PORT:-80}"
+PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
 NO_TLS=0
 
 LOG="/var/log/rynxcp/autoinstall.log"
@@ -59,7 +59,7 @@ Options:
   --host <fqdn|ip>      Panel hostname or public IP. Auto-detected when omitted.
   --email <address>     Admin email. Defaults to admin@<host> for domains.
   --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD instead.
-  --panel-port <port>   Public panel port (default 80).
+  --panel-port <port>   Public panel port (default 2083; 80 stays for ACME).
   --no-tls              Do not request a Let's Encrypt certificate.
   --repo <url>          RYNXCP Git repository.
   --ref <ref>           Branch or tag to install (default main).

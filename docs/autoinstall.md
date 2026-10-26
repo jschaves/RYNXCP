@@ -29,6 +29,10 @@ admin email, generates a strong admin password, and installs everything. The
 generated password is printed once and stored in
 `/root/rynxcp-credentials.txt` (mode `0600`).
 
+The panel is published on **port 2083** by default
+(`https://<host>:2083`, or `http://<ip>:2083` without TLS). Port 80 remains
+dedicated to the ACME challenge and redirects to 2083.
+
 Useful options:
 
 ```bash
@@ -45,7 +49,7 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 | `--host <fqdn\|ip>` | Panel hostname or public IPv4. Auto-detected when omitted. |
 | `--email <address>` | Admin email. Defaults to `admin@<host>` for domains. |
 | `--password <value>` | Admin password. Prefer `RYNX_ADMIN_PASSWORD`. |
-| `--panel-port <port>` | Public panel port (default `80`; `80` is kept for ACME). |
+| `--panel-port <port>` | Public panel port (default `2083`; `80` is kept for ACME). |
 | `--no-tls` | Do not request a Let's Encrypt certificate. |
 | `--repo <url>` | RYNXCP Git repository. |
 | `--ref <ref>` | Branch/tag to install (default `main`). |

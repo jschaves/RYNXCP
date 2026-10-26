@@ -61,7 +61,7 @@ MAGICRITA_PORT="${MAGICRITA_PORT:-8787}"
 PANEL_HOST="${RYNX_HOST:-${PANEL_HOST:-}}"
 PANEL_EMAIL="${RYNX_ADMIN_EMAIL:-${PANEL_EMAIL:-}}"
 PANEL_PASSWORD="${RYNX_ADMIN_PASSWORD:-${PANEL_PASSWORD:-}}"
-PANEL_PORT="${RYNX_PANEL_PORT:-${PANEL_PORT:-80}}"
+PANEL_PORT="${RYNX_PANEL_PORT:-${PANEL_PORT:-2083}}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 ASSUME_YES=0
@@ -107,7 +107,7 @@ Panel RYNXCP (se reenvían a deploy/preinstall.sh):
   --panel-host HOST               Host/IP del panel. Si se omite, preinstall lo detecta.
   --panel-email EMAIL             Email del administrador del panel.
   --panel-password PASS           Password del panel (mejor RYNX_ADMIN_PASSWORD).
-  --panel-port PORT               Puerto público del panel (por defecto 80).
+  --panel-port PORT               Puerto público del panel (por defecto 2083).
                                   El 80 se mantiene para el reto ACME.
 
 MagicRita:

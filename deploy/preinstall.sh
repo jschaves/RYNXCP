@@ -20,7 +20,7 @@ PANEL_USER="admin"
 HOST_ARG=""
 EMAIL_ARG=""
 PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
-PANEL_PORT="${RYNX_PANEL_PORT:-80}"
+PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
 ASSUME_YES=0
 NO_TLS=0
 SSH_PORT=""
@@ -43,7 +43,7 @@ Options:
   --email <address>     Admin email. Defaults to admin@<host> for domains.
   --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD env var to
                         avoid exposing it in the process list.
-  --panel-port <port>   Publish the panel on this TCP port (default 80).
+  --panel-port <port>   Publish the panel on this TCP port (default 2083).
                         Port 80 is still used for the ACME challenge.
   --no-tls              Do not request a Let's Encrypt certificate.
   --yes                 Assume yes for confirmations (non-interactive).

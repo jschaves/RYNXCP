@@ -357,7 +357,8 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 ```
 
 Both clone `main` and run `deploy/preinstall.sh`; the panel-only installer is
-fully non-interactive and generates the admin password. See
+fully non-interactive and generates the admin password. The panel is published
+on `https://<host>:2083` by default. See
 [docs/autoinstall.md](docs/autoinstall.md) for options and verification.
 
 ## One-shot pre-installer (recommended)
@@ -383,9 +384,10 @@ sudo RYNX_ADMIN_PASSWORD='Your-Strong-Pass1' \
   bash deploy/preinstall.sh --host panel.example.com --email admin@example.com --yes
 ```
 
-Add `--panel-port 2083` (or `RYNX_PANEL_PORT=2083`) to publish the panel on a
-custom port. Port 80 is still used for the ACME HTTP-01 challenge and redirects
-to the panel port.
+The panel is published on **port 2083** by default
+(`https://<host>:2083`, or `http://<ip>:2083` without TLS). Use
+`--panel-port <port>` (or `RYNX_PANEL_PORT=<port>`) to change it. Port 80 is
+still used for the ACME HTTP-01 challenge and redirects to the panel port.
 
 What it installs and configures:
 
@@ -423,8 +425,9 @@ What it installs and configures:
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
 
-The panel is published at `http(s)://<host>[:port]` and the administrator is created with
-the email/password you entered. Email is opt-in per website from the **Correo**
+The panel is published at `http(s)://<host>:2083` by default (port `80` stays for
+the ACME challenge) and the administrator is created with the email/password you
+entered. Email is opt-in per website from the **Correo**
 view; enabling it starts the webmail certificate job and provisions the mail DNS
 records.
 
