@@ -339,22 +339,52 @@ fn ensure_dir_components(
 
 fn set_mode(fd: std::os::fd::RawFd, mode: u32) -> ExecResult<()> {
     let rc = unsafe { libc::fchmod(fd, mode as libc::mode_t) };
+    if rc == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    #[cfg(target_os = "linux")]
+    {
+        // cap-std opens directories with O_PATH, where fchmod fails with EBADF.
+        if error.raw_os_error() == Some(libc::EBADF) {
+            let path = std::ffi::CString::new(format!("/proc/self/fd/{fd}"))
+                .map_err(|_| ExecError::Io("invalid descriptor path".into()))?;
+            let rc = unsafe { libc::chmod(path.as_ptr(), mode as libc::mode_t) };
+            if rc == 0 {
+                return Ok(());
+            }
+            return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
+        }
+    }
+    Err(ExecError::Io(error.to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn set_owner_mode(fd: std::os::fd::RawFd, uid: u32, gid: u32, mode: u32) -> ExecResult<()> {
+    // fchown also fails with EBADF on O_PATH descriptors; AT_EMPTY_PATH applies
+    // the change to the directory the descriptor refers to.
+    let rc = unsafe {
+        libc::fchownat(
+            fd,
+            b"\0".as_ptr().cast(),
+            uid as libc::uid_t,
+            gid as libc::gid_t,
+            libc::AT_EMPTY_PATH,
+        )
+    };
     if rc != 0 {
         return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
     }
-    Ok(())
+    set_mode(fd, mode)
 }
 
+#[cfg(not(target_os = "linux"))]
 fn set_owner_mode(fd: std::os::fd::RawFd, uid: u32, gid: u32, mode: u32) -> ExecResult<()> {
     let rc = unsafe { libc::fchown(fd, uid as libc::uid_t, gid as libc::gid_t) };
     if rc != 0 {
         return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
     }
-    let rc = unsafe { libc::fchmod(fd, mode as libc::mode_t) };
-    if rc != 0 {
-        return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
-    }
-    Ok(())
+    set_mode(fd, mode)
 }
 
 #[async_trait]
