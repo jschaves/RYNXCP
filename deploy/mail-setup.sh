@@ -79,6 +79,12 @@ if ! getent passwd vmail >/dev/null; then
   useradd -u "$MAIL_UID" -g "$MAIL_GID" -d "$VMAIL_ROOT" -s /usr/sbin/nologin -M vmail
 fi
 install -d -o vmail -g vmail -m 0700 "$VMAIL_ROOT"
+chown "$MAIL_UID:$MAIL_GID" "$VMAIL_ROOT"
+chmod 0700 "$VMAIL_ROOT"
+while IFS= read -r -d '' existing_domain; do
+  chown "$MAIL_UID:$MAIL_GID" "$existing_domain"
+  chmod 0750 "$existing_domain"
+done < <(find "$VMAIL_ROOT" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
 log "Creating mail directories and default TLS certificate"
 install -d -m 0755 /etc/ssl/rynxcp "$MAIL_CERT_DIR"
