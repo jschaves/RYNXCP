@@ -84,6 +84,10 @@ location = /_rynx_auth {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 
+location = /phpmyadmin {
+    return 301 /phpmyadmin/;
+}
+
 location = /phpmyadmin/config.inc.php {
     auth_request /_rynx_auth;
     deny all;
