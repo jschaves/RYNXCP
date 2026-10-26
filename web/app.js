@@ -443,6 +443,8 @@ const LIST_ENDPOINTS = {
   users: ['/api/v1/users', null],
   packages: ['/api/v1/packages', null],
   accountPackages: ['/api/v1/packages/assignments', null],
+  mailDomains: ['/api/v1/mail/domains', 'domains'],
+  mailAccounts: ['/api/v1/mail/accounts', 'accounts'],
 };
 
 async function loadList(key) {
