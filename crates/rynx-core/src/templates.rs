@@ -576,7 +576,7 @@ pub fn bind_zone(
         .cloned()
         .unwrap_or_else(|| format!("ns1.{domain}"));
     let mut out = String::with_capacity(2048);
-    let _ = writeln!(out, "# {MARKER}");
+    let _ = writeln!(out, "; {MARKER}");
     let _ = writeln!(out, "$TTL {default_ttl}");
     let _ = writeln!(
         out,
@@ -686,6 +686,7 @@ mod tests {
     #[test]
     fn bind_zone_defaults_nameservers_when_unset() {
         let zone = bind_zone("example.com", &[], &[], 42, 300);
+        assert!(zone.starts_with("; managed-by: RYNXCP"));
         assert!(zone.contains("@ IN SOA ns1.example.com."));
         assert!(zone.contains("@ IN NS ns1.example.com."));
         assert!(zone.contains("@ IN NS ns2.example.com."));
