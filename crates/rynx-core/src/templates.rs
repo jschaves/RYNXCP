@@ -255,7 +255,7 @@ fn webmail_location(out: &mut String, webmail_root: &str, socket: &str) {
     out.push_str("    location ~ /\\.(?!well-known) { deny all; }\n");
     out.push_str("    location ~ ^/(config|temp|logs|SQL|bin|vendor)/ { deny all; }\n");
     out.push_str("    location / { try_files $uri $uri/ /index.php?$query_string; }\n");
-    out.push_str("    location ~ \\.php$ {\n");
+    out.push_str("    location ~ [^/]\\.php(/|$) {\n");
     out.push_str("        include snippets/fastcgi-php.conf;\n");
     let _ = writeln!(out, "        fastcgi_pass {socket};");
     out.push_str("    }\n");
@@ -804,6 +804,7 @@ mod tests {
         assert!(conf
             .contains("ssl_certificate /etc/letsencrypt/live/webmail.example.com/fullchain.pem;"));
         assert!(conf.contains("fastcgi_pass unix:/run/php/php8.5-fpm.sock;"));
+        assert!(conf.contains("location ~ [^/]\\.php(/|$)"));
         assert!(conf.contains("root /usr/share/roundcube;"));
         assert!(conf.contains("config|temp|logs"));
     }
