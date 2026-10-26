@@ -197,7 +197,7 @@ async fn dovecot_is_v24() -> bool {
 
 struct SiteRoot {
     dir: Dir,
-    #[cfg(target_os = "linux")]
+    #[allow(dead_code)]
     _identity: FsIdentityGuard,
 }
 
@@ -223,10 +223,10 @@ impl Drop for FsIdentityGuard {
 /// not await while the guard is alive.
 #[cfg(target_os = "linux")]
 fn switch_fs_identity(uid: u32, gid: u32) -> ExecResult<FsIdentityGuard> {
-    let old_uid = unsafe { libc::setfsuid(uid as libc::uid_t) };
-    let old_gid = unsafe { libc::setfsgid(gid as libc::gid_t) };
-    let check_uid = unsafe { libc::setfsuid(uid as libc::uid_t) };
-    let check_gid = unsafe { libc::setfsgid(gid as libc::gid_t) };
+    let old_uid = unsafe { libc::setfsuid(uid as libc::uid_t) } as libc::uid_t;
+    let old_gid = unsafe { libc::setfsgid(gid as libc::gid_t) } as libc::gid_t;
+    let check_uid = unsafe { libc::setfsuid(uid as libc::uid_t) } as libc::uid_t;
+    let check_gid = unsafe { libc::setfsgid(gid as libc::gid_t) } as libc::gid_t;
     if check_uid != uid as libc::uid_t || check_gid != gid as libc::gid_t {
         unsafe {
             libc::setfsuid(old_uid);
@@ -270,9 +270,6 @@ fn open_site_root(cfg: &DaemonConfig, username: &str, docroot: &str) -> ExecResu
     let dir = account_home.open_dir(docroot)?;
     Ok(SiteRoot {
         dir,
-        #[cfg(target_os = "linux")]
-        _identity: identity,
-        #[cfg(not(target_os = "linux"))]
         _identity: identity,
     })
 }
@@ -316,6 +313,7 @@ fn ensure_dir_components(
                 "invalid managed directory path".into(),
             ));
         };
+        let name = Path::new(name);
         match current.symlink_metadata(name) {
             Ok(meta) => {
                 if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -341,7 +339,7 @@ fn ensure_dir_components(
 }
 
 fn set_mode(fd: std::os::fd::RawFd, mode: u32) -> ExecResult<()> {
-    let rc = unsafe { libc::fchmod(fd, mode) };
+    let rc = unsafe { libc::fchmod(fd, mode as libc::mode_t) };
     if rc != 0 {
         return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
     }
@@ -349,11 +347,11 @@ fn set_mode(fd: std::os::fd::RawFd, mode: u32) -> ExecResult<()> {
 }
 
 fn set_owner_mode(fd: std::os::fd::RawFd, uid: u32, gid: u32, mode: u32) -> ExecResult<()> {
-    let rc = unsafe { libc::fchown(fd, uid, gid) };
+    let rc = unsafe { libc::fchown(fd, uid as libc::uid_t, gid as libc::gid_t) };
     if rc != 0 {
         return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
     }
-    let rc = unsafe { libc::fchmod(fd, mode) };
+    let rc = unsafe { libc::fchmod(fd, mode as libc::mode_t) };
     if rc != 0 {
         return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
     }
@@ -466,13 +464,13 @@ impl Executor for RealExecutor {
     ) -> ExecResult<Vec<FileEntry>> {
         validate_relative_path(path)?;
         let site = open_site_root(&self.cfg, username, docroot)?;
-        let mut read_dir = if path.is_empty() {
+        let read_dir = if path.is_empty() {
             site.dir.entries()?
         } else {
             site.dir.read_dir(path)?
         };
         let mut entries = Vec::new();
-        for entry in &mut read_dir {
+        for entry in read_dir {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().to_string();
             let relative = if path.is_empty() {
@@ -480,7 +478,7 @@ impl Executor for RealExecutor {
             } else {
                 Path::new(path).join(&name)
             };
-            let meta = site.dir.symlink_metadata(&relative)?;
+            let meta = site.dir.symlink_metadata(relative.as_path())?;
             let kind = if meta.is_dir() {
                 "dir"
             } else if meta.is_file() {
@@ -596,7 +594,7 @@ impl Executor for RealExecutor {
         let site = open_site_root(&self.cfg, username, docroot)?;
         let source = Path::new(path);
         let target = source.parent().unwrap_or(Path::new("")).join(new_name);
-        site.dir.rename(source, &site.dir, &target)?;
+        site.dir.rename(source, &site.dir, target.as_path())?;
         Ok(())
     }
 
