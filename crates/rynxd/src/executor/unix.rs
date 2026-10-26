@@ -3,13 +3,12 @@
 
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use async_trait::async_trait;
 use cap_std::ambient_authority;
-use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};
+use cap_std::fs::{Dir, MetadataExt, OpenOptions as CapOpenOptions};
 use nix::unistd::{chown, Gid, Uid, User};
 use time::{format_description::well_known::Rfc3339, macros::format_description, OffsetDateTime};
 use tokio::io::AsyncWriteExt;
@@ -491,7 +490,7 @@ impl Executor for RealExecutor {
             let modified = meta
                 .modified()
                 .ok()
-                .and_then(|value| OffsetDateTime::from(value).format(&Rfc3339).ok());
+                .and_then(|value| OffsetDateTime::from(value.into_std()).format(&Rfc3339).ok());
             entries.push(FileEntry {
                 name,
                 kind: kind.to_string(),
