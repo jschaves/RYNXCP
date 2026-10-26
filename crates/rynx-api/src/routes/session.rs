@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 use axum::extract::{ConnectInfo, Path, State};
@@ -401,17 +401,32 @@ fn clear_cookie(secure: bool) -> String {
     cookie
 }
 
+fn parse_ip(value: &str) -> Option<String> {
+    value
+        .trim()
+        .trim_matches('"')
+        .parse::<IpAddr>()
+        .ok()
+        .map(|ip| ip.to_string())
+}
+
 fn client_ip(
     headers: &HeaderMap,
     connect: Option<&ConnectInfo<SocketAddr>>,
     trust_proxy: bool,
 ) -> String {
     if trust_proxy {
+        // Nginx overwrites X-Real-IP with $remote_addr. Never trust the
+        // client-controlled prefix of X-Forwarded-For.
+        if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            if let Some(ip) = parse_ip(value) {
+                return ip;
+            }
+        }
         if let Some(value) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-            if let Some(first) = value.split(',').next() {
-                let first = first.trim();
-                if !first.is_empty() {
-                    return first.to_string();
+            if let Some(last) = value.rsplit(',').next() {
+                if let Some(ip) = parse_ip(last) {
+                    return ip;
                 }
             }
         }
@@ -419,4 +434,32 @@ fn client_ip(
     connect
         .map(|info| info.0.ip().to_string())
         .unwrap_or_else(|| "unknown".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn proxy_ip_uses_real_ip_and_last_forwarded_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", HeaderValue::from_static("203.0.113.9"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("198.51.100.7, 203.0.113.9"),
+        );
+        assert_eq!(client_ip(&headers, None, true), "203.0.113.9");
+    }
+
+    #[test]
+    fn proxy_ip_rejects_non_ip_values() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", HeaderValue::from_static("evil"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("1.2.3.4, not-an-ip"),
+        );
+        assert_eq!(client_ip(&headers, None, true), "unknown");
+    }
 }

@@ -197,13 +197,61 @@ async fn dovecot_is_v24() -> bool {
 
 struct SiteRoot {
     dir: Dir,
-    uid: u32,
-    gid: u32,
+    #[cfg(target_os = "linux")]
+    _identity: FsIdentityGuard,
+}
+
+#[cfg(target_os = "linux")]
+struct FsIdentityGuard {
+    old_uid: libc::uid_t,
+    old_gid: libc::gid_t,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for FsIdentityGuard {
+    fn drop(&mut self) {
+        unsafe {
+            libc::setfsuid(self.old_uid);
+            libc::setfsgid(self.old_gid);
+        }
+    }
+}
+
+/// Switches the calling thread to the account's filesystem UID/GID. This makes
+/// the file manager obey normal Unix permissions instead of running as root.
+/// The guard restores the daemon identity when it is dropped. The caller must
+/// not await while the guard is alive.
+#[cfg(target_os = "linux")]
+fn switch_fs_identity(uid: u32, gid: u32) -> ExecResult<FsIdentityGuard> {
+    let old_uid = unsafe { libc::setfsuid(uid as libc::uid_t) };
+    let old_gid = unsafe { libc::setfsgid(gid as libc::gid_t) };
+    let check_uid = unsafe { libc::setfsuid(uid as libc::uid_t) };
+    let check_gid = unsafe { libc::setfsgid(gid as libc::gid_t) };
+    if check_uid != uid as libc::uid_t || check_gid != gid as libc::gid_t {
+        unsafe {
+            libc::setfsuid(old_uid);
+            libc::setfsgid(old_gid);
+        }
+        return Err(ExecError::Io(
+            "cannot switch to the account filesystem identity".into(),
+        ));
+    }
+    Ok(FsIdentityGuard { old_uid, old_gid })
+}
+
+#[cfg(not(target_os = "linux"))]
+struct FsIdentityGuard;
+
+#[cfg(not(target_os = "linux"))]
+fn switch_fs_identity(uid: u32, gid: u32) -> ExecResult<FsIdentityGuard> {
+    let _ = (uid, gid);
+    Ok(FsIdentityGuard)
 }
 
 /// Opens the site document root as a capability directory. The account home and
 /// docroot themselves must be real directories, and cap-std confines every
-/// subsequent operation to the docroot (no `..` or symlink escapes).
+/// subsequent operation to the docroot (no `..` or symlink escapes). On Linux
+/// the caller runs with the account's filesystem UID/GID.
 fn open_site_root(cfg: &DaemonConfig, username: &str, docroot: &str) -> ExecResult<SiteRoot> {
     validate_site_root(username, docroot)?;
     let home_root = Dir::open_ambient_dir(&cfg.home_root, ambient_authority())?;
@@ -211,6 +259,7 @@ fn open_site_root(cfg: &DaemonConfig, username: &str, docroot: &str) -> ExecResu
     if home_meta.file_type().is_symlink() || !home_meta.is_dir() {
         return Err(ExecError::Io("the account home is not a directory".into()));
     }
+    let identity = switch_fs_identity(home_meta.uid(), home_meta.gid())?;
     let account_home = home_root.open_dir(username)?;
     let doc_meta = account_home.symlink_metadata(docroot)?;
     if doc_meta.file_type().is_symlink() || !doc_meta.is_dir() {
@@ -221,9 +270,82 @@ fn open_site_root(cfg: &DaemonConfig, username: &str, docroot: &str) -> ExecResu
     let dir = account_home.open_dir(docroot)?;
     Ok(SiteRoot {
         dir,
-        uid: home_meta.uid(),
-        gid: home_meta.gid(),
+        #[cfg(target_os = "linux")]
+        _identity: identity,
+        #[cfg(not(target_os = "linux"))]
+        _identity: identity,
     })
+}
+
+/// Opens the account home capability, optionally creating it. Symlinks and
+/// non-directories are rejected so later chown/chmod calls cannot be tricked
+/// into touching another account.
+fn open_account_home(cfg: &DaemonConfig, username: &str, create: bool) -> ExecResult<Dir> {
+    let home_root = Dir::open_ambient_dir(&cfg.home_root, ambient_authority())?;
+    match home_root.symlink_metadata(username) {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(ExecError::InvalidInput(
+                    "the account home is not a real directory".into(),
+                ));
+            }
+            Ok(home_root.open_dir(username)?)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && create => {
+            home_root.create_dir(username)?;
+            Ok(home_root.open_dir(username)?)
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Creates/opens each path component below a capability directory, rejecting
+/// symlinked or non-directory components. Existing components are re-owned and
+/// re-moded to the managed values.
+fn ensure_dir_components(
+    parent: &Dir,
+    relative: &Path,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+) -> ExecResult<()> {
+    let mut current = parent.try_clone()?;
+    for component in relative.components() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(ExecError::InvalidInput(
+                "invalid managed directory path".into(),
+            ));
+        };
+        match current.symlink_metadata(name) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() || !meta.is_dir() {
+                    return Err(ExecError::InvalidInput(format!(
+                        "refusing symlinked or non-directory path component '{}'",
+                        name.to_string_lossy()
+                    )));
+                }
+                let dir = current.open_dir(name)?;
+                set_owner_mode(dir.as_raw_fd(), uid, gid, mode)?;
+                current = dir;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                current.create_dir(name)?;
+                let dir = current.open_dir(name)?;
+                set_owner_mode(dir.as_raw_fd(), uid, gid, mode)?;
+                current = dir;
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
+}
+
+fn set_mode(fd: std::os::fd::RawFd, mode: u32) -> ExecResult<()> {
+    let rc = unsafe { libc::fchmod(fd, mode) };
+    if rc != 0 {
+        return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
+    }
+    Ok(())
 }
 
 fn set_owner_mode(fd: std::os::fd::RawFd, uid: u32, gid: u32, mode: u32) -> ExecResult<()> {
@@ -284,7 +406,11 @@ impl Executor for RealExecutor {
         }
 
         let gid = self.gid_for(&spec.username)?;
-        self.make_dir(&home, 0o750, uid, gid)?;
+        let account_home = open_account_home(&self.cfg, &spec.username, true)?;
+        // Nginx (www-data) must traverse the home to reach public_html, but it
+        // must not be able to list the home. Other internal directories keep
+        // their own restrictive modes.
+        set_owner_mode(account_home.as_raw_fd(), uid, gid, 0o711)?;
         for (relative, mode) in [
             ("public_html", 0o755),
             ("logs", 0o750),
@@ -292,7 +418,7 @@ impl Executor for RealExecutor {
             (".php/sessions", 0o700),
             ("tmp", 0o700),
         ] {
-            self.make_dir(&home.join(relative), mode, uid, gid)?;
+            ensure_dir_components(&account_home, Path::new(relative), mode, uid, gid)?;
         }
         Ok(())
     }
@@ -324,8 +450,12 @@ impl Executor for RealExecutor {
                 "docroot escapes the account home".into(),
             ));
         }
+        let relative = path
+            .strip_prefix(&home)
+            .map_err(|_| ExecError::InvalidInput("docroot escapes the account home".into()))?;
+        let account_home = open_account_home(&self.cfg, username, false)?;
         let gid = self.gid_for(username)?;
-        self.make_dir(path, 0o755, uid, gid)
+        ensure_dir_components(&account_home, relative, 0o755, uid, gid)
     }
 
     async fn file_list(
@@ -416,7 +546,9 @@ impl Executor for RealExecutor {
         }
         validate_relative_path(path)?;
         let site = open_site_root(&self.cfg, username, docroot)?;
+        let mut existing = false;
         if let Ok(meta) = site.dir.symlink_metadata(path) {
+            existing = true;
             if meta.file_type().is_symlink() {
                 return Err(ExecError::Io("symbolic links cannot be edited".into()));
             }
@@ -429,7 +561,11 @@ impl Executor for RealExecutor {
         let mut file = site.dir.open_with(path, &options)?;
         file.write_all(data)?;
         file.flush()?;
-        set_owner_mode(file.as_raw_fd(), site.uid, site.gid, 0o644)?;
+        if !existing {
+            // The daemon runs with UMask=0027; make new web files readable by
+            // Nginx (www-data) even though the account owns them.
+            set_mode(file.as_raw_fd(), 0o644)?;
+        }
         Ok(())
     }
 
@@ -441,7 +577,7 @@ impl Executor for RealExecutor {
         let site = open_site_root(&self.cfg, username, docroot)?;
         site.dir.create_dir(path)?;
         let dir = site.dir.open_dir(path)?;
-        set_owner_mode(dir.as_raw_fd(), site.uid, site.gid, 0o755)?;
+        set_mode(dir.as_raw_fd(), 0o755)?;
         Ok(())
     }
 
@@ -498,21 +634,25 @@ impl Executor for RealExecutor {
         locale: &str,
         php: bool,
     ) -> ExecResult<()> {
-        let html = docroot.join("index.html");
-        let php_file = docroot.join("index.php");
-        if html.exists() || php_file.exists() {
+        let relative = docroot
+            .strip_prefix(self.home(username))
+            .map_err(|_| ExecError::InvalidInput("welcome path escapes the account home".into()))?;
+        let docroot = relative
+            .to_str()
+            .ok_or_else(|| ExecError::InvalidInput("welcome path is not valid UTF-8".into()))?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        if site.dir.exists("index.html") || site.dir.exists("index.php") {
             return Ok(());
         }
-        let path = if php { php_file } else { html };
+        let name = if php { "index.php" } else { "index.html" };
         let content = rynx_core::templates::welcome_page(locale, domain);
-        std::fs::write(&path, content)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644));
-            let gid = self.gid_for(username)?;
-            let _ = chown(&path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)));
-        }
+        let mut options = CapOpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut file = site.dir.open_with(name, &options)?;
+        file.write_all(content.as_bytes())?;
+        file.flush()?;
+        set_mode(file.as_raw_fd(), 0o644)?;
+        let _ = uid;
         Ok(())
     }
 
@@ -628,8 +768,12 @@ impl Executor for RealExecutor {
                 "application directory escapes the account home".into(),
             ));
         }
+        let relative = dir.strip_prefix(&home).map_err(|_| {
+            ExecError::InvalidInput("application directory escapes the account home".into())
+        })?;
+        let account_home = open_account_home(&self.cfg, username, false)?;
         let gid = self.gid_for(username)?;
-        self.make_dir(dir, 0o750, uid, gid)
+        ensure_dir_components(&account_home, relative, 0o750, uid, gid)
     }
 
     async fn apply_app(
@@ -1623,7 +1767,7 @@ impl Executor for RealExecutor {
             let installed = version.is_some();
             out.push(ProgramInfo {
                 name: name.to_string(),
-                version: version.unwrap_or_else(|| "Ã¢â‚¬â€".into()),
+                version: version.unwrap_or_else(|| "unknown".into()),
                 kind: kind.to_string(),
                 status: if installed { "installed" } else { "missing" }.into(),
                 detail: detail.to_string(),

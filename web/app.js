@@ -2530,7 +2530,7 @@ async function renderDatabases() {
     td(esc(fmtDate(db.created_at))),
     td(writable ? btn('Eliminar', 'database-delete', db.id, 'tiny danger') : '', 'actions'),
   ]);
-  const phpMyAdmin = '<a class="btn ghost" href="/phpmyadmin/" target="_blank" rel="noopener">phpMyAdmin</a>';
+  const phpMyAdmin = '<a class="btn ghost" href="/phpmyadmin/" target="_blank" rel="noopener noreferrer">phpMyAdmin</a>';
   $('#view').innerHTML =
     sectionHead('Bases de datos por dominio', phpMyAdmin + (writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '')) +
     table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');

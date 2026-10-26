@@ -3,9 +3,11 @@
 #
 # The web root is only reachable through Nginx auth_request against the panel
 # API, so an unauthenticated visitor is redirected to the panel login page.
+# If you override PHPMYADMIN_VERSION, also set PHPMYADMIN_SHA256.
 set -Eeuo pipefail
 
 PHPMYADMIN_VERSION="${PHPMYADMIN_VERSION:-5.2.3}"
+PHPMYADMIN_SHA256="${PHPMYADMIN_SHA256:-12ba1c425fa4071abbd4e7668c9ebdeac0b0755a467a6d6d5026122bb47c102b}"
 PHPMYADMIN_ROOT="/usr/share/phpmyadmin"
 PHPMYADMIN_DATA="/var/lib/phpmyadmin"
 SNIPPET="/etc/nginx/snippets/rynxcp-phpmyadmin.conf"
@@ -30,6 +32,8 @@ if [[ ! -f "$PHPMYADMIN_ROOT/index.php" ]]; then
   trap 'rm -rf "$tmp"' EXIT
   url="https://files.phpmyadmin.net/phpMyAdmin/${PHPMYADMIN_VERSION}/phpMyAdmin-${PHPMYADMIN_VERSION}-all-languages.tar.gz"
   curl -fsSL --retry 3 --max-time 300 "$url" -o "$tmp/phpmyadmin.tar.gz"
+  printf '%s  %s\n' "$PHPMYADMIN_SHA256" "$tmp/phpmyadmin.tar.gz" | sha256sum -c - >/dev/null || \
+    die "phpMyAdmin checksum verification failed; refusing to extract"
   tar -xzf "$tmp/phpmyadmin.tar.gz" -C "$tmp"
   rm -rf "$PHPMYADMIN_ROOT"
   install -d -m 0750 "$PHPMYADMIN_ROOT"
@@ -113,6 +117,10 @@ location /phpmyadmin/ {
     error_page 401 = @rynx_login;
     alias /usr/share/phpmyadmin/;
     index index.php;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
 }
 
 location ~ ^/phpmyadmin/(.+\.php)$ {
@@ -124,6 +132,11 @@ location ~ ^/phpmyadmin/(.+\.php)$ {
     fastcgi_param SCRIPT_NAME /phpmyadmin/$1;
     fastcgi_param DOCUMENT_ROOT /usr/share/phpmyadmin;
     fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Cache-Control "no-store" always;
 }
 
 location @rynx_login {

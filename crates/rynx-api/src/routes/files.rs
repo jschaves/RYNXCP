@@ -95,6 +95,7 @@ fn valid_name(name: &str) -> Result<(), ApiError> {
         || name.contains('/')
         || name.contains('\\')
         || name.contains('\0')
+        || name.chars().any(|c| c.is_control())
         || name.len() > 255
     {
         return Err(ApiError::BadRequest("invalid file name".into()));

@@ -60,7 +60,7 @@ if [[ ! -f /etc/rynxcp/api.toml ]]; then
 fi
 
 if [[ ! -f /etc/rynxcp/daemon.token ]]; then
-  openssl rand -hex 32 > /etc/rynxcp/daemon.token
+  (umask 077; openssl rand -hex 32 > /etc/rynxcp/daemon.token)
 fi
 chown root:rynx /etc/rynxcp/daemon.token
 chmod 0640 /etc/rynxcp/daemon.token

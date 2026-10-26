@@ -52,6 +52,7 @@ fn proxy_location(port: u16) -> String {
 
 fn common_server_body(ctx: &NginxContext<'_>, out: &mut String) {
     let _ = writeln!(out, "    root {};", ctx.docroot);
+    let _ = writeln!(out, "    disable_symlinks on;");
     let _ = writeln!(out, "    index index.php index.html index.htm;");
     let _ = writeln!(out, "    client_max_body_size 64m;");
     let _ = writeln!(out, "    server_tokens off;");

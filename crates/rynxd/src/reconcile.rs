@@ -2909,7 +2909,7 @@ fn trim_console_output(mut text: String) -> String {
     text.retain(|c| c == '\n' || c == '\t' || !c.is_control());
     if text.chars().count() > 64_000 {
         text = text.chars().take(64_000).collect();
-        text.push_str("\nÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ (truncated)");
+        text.push_str("\n (truncated)");
     }
     text
 }

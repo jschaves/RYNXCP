@@ -11,8 +11,9 @@ daemon_token_file = "/etc/rynxcp/daemon.token"
 # Set to true when the panel is served over HTTPS (recommended).
 secure_cookies = true
 session_ttl_secs = 28800
-# Enable when Nginx terminates TLS in front of the API so the client IP is
-# taken from X-Forwarded-For.
+# Enable when Nginx proxies the API. Nginx must overwrite X-Real-IP with
+# $remote_addr; the API never trusts the client-controlled X-Forwarded-For
+# prefix.
 trust_proxy_headers = false
 # public_url = "https://panel.example.com"
 

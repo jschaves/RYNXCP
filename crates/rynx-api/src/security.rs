@@ -65,8 +65,14 @@ pub fn check_origin(headers: &HeaderMap, cfg: &ApiConfig) -> Result<(), ApiError
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    if !host.is_empty() && origin.ends_with(&format!("//{host}")) {
-        return Ok(());
+    if !host.is_empty() {
+        if let Ok(uri) = origin.parse::<http::Uri>() {
+            if let Some(authority) = uri.authority() {
+                if authority.as_str().eq_ignore_ascii_case(host) {
+                    return Ok(());
+                }
+            }
+        }
     }
     Err(ApiError::Forbidden)
 }

@@ -68,8 +68,14 @@ pub fn validate_relative_path(path: &str) -> ExecResult<()> {
     if path.is_empty() {
         return Ok(());
     }
-    if path.starts_with('/') || path.contains('\\') || path.contains('\0') {
-        return Err(invalid_path("absolute, backslash or NUL"));
+    if path.starts_with('/')
+        || path.contains('\\')
+        || path.contains('\0')
+        || path.chars().any(|c| c.is_control())
+    {
+        return Err(invalid_path(
+            "absolute, backslash, NUL or control character",
+        ));
     }
     for component in Path::new(path).components() {
         if !matches!(component, std::path::Component::Normal(_)) {
@@ -87,6 +93,7 @@ pub fn validate_file_name(name: &str) -> ExecResult<()> {
         || name.contains('/')
         || name.contains('\\')
         || name.contains('\0')
+        || name.chars().any(|c| c.is_control())
         || name.len() > 255
     {
         return Err(invalid_path("invalid file name"));
@@ -336,6 +343,7 @@ mod tests {
         assert!(validate_relative_path("a/../../b").is_err());
         assert!(validate_relative_path("/etc/passwd").is_err());
         assert!(validate_relative_path("a\\b").is_err());
+        assert!(validate_relative_path("a\nb").is_err());
     }
 
     #[test]
@@ -343,5 +351,6 @@ mod tests {
         assert!(validate_file_name("index.php").is_ok());
         assert!(validate_file_name("..").is_err());
         assert!(validate_file_name("a/b").is_err());
+        assert!(validate_file_name("a\nb").is_err());
     }
 }

@@ -338,7 +338,9 @@ chown -R www-data:www-data "$ROUNDCUBE_DATA"
 chmod 0640 "$ROUNDCUBE_DATA/db/sqlite.db" 2>/dev/null || true
 
 des_key="$(openssl rand -hex 24)"
-cat >"$ROUNDCUBE_ROOT/config/config.inc.php" <<EOF
+(
+  umask 027
+  cat >"$ROUNDCUBE_ROOT/config/config.inc.php" <<EOF
 <?php
 if (!empty(\$_SERVER['HTTPS']) && \$_SERVER['HTTPS'] !== 'off') {
   ini_set('session.cookie_secure', '1');
@@ -365,6 +367,7 @@ ini_set('session.cookie_samesite', 'Lax');
 \$config['language'] = 'es_ES';
 \$config['default_charset'] = 'UTF-8';
 EOF
+)
 chown root:www-data "$ROUNDCUBE_ROOT/config/config.inc.php"
 chmod 0640 "$ROUNDCUBE_ROOT/config/config.inc.php"
 chown -R www-data:www-data "$ROUNDCUBE_DATA"

@@ -173,7 +173,14 @@ pub fn validate_relative_path(value: &str, field: &str) -> CoreResult<()> {
 }
 
 pub fn validate_docroot(value: &str) -> CoreResult<()> {
-    validate_relative_path(value, "docroot")
+    validate_relative_path(value, "docroot")?;
+    let first = value.split('/').next().unwrap_or_default();
+    if first.starts_with('.') || matches!(first, "apps" | "logs" | "tmp" | "Maildir" | "sieve") {
+        return Err(invalid(
+            "docroot must not point at an internal account directory",
+        ));
+    }
+    Ok(())
 }
 
 pub const MAX_DISK_LIMIT_MB: u64 = 10_485_760;
@@ -701,6 +708,10 @@ mod tests {
         assert!(validate_docroot("a\\b").is_err());
         assert!(validate_docroot("a//b").is_err());
         assert!(validate_docroot("c:evil").is_err());
+        assert!(validate_docroot(".php/sessions").is_err());
+        assert!(validate_docroot("apps").is_err());
+        assert!(validate_docroot("logs").is_err());
+        assert!(validate_docroot("tmp").is_err());
     }
 
     #[test]
