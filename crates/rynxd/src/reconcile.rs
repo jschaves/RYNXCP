@@ -773,7 +773,14 @@ impl Reconciler {
             }
         };
 
-        let content = self.nginx_content(spec, &docroot, app_port, php_socket.as_deref());
+        let content = {
+            let mut render_spec = spec.clone();
+            let ftp_host = format!("ftp.{}", spec.domain);
+            if !render_spec.aliases.iter().any(|alias| alias == &ftp_host) {
+                render_spec.aliases.push(ftp_host);
+            }
+            self.nginx_content(&render_spec, &docroot, app_port, php_socket.as_deref())
+        };
         self.exec
             .apply_site(&spec.domain, &content, spec.enabled)
             .await
@@ -1089,6 +1096,10 @@ impl Reconciler {
         }
         let webroot = self.exec.acme_root();
         let mut domains = vec![domain.to_string()];
+        let ftp_host = format!("ftp.{domain}");
+        if !domains.contains(&ftp_host) {
+            domains.push(ftp_host);
+        }
         for alias in &website.spec.aliases {
             if !domains.contains(alias) {
                 domains.push(alias.clone());
@@ -1098,6 +1109,8 @@ impl Reconciler {
             self.dns_ensure_zone(domain, self.cfg.mail_enabled).await?;
             self.dns_render(domain).await?;
         }
+        // Ensure the vhost serves the ACME challenge for ftp.<domain> too.
+        self.apply_website(&website.spec).await?;
         self.exec
             .issue_cert(domain, &domains, email, &webroot, staging)
             .await
@@ -1105,6 +1118,9 @@ impl Reconciler {
 
         // Re-render the site so Nginx starts serving TLS.
         self.apply_website(&website.spec).await?;
+        if let Err(err) = self.exec.apply_ftp_certificate(domain).await {
+            tracing::warn!(domain = %domain, error = %err, "FTP certificate update failed");
+        }
         self.log(
             actor,
             "cert.issue",
@@ -1971,6 +1987,7 @@ impl Reconciler {
         }
         self.dns_seed_aliases(domain).await?;
         self.dns_seed_nameserver_glue(domain).await?;
+        self.dns_seed_ftp_host(domain).await?;
         if enable_mail || self.cfg.mail_enabled {
             self.dns_seed_mail(domain).await?;
         }
@@ -2013,6 +2030,30 @@ impl Reconciler {
                 {
                     self.dns_put(domain, label, "AAAA", ipv6, None, true)?;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    async fn dns_seed_ftp_host(&self, domain: &str) -> Result<(), WireError> {
+        if let Some(ipv4) = &self.cfg.default_ipv4 {
+            if self
+                .state
+                .find_dns_record(domain, "ftp", "A")
+                .map_err(internal)?
+                .is_none()
+            {
+                self.dns_put(domain, "ftp", "A", ipv4, None, true)?;
+            }
+        }
+        if let Some(ipv6) = &self.cfg.default_ipv6 {
+            if self
+                .state
+                .find_dns_record(domain, "ftp", "AAAA")
+                .map_err(internal)?
+                .is_none()
+            {
+                self.dns_put(domain, "ftp", "AAAA", ipv6, None, true)?;
             }
         }
         Ok(())
@@ -2296,6 +2337,9 @@ impl Reconciler {
             .apply_ftp_user(&login, uid, gid, &home, &password)
             .await
             .map_err(exec_error)?;
+        if let Err(err) = self.exec.apply_ftp_certificate(&spec.domain).await {
+            tracing::warn!(domain = %spec.domain, error = %err, "FTP certificate update failed");
+        }
         let view = FtpView {
             id: uuid::Uuid::new_v4().to_string(),
             domain: spec.domain.clone(),

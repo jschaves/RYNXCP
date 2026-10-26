@@ -1758,6 +1758,34 @@ impl Executor for RealExecutor {
         Ok(())
     }
 
+    async fn apply_ftp_certificate(&self, domain: &str) -> ExecResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let conf = Path::new("/etc/pure-ftpd/conf");
+        if !conf.is_dir() {
+            return Ok(());
+        }
+        let cert_dir = self.cfg.certs_root.join(domain);
+        let chain = cert_dir.join("fullchain.pem");
+        let key = cert_dir.join("privkey.pem");
+        if !chain.exists() || !key.exists() {
+            return Ok(());
+        }
+        let target = Path::new("/etc/ssl/private/pure-ftpd.pem");
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut pem = std::fs::read(&chain)?;
+        pem.extend(std::fs::read(&key)?);
+        std::fs::write(target, pem)?;
+        std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
+        // The Debian wrapper does not understand CertFile; the compiled-in
+        // bundle path above is the only supported location.
+        let _ = std::fs::remove_file(conf.join("CertFile"));
+        std::fs::write(conf.join("TLS"), "1\n")?;
+        self.reload_service("pure-ftpd").await
+    }
+
     async fn remove_ftp_user(&self, login: &str) -> ExecResult<()> {
         let passwd_file = self.cfg.pure_passwd.display().to_string();
         let _ = run(

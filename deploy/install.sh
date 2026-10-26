@@ -88,8 +88,8 @@ if [[ -d /etc/pure-ftpd/conf ]]; then
     rm -rf "$tls_dir"
   fi
   chmod 0600 "$tls_cert"
+  rm -f /etc/pure-ftpd/conf/CertFile
   echo 1 > /etc/pure-ftpd/conf/TLS
-  echo "$tls_cert" > /etc/pure-ftpd/conf/CertFile
   systemctl restart pure-ftpd >/dev/null 2>&1 || true
 fi
 if [[ -f /etc/bind/named.conf.local ]]; then

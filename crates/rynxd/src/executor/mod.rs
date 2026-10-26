@@ -303,6 +303,7 @@ pub trait Executor: Send + Sync {
         password: &str,
     ) -> ExecResult<()>;
     async fn remove_ftp_user(&self, login: &str) -> ExecResult<()>;
+    async fn apply_ftp_certificate(&self, domain: &str) -> ExecResult<()>;
     async fn apply_firewall(&self, ruleset: &str) -> ExecResult<()>;
     async fn resolve_user_ids(&self, username: &str) -> ExecResult<Option<(u32, u32)>>;
 

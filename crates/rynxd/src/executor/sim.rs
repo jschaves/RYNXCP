@@ -811,6 +811,10 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn apply_ftp_certificate(&self, _domain: &str) -> ExecResult<()> {
+        Ok(())
+    }
+
     async fn resolve_user_ids(&self, _username: &str) -> ExecResult<Option<(u32, u32)>> {
         Ok(Some((1000, 1000)))
     }
