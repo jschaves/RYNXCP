@@ -428,6 +428,15 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .limit-row input { flex: 1; min-width: 0; }
 .file-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
 .file-site { min-width: 200px; }
+.file-drop { position: relative; border-radius: var(--radius); }
+.file-drop.dragover {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  background: rgba(77, 163, 255, 0.06);
+}
+.file-drop-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.file-drop.dragover .file-drop-hint { color: var(--accent); }
+.file-upload-status { margin: 0 0 10px; color: var(--accent); font-size: 12px; }
 .breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
 .crumb { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 2px 4px; font: inherit; }
 .crumb:hover { text-decoration: underline; }

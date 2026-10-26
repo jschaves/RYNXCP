@@ -1053,6 +1053,164 @@ function fileToBase64(file) {
   });
 }
 
+const FILE_UPLOAD_LIMIT = 5 * 1024 * 1024;
+
+async function uploadOneFile(file, targetPath) {
+  if (file.size > FILE_UPLOAD_LIMIT) {
+    throw new Error(`${file.name}: supera 5 MB`);
+  }
+  const data = await fileToBase64(file);
+  await api('/api/v1/files/upload', {
+    method: 'POST',
+    body: {
+      domain: S.files.domain,
+      path: targetPath,
+      name: file.name,
+      data,
+    },
+  });
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    const read = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) {
+          resolve(entries);
+          return;
+        }
+        entries.push(...batch);
+        read();
+      }, reject);
+    };
+    read();
+  });
+}
+
+async function uploadDroppedEntry(entry, targetPath, stats) {
+  if (entry.isFile) {
+    try {
+      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+      await uploadOneFile(file, targetPath);
+      stats.files += 1;
+    } catch (err) {
+      stats.failed += 1;
+      stats.lastError = err.message;
+    }
+    return;
+  }
+  if (!entry.isDirectory) return;
+  let childPath = targetPath;
+  try {
+    await api('/api/v1/files/mkdir', {
+      method: 'POST',
+      body: { domain: S.files.domain, path: targetPath, name: entry.name },
+    });
+    stats.directories += 1;
+    childPath = fileJoin(targetPath, entry.name);
+  } catch (err) {
+    childPath = fileJoin(targetPath, entry.name);
+  }
+  const children = await readDirectoryEntries(entry.createReader());
+  for (const child of children) {
+    await uploadDroppedEntry(child, childPath, stats);
+  }
+}
+
+async function uploadDroppedItems(items) {
+  const entries = [];
+  const files = [];
+  for (const item of items) {
+    const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+    if (entry) entries.push(entry);
+    else {
+      const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+      if (file) files.push(file);
+    }
+  }
+  if (!entries.length && !files.length) return;
+  const stats = { files: 0, directories: 0, failed: 0, lastError: '' };
+  const status = $('#file-upload-status');
+  if (status) {
+    status.hidden = false;
+    status.textContent = 'Subiendo…';
+  }
+  for (const file of files) {
+    try {
+      await uploadOneFile(file, S.files.path);
+      stats.files += 1;
+    } catch (err) {
+      stats.failed += 1;
+      stats.lastError = err.message;
+    }
+  }
+  for (const entry of entries) {
+    await uploadDroppedEntry(entry, S.files.path, stats);
+    if (status) {
+      status.textContent = `${stats.files} archivo(s) subido(s), ${stats.directories} carpeta(s)…`;
+    }
+  }
+  if (stats.failed) {
+    toast(`${stats.files} archivo(s) subido(s). ${stats.failed} error(es): ${stats.lastError}`, 'error');
+  } else {
+    toast(`${stats.files} archivo(s) y ${stats.directories} carpeta(s) subidos`);
+  }
+  await navigate('files');
+}
+
+async function uploadFileList(files, targetPath, stats) {
+  const created = new Set();
+  for (const file of files) {
+    const relative = file.webkitRelativePath || file.name;
+    const parts = relative.split('/').filter(Boolean);
+    parts.pop();
+    let dirPath = targetPath;
+    for (const part of parts) {
+      const parent = dirPath;
+      dirPath = fileJoin(dirPath, part);
+      if (!created.has(dirPath)) {
+        try {
+          await api('/api/v1/files/mkdir', {
+            method: 'POST',
+            body: { domain: S.files.domain, path: parent, name: part },
+          });
+          stats.directories += 1;
+        } catch (err) {
+          // The folder may already exist; continue with the files inside it.
+        }
+        created.add(dirPath);
+      }
+    }
+    try {
+      await uploadOneFile(file, dirPath);
+      stats.files += 1;
+    } catch (err) {
+      stats.failed += 1;
+      stats.lastError = err.message;
+    }
+  }
+}
+
+function uploadSummary(stats) {
+  if (stats.failed) {
+    return `${stats.files} archivo(s) subido(s). ${stats.failed} error(es): ${stats.lastError}`;
+  }
+  return `${stats.files} archivo(s) y ${stats.directories} carpeta(s) subidos`;
+}
+
+async function runUpload(files, targetPath) {
+  const stats = { files: 0, directories: 0, failed: 0, lastError: '' };
+  const status = $('#file-upload-status');
+  if (status) {
+    status.hidden = false;
+    status.textContent = 'Subiendo…';
+  }
+  await uploadFileList(files, targetPath, stats);
+  toast(uploadSummary(stats), stats.failed ? 'error' : 'ok');
+  await navigate('files');
+}
+
 function fileBreadcrumb(path) {
   const parts = String(path || '').split('/').filter(Boolean);
   let html = `<button class="crumb" data-action="file-open" data-id="">${esc(T('Raíz'))}</button>`;
@@ -1102,7 +1260,8 @@ async function renderFiles() {
     : `<span class="chip">${esc(S.files.domain)}</span>`;
   const actions = [
     write ? `<button class="btn primary" data-action="file-new-folder">${esc(T('Nueva carpeta'))}</button>` : '',
-    write ? `<label class="btn ghost">${esc(T('Subir archivo'))}<input type="file" id="file-upload" hidden></label>` : '',
+    write ? `<label class="btn ghost">${esc(T('Subir archivo'))}<input type="file" id="file-upload" hidden multiple></label>` : '',
+    write ? `<label class="btn ghost">${esc(T('Subir carpeta'))}<input type="file" id="folder-upload" webkitdirectory multiple hidden></label>` : '',
     `<button class="btn ghost" data-action="files-refresh">${esc(T('Actualizar'))}</button>`,
   ].filter(Boolean).join('');
 
@@ -1127,10 +1286,15 @@ async function renderFiles() {
     ];
   });
 
+  const dropHint = write
+    ? `<div class="file-drop-hint">${esc(T('Arrastra archivos o carpetas aquí para subirlos'))}</div>`
+    : '';
   $('#view').innerHTML =
     sectionHead('Archivos', actions) +
     `<div class="file-toolbar">${siteSelect}${fileBreadcrumb(S.files.path)}</div>` +
-    table(['Nombre', 'Tipo', 'Tamaño', 'Modificado', ''], rows, 'Esta carpeta está vacía.');
+    `<div class="file-drop" id="file-drop">${dropHint}<div class="file-upload-status" id="file-upload-status" hidden></div>` +
+    table(['Nombre', 'Tipo', 'Tamaño', 'Modificado', ''], rows, 'Esta carpeta está vacía.') +
+    '</div>';
 
   const siteSelectEl = $('#file-site');
   if (siteSelectEl) {
@@ -1143,31 +1307,43 @@ async function renderFiles() {
   const upload = $('#file-upload');
   if (upload) {
     upload.addEventListener('change', async () => {
-      const file = upload.files && upload.files[0];
-      if (!file) return;
-      if (file.size > 5 * 1024 * 1024) {
-        toast('El archivo supera 5 MB', 'error');
-        upload.value = '';
-        return;
-      }
-      try {
-        const data = await fileToBase64(file);
-        await api('/api/v1/files/upload', {
-          method: 'POST',
-          body: {
-            domain: S.files.domain,
-            path: S.files.path,
-            name: file.name,
-            data,
-          },
-        });
-        toast('Archivo subido');
-        await navigate('files');
-      } catch (err) {
-        toast(err.message, 'error');
-      } finally {
-        upload.value = '';
-      }
+      const files = Array.from(upload.files || []);
+      upload.value = '';
+      if (!files.length) return;
+      await runUpload(files, S.files.path);
+    });
+  }
+  const folderUpload = $('#folder-upload');
+  if (folderUpload) {
+    folderUpload.addEventListener('change', async () => {
+      const files = Array.from(folderUpload.files || []);
+      folderUpload.value = '';
+      if (!files.length) return;
+      await runUpload(files, S.files.path);
+    });
+  }
+  const dropZone = $('#file-drop');
+  if (write && dropZone) {
+    const highlight = () => dropZone.classList.add('dragover');
+    const clear = () => dropZone.classList.remove('dragover');
+    dropZone.addEventListener('dragenter', (event) => {
+      if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes('Files')) return;
+      event.preventDefault();
+      highlight();
+    });
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      highlight();
+    });
+    dropZone.addEventListener('dragleave', (event) => {
+      if (!dropZone.contains(event.relatedTarget)) clear();
+    });
+    dropZone.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      clear();
+      const items = Array.from(event.dataTransfer?.items || []);
+      await uploadDroppedItems(items);
     });
   }
 }
