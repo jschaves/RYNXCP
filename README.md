@@ -336,6 +336,30 @@ The admin console **is not a shell**. It only runs closed actions (Nginx test/re
 app restart/logs, PHP-FPM reload, reconciliation, TLS renewal, backups, disk usage)
 and every execution is audited.
 
+## Fully automated installers
+
+For a fresh VPS, download and run one of the one-shot installers:
+
+```bash
+# Panel only
+curl -fsSL https://raw.githubusercontent.com/jschaves/RYNXCP/main/deploy/autoinstall.sh \
+  -o /root/autoinstall.sh
+sudo bash /root/autoinstall.sh
+
+# Panel + MagicRita
+curl -fsSL https://raw.githubusercontent.com/jschaves/RYNXCP/main/deploy/autoinstall-panel-magicrita.sh \
+  -o /root/autoinstall-panel-magicrita.sh
+sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
+  bash /root/autoinstall-panel-magicrita.sh \
+  --panel-host panel.example.com \
+  --magicrita-domain chat.example.com \
+  --yes
+```
+
+Both clone `main` and run `deploy/preinstall.sh`; the panel-only installer is
+fully non-interactive and generates the admin password. See
+[docs/autoinstall.md](docs/autoinstall.md) for options and verification.
+
 ## One-shot pre-installer (recommended)
 
 `deploy/preinstall.sh` prepares a fresh Debian/Ubuntu server end to end:
