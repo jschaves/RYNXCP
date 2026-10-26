@@ -1301,9 +1301,9 @@ impl Executor for RealExecutor {
             .collect();
 
         for account in &active_accounts {
-            let home = PathBuf::from(VMAIL_ROOT)
-                .join(&account.domain)
-                .join(&account.local_part);
+            let domain_dir = PathBuf::from(VMAIL_ROOT).join(&account.domain);
+            self.make_dir(&domain_dir, 0o750, MAIL_UID, MAIL_GID)?;
+            let home = domain_dir.join(&account.local_part);
             self.make_dir(&home, 0o700, MAIL_UID, MAIL_GID)?;
             for sub in [
                 "Maildir",
