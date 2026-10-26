@@ -170,6 +170,23 @@ async fn run_combined(program: &str, args: &[String]) -> ExecResult<String> {
     Ok(combined)
 }
 
+/// Dovecot 2.4 split `mail_location` into `mail_driver`/`mail_path`, renamed
+/// the SSL settings and removed the `plugin {}` section. Detect the installed
+/// version so the generated configuration stays valid on both 2.3 and 2.4.
+async fn dovecot_is_v24() -> bool {
+    let Ok(output) = run("dovecot", &["--version"]).await else {
+        return true;
+    };
+    let version = output.split_whitespace().next().unwrap_or_default();
+    let mut parts = version.split('.');
+    let major = parts.next().and_then(|value| value.parse::<u32>().ok());
+    let minor = parts.next().and_then(|value| value.parse::<u32>().ok());
+    match (major, minor) {
+        (Some(major), Some(minor)) => major > 2 || (major == 2 && minor >= 4),
+        _ => true,
+    }
+}
+
 #[async_trait]
 impl Executor for RealExecutor {
     fn mode(&self) -> &'static str {
@@ -974,61 +991,138 @@ impl Executor for RealExecutor {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))?;
         }
 
+        let dovecot_v24 = dovecot_is_v24().await;
+
         let mut users = String::from("# managed-by: RYNXCP\n");
         let mut sni = String::new();
-        let mut dovecot = String::from(
-            "# managed-by: RYNXCP\n\
-             mail_location = maildir:/var/vmail/%d/%n/Maildir\n\
-             mail_uid = 5000\n\
-             mail_gid = 5000\n\
-             first_valid_uid = 5000\n\
-             auth_mechanisms = plain login\n\
-             passdb {\n\
-               driver = passwd-file\n\
-               args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/rynxcp/users\n\
-             }\n\
-             userdb {\n\
-               driver = passwd-file\n\
-               args = username_format=%u /etc/dovecot/rynxcp/users\n\
-             }\n\
-             service auth {\n\
-               unix_listener /var/spool/postfix/private/auth {\n\
-                 mode = 0660\n\
-                 user = postfix\n\
-                 group = postfix\n\
-               }\n\
-             }\n\
-             service lmtp {\n\
-               unix_listener /var/spool/postfix/private/dovecot-lmtp {\n\
-                 mode = 0600\n\
-                 user = postfix\n\
-                 group = postfix\n\
-               }\n\
-             }\n\
-             protocol lmtp { mail_plugins = $mail_plugins quota sieve }\n\
-             protocol imap { mail_plugins = $mail_plugins quota }\n\
-             protocol pop3 { mail_plugins = $mail_plugins quota }\n\
-             plugin {\n\
-               quota = maildir:User quota\n\
-               sieve = /var/vmail/%d/%n/sieve/roundcube.sieve\n\
-               sieve_dir = /var/vmail/%d/%n/sieve\n\
-             }\n\
-             ssl = required\n\
-             ssl_cert = </etc/ssl/rynxcp/mail/default.crt\n\
-             ssl_key = </etc/ssl/rynxcp/mail/default.key\n",
-        );
+        let mut dovecot = if dovecot_v24 {
+            String::from(
+                "# managed-by: RYNXCP\n\
+                 # Dovecot 2.4 configuration.\n\
+                 protocols = imap pop3 lmtp sieve\n\
+                 mail_driver = maildir\n\
+                 mail_path = /var/vmail/%{user | domain}/%{user | username}/Maildir\n\
+                 mail_uid = 5000\n\
+                 mail_gid = 5000\n\
+                 first_valid_uid = 5000\n\
+                 auth_mechanisms = plain login\n\
+                 passdb passwd-file {\n\
+                   passwd_file_path = /etc/dovecot/rynxcp/users\n\
+                   default_password_scheme = SHA512-CRYPT\n\
+                   auth_username_format = %{user}\n\
+                 }\n\
+                 userdb passwd-file {\n\
+                   passwd_file_path = /etc/dovecot/rynxcp/users\n\
+                   auth_username_format = %{user}\n\
+                 }\n\
+                 service auth {\n\
+                   unix_listener /var/spool/postfix/private/auth {\n\
+                     mode = 0660\n\
+                     user = postfix\n\
+                     group = postfix\n\
+                   }\n\
+                 }\n\
+                 service lmtp {\n\
+                   unix_listener /var/spool/postfix/private/dovecot-lmtp {\n\
+                     mode = 0600\n\
+                     user = postfix\n\
+                     group = postfix\n\
+                   }\n\
+                 }\n\
+                 mail_plugins {\n\
+                   quota = yes\n\
+                 }\n\
+                 protocol lmtp {\n\
+                   mail_plugins {\n\
+                     sieve = yes\n\
+                   }\n\
+                 }\n\
+                 protocol imap {\n\
+                   mail_plugins {\n\
+                     imap_quota = yes\n\
+                   }\n\
+                 }\n\
+                 quota \"User quota\" {\n\
+                 }\n\
+                 sieve_script personal {\n\
+                   driver = file\n\
+                   path = /var/vmail/%{user | domain}/%{user | username}/sieve\n\
+                   active_path = /var/vmail/%{user | domain}/%{user | username}/sieve/roundcube.sieve\n\
+                 }\n\
+                 ssl = required\n\
+                 ssl_server_cert_file = /etc/ssl/rynxcp/mail/default.crt\n\
+                 ssl_server_key_file = /etc/ssl/rynxcp/mail/default.key\n",
+            )
+        } else {
+            String::from(
+                "# managed-by: RYNXCP\n\
+                 # Dovecot 2.3 configuration.\n\
+                 protocols = imap pop3 lmtp sieve\n\
+                 mail_location = maildir:/var/vmail/%d/%n/Maildir\n\
+                 mail_uid = 5000\n\
+                 mail_gid = 5000\n\
+                 first_valid_uid = 5000\n\
+                 auth_mechanisms = plain login\n\
+                 passdb {\n\
+                   driver = passwd-file\n\
+                   args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/rynxcp/users\n\
+                 }\n\
+                 userdb {\n\
+                   driver = passwd-file\n\
+                   args = username_format=%u /etc/dovecot/rynxcp/users\n\
+                 }\n\
+                 service auth {\n\
+                   unix_listener /var/spool/postfix/private/auth {\n\
+                     mode = 0660\n\
+                     user = postfix\n\
+                     group = postfix\n\
+                   }\n\
+                 }\n\
+                 service lmtp {\n\
+                   unix_listener /var/spool/postfix/private/dovecot-lmtp {\n\
+                     mode = 0600\n\
+                     user = postfix\n\
+                     group = postfix\n\
+                   }\n\
+                 }\n\
+                 protocol lmtp { mail_plugins = $mail_plugins quota sieve }\n\
+                 protocol imap { mail_plugins = $mail_plugins quota }\n\
+                 protocol pop3 { mail_plugins = $mail_plugins quota }\n\
+                 plugin {\n\
+                   quota = maildir:User quota\n\
+                   sieve = /var/vmail/%d/%n/sieve/roundcube.sieve\n\
+                   sieve_dir = /var/vmail/%d/%n/sieve\n\
+                 }\n\
+                 ssl = required\n\
+                 ssl_cert = </etc/ssl/rynxcp/mail/default.crt\n\
+                 ssl_key = </etc/ssl/rynxcp/mail/default.key\n",
+            )
+        };
         for account in &active_accounts {
             let home = format!("{}/{}/{}", VMAIL_ROOT, account.domain, account.local_part);
-            users.push_str(&format!(
-                "{}@{}:{}:{}:{}::{}::userdb_quota_rule=*:storage={}M\n",
-                account.local_part,
-                account.domain,
-                account.password_hash,
-                MAIL_UID,
-                MAIL_GID,
-                home,
-                account.quota_mb
-            ));
+            if dovecot_v24 {
+                users.push_str(&format!(
+                    "{}@{}:{}:{}:{}::{}::userdb_quota_storage_size={}M\n",
+                    account.local_part,
+                    account.domain,
+                    account.password_hash,
+                    MAIL_UID,
+                    MAIL_GID,
+                    home,
+                    account.quota_mb
+                ));
+            } else {
+                users.push_str(&format!(
+                    "{}@{}:{}:{}:{}::{}::userdb_quota_rule=*:storage={}M\n",
+                    account.local_part,
+                    account.domain,
+                    account.password_hash,
+                    MAIL_UID,
+                    MAIL_GID,
+                    home,
+                    account.quota_mb
+                ));
+            }
         }
         for domain in &active_domains {
             let cert_dir = self
@@ -1059,11 +1153,19 @@ impl Executor for RealExecutor {
             ] {
                 let name = format!("{prefix}.{}", domain.domain);
                 sni.push_str(&format!("{} {}\n", name, combined.display()));
-                dovecot.push_str(&format!(
-                    "local_name {name} {{\n  ssl_cert = <{}\n  ssl_key = <{}\n}}\n",
-                    chain.display(),
-                    key.display()
-                ));
+                if dovecot_v24 {
+                    dovecot.push_str(&format!(
+                        "local_name {name} {{\n  ssl_server_cert_file = {}\n  ssl_server_key_file = {}\n}}\n",
+                        chain.display(),
+                        key.display()
+                    ));
+                } else {
+                    dovecot.push_str(&format!(
+                        "local_name {name} {{\n  ssl_cert = <{}\n  ssl_key = <{}\n}}\n",
+                        chain.display(),
+                        key.display()
+                    ));
+                }
             }
         }
         let users_path = PathBuf::from(DOVECOT_MAIL_DIR).join("users");

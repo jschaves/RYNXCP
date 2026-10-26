@@ -30,6 +30,20 @@ log() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Dovecot 2.4 split mail_location into mail_driver/mail_path, renamed the SSL
+# settings and removed the plugin{} section. Emit a config for the installed
+# major.minor so the mail stack works on both 2.3 and 2.4.
+dovecot_is_v24() {
+  local version major minor
+  version="$(dovecot --version 2>/dev/null | awk '{print $1}' || true)"
+  [[ -n "$version" ]] || return 0
+  major="${version%%.*}"
+  version="${version#*.}"
+  minor="${version%%.*}"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 0
+  (( major > 2 || (major == 2 && minor >= 4) ))
+}
+
 [[ -f "$DAEMON_CONF" ]] || die "$DAEMON_CONF not found; install RYNXCP first"
 command -v hostname >/dev/null || die "hostname not found"
 
@@ -139,9 +153,68 @@ EOF
 fi
 
 log "Configuring Dovecot authentication, LMTP, Sieve and TLS"
-if [[ ! -f "$DOVECOT_CONF" ]]; then
+if dovecot_is_v24; then
 cat >"$DOVECOT_CONF" <<EOF
 # managed-by: RYNXCP
+# Dovecot 2.4 configuration.
+protocols = imap pop3 lmtp sieve
+mail_driver = maildir
+mail_path = ${VMAIL_ROOT}/%{user | domain}/%{user | username}/Maildir
+mail_uid = ${MAIL_UID}
+mail_gid = ${MAIL_GID}
+first_valid_uid = ${MAIL_UID}
+auth_mechanisms = plain login
+passdb passwd-file {
+  passwd_file_path = ${DOVECOT_MAIL_DIR}/users
+  default_password_scheme = SHA512-CRYPT
+  auth_username_format = %{user}
+}
+userdb passwd-file {
+  passwd_file_path = ${DOVECOT_MAIL_DIR}/users
+  auth_username_format = %{user}
+}
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+mail_plugins {
+  quota = yes
+}
+protocol lmtp {
+  mail_plugins {
+    sieve = yes
+  }
+}
+protocol imap {
+  mail_plugins {
+    imap_quota = yes
+  }
+}
+quota "User quota" {
+}
+sieve_script personal {
+  driver = file
+  path = ${VMAIL_ROOT}/%{user | domain}/%{user | username}/sieve
+  active_path = ${VMAIL_ROOT}/%{user | domain}/%{user | username}/sieve/roundcube.sieve
+}
+ssl = required
+ssl_server_cert_file = ${MAIL_CERT_DIR}/default.crt
+ssl_server_key_file = ${MAIL_CERT_DIR}/default.key
+EOF
+else
+cat >"$DOVECOT_CONF" <<EOF
+# managed-by: RYNXCP
+# Dovecot 2.3 configuration.
 protocols = imap pop3 lmtp sieve
 mail_location = maildir:${VMAIL_ROOT}/%d/%n/Maildir
 mail_uid = ${MAIL_UID}
