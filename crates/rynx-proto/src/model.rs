@@ -61,6 +61,40 @@ pub enum Request {
     },
     AccountList,
 
+    FileList {
+        username: String,
+        domain: String,
+        path: String,
+    },
+    FileRead {
+        username: String,
+        domain: String,
+        path: String,
+    },
+    FileWrite {
+        username: String,
+        domain: String,
+        path: String,
+        data: Vec<u8>,
+    },
+    FileMkdir {
+        username: String,
+        domain: String,
+        path: String,
+    },
+    FileRename {
+        username: String,
+        domain: String,
+        path: String,
+        new_name: String,
+    },
+    FileDelete {
+        username: String,
+        domain: String,
+        path: String,
+        recursive: bool,
+    },
+
     WebsiteUpsert(WebsiteSpec),
     WebsiteDelete {
         domain: String,
@@ -200,6 +234,13 @@ pub enum Response {
     },
     Accounts {
         accounts: Vec<AccountView>,
+    },
+    Files {
+        entries: Vec<FileEntry>,
+        path: String,
+    },
+    FileData {
+        data: Vec<u8>,
     },
     Website {
         website: WebsiteView,
@@ -443,6 +484,15 @@ pub struct AccountView {
     pub home: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileEntry {
+    pub name: String,
+    /// `file`, `dir`, `symlink` or `other`.
+    pub kind: String,
+    pub size: u64,
+    pub modified: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

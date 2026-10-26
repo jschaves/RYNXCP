@@ -12,6 +12,7 @@ const S = {
   impersonatedBy: null,
   resetToken: null,
   data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], accountPackages: [], mailDomains: [], mailAccounts: [] },
+  files: { domain: '', path: '', entries: [] },
 };
 
 const RUNTIMES = {
@@ -42,6 +43,7 @@ const NAV_ITEMS = [
   { id: 'overview', label: 'Resumen', group: 'Operación' },
   { id: 'accounts', label: 'Cuentas', group: 'Operación' },
   { id: 'websites', label: 'Sitios web', group: 'Operación' },
+  { id: 'files', label: 'Archivos', group: 'Operación' },
   { id: 'apps', label: 'Aplicaciones', group: 'Operación' },
   { id: 'php', label: 'PHP-FPM', group: 'Operación' },
   { id: 'databases', label: 'Bases de datos', group: 'Operación' },
@@ -74,6 +76,7 @@ const TITLES = {
   overview: ['Resumen', 'Estado del nodo y de los recursos gestionados'],
   accounts: ['Cuentas', 'Usuarios Linux aislados con cuota y home dedicado'],
   websites: ['Sitios web', 'Virtual hosts Nginx con TLS y reverse proxy'],
+  files: ['Archivos', 'Gestor de archivos del document root, aislado por cuenta'],
   apps: ['Aplicaciones', 'Procesos gestionados por systemd (Node, Python, Ruby, Java, .NET, Go)'],
   php: ['PHP-FPM', 'Pools por cuenta con open_basedir y funciones restringidas'],
   mail: ['Correo', 'Dominios, buzones, webmail y seguridad DNS'],
@@ -325,6 +328,7 @@ function canWrite() {
 const SCOPED_NAV = new Set([
   'accounts',
   'websites',
+  'files',
   'apps',
   'php',
   'databases',
@@ -385,6 +389,7 @@ const renderers = {
   overview: renderOverview,
   accounts: renderAccounts,
   websites: renderWebsites,
+  files: renderFiles,
   apps: renderApps,
   php: renderPhp,
   ssl: renderSsl,
@@ -1013,6 +1018,245 @@ function openWebsiteModal() {
       await refresh();
     },
   });
+}
+
+/* ---------------- files ---------------- */
+
+function fileJoin(directory, name) {
+  return directory ? `${directory}/${name}` : name;
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',', 2)[1] || '');
+    reader.onerror = () => reject(reader.error || new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function fileBreadcrumb(path) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  let html = `<button class="crumb" data-action="file-open" data-id="">${esc(T('Raíz'))}</button>`;
+  let current = '';
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    html += ` <span class="muted">/</span> <button class="crumb" data-action="file-open" data-id="${esc(current)}">${esc(part)}</button>`;
+  }
+  return `<div class="breadcrumb">${html}</div>`;
+}
+
+function fileKind(kind) {
+  return { dir: 'Carpeta', file: 'Archivo', symlink: 'Enlace', other: 'Otro' }[kind] || kind;
+}
+
+function fileQuery(path) {
+  return `/api/v1/files?domain=${encodeURIComponent(S.files.domain)}&path=${encodeURIComponent(path || '')}`;
+}
+
+async function renderFiles() {
+  await loadList('websites');
+  const sites = S.data.websites || [];
+  if (!sites.length) {
+    $('#view').innerHTML = sectionHead('Archivos') +
+      `<div class="card empty"><strong>${esc(T('No hay sitios web'))}</strong><span>${esc(T('Crea un sitio web para gestionar sus archivos.'))}</span></div>`;
+    return;
+  }
+  if (!S.files.domain || !sites.some((site) => site.spec.domain === S.files.domain)) {
+    S.files.domain = sites[0].spec.domain;
+    S.files.path = '';
+  }
+
+  let data;
+  try {
+    data = await api(fileQuery(S.files.path));
+  } catch (err) {
+    $('#view').innerHTML = sectionHead('Archivos') +
+      `<div class="card empty"><strong>${esc(T('No se pudo abrir el gestor'))}</strong><span>${esc(err.message)}</span></div>`;
+    return;
+  }
+  S.files.entries = data.entries || [];
+  S.files.path = data.path || '';
+
+  const write = canWrite();
+  const siteSelect = sites.length > 1
+    ? `<select id="file-site" class="file-site">${sites.map((site) => `<option value="${esc(site.spec.domain)}"${site.spec.domain === S.files.domain ? ' selected' : ''}>${esc(site.spec.domain)}</option>`).join('')}</select>`
+    : `<span class="chip">${esc(S.files.domain)}</span>`;
+  const actions = [
+    write ? `<button class="btn primary" data-action="file-new-folder">${esc(T('Nueva carpeta'))}</button>` : '',
+    write ? `<label class="btn ghost">${esc(T('Subir archivo'))}<input type="file" id="file-upload" hidden></label>` : '',
+    `<button class="btn ghost" data-action="files-refresh">${esc(T('Actualizar'))}</button>`,
+  ].filter(Boolean).join('');
+
+  const rows = S.files.entries.map((entry) => {
+    const path = fileJoin(S.files.path, entry.name);
+    const rowActions = [];
+    if (entry.kind === 'dir') rowActions.push(btn(T('Abrir'), 'file-open', path));
+    if (entry.kind === 'file') {
+      rowActions.push(btn(T('Editar'), 'file-edit', path));
+      rowActions.push(btn(T('Descargar'), 'file-download', path));
+    }
+    if (write) {
+      rowActions.push(btn(T('Renombrar'), 'file-rename', path));
+      rowActions.push(btn(T('Eliminar'), 'file-delete', path, 'tiny danger'));
+    }
+    return [
+      td(`<div class="cell-title">${esc(entry.name)}</div>`),
+      td(esc(T(fileKind(entry.kind)))),
+      td(entry.kind === 'file' ? esc(fmtBytes(entry.size)) : '<span class="muted">—</span>'),
+      td(entry.modified ? esc(fmtDate(entry.modified)) : '<span class="muted">—</span>'),
+      td(rowActions.join(''), 'actions'),
+    ];
+  });
+
+  $('#view').innerHTML =
+    sectionHead('Archivos', actions) +
+    `<div class="file-toolbar">${siteSelect}${fileBreadcrumb(S.files.path)}</div>` +
+    table(['Nombre', 'Tipo', 'Tamaño', 'Modificado', ''], rows, 'Esta carpeta está vacía.');
+
+  const siteSelectEl = $('#file-site');
+  if (siteSelectEl) {
+    siteSelectEl.addEventListener('change', () => {
+      S.files.domain = siteSelectEl.value;
+      S.files.path = '';
+      navigate('files');
+    });
+  }
+  const upload = $('#file-upload');
+  if (upload) {
+    upload.addEventListener('change', async () => {
+      const file = upload.files && upload.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) {
+        toast('El archivo supera 5 MB', 'error');
+        upload.value = '';
+        return;
+      }
+      try {
+        const data = await fileToBase64(file);
+        await api('/api/v1/files/upload', {
+          method: 'POST',
+          body: {
+            domain: S.files.domain,
+            path: S.files.path,
+            name: file.name,
+            data,
+          },
+        });
+        toast('Archivo subido');
+        await navigate('files');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        upload.value = '';
+      }
+    });
+  }
+}
+
+async function openFileEditor(path) {
+  const data = await api(`/api/v1/files/read?domain=${encodeURIComponent(S.files.domain)}&path=${encodeURIComponent(path)}`);
+  const bytes = base64ToBytes(data.data);
+  if (bytes.length > 1024 * 1024) {
+    toast('El archivo es demasiado grande para editarlo; descárgalo', 'error');
+    return;
+  }
+  if (bytes.includes(0)) {
+    toast('El archivo parece binario; descárgalo para editarlo', 'error');
+    return;
+  }
+  const text = new TextDecoder().decode(bytes);
+  openModal({
+    title: `Editar · ${path}`,
+    submitLabel: 'Guardar',
+    html: `<div class="stack">${field('content', 'Contenido', `<textarea name="content" class="file-editor">${esc(text)}</textarea>`, '', true)}</div>`,
+    onSubmit: async (form) => {
+      const content = form.elements.content.value;
+      await api('/api/v1/files/write', {
+        method: 'PUT',
+        body: {
+          domain: S.files.domain,
+          path,
+          data: bytesToBase64(new TextEncoder().encode(content)),
+        },
+      });
+      toast('Archivo guardado');
+      await navigate('files');
+    },
+  });
+}
+
+async function downloadFile(path) {
+  const data = await api(`/api/v1/files/read?domain=${encodeURIComponent(S.files.domain)}&path=${encodeURIComponent(path)}`);
+  const bytes = base64ToBytes(data.data);
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = path.split('/').pop() || 'archivo';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function openNewFolderModal() {
+  openModal({
+    title: 'Nueva carpeta',
+    submitLabel: 'Crear',
+    html: `<div class="stack">${fInput('name', 'Nombre', { required: true, placeholder: 'assets' })}</div>`,
+    onSubmit: async (form) => {
+      await api('/api/v1/files/mkdir', {
+        method: 'POST',
+        body: { domain: S.files.domain, path: S.files.path, name: val(form, 'name') },
+      });
+      toast('Carpeta creada');
+      await navigate('files');
+    },
+  });
+}
+
+async function renameFile(path) {
+  const current = path.split('/').pop() || '';
+  const name = prompt('Nuevo nombre', current);
+  if (!name || name === current) return;
+  await api('/api/v1/files/rename', {
+    method: 'POST',
+    body: { domain: S.files.domain, path, new_name: name },
+  });
+  toast('Archivo renombrado');
+  await navigate('files');
+}
+
+async function deleteFile(path) {
+  const entry = (S.files.entries || []).find((item) => fileJoin(S.files.path, item.name) === path);
+  const isDir = entry && entry.kind === 'dir';
+  const question = isDir
+    ? `¿Eliminar la carpeta ${path} y todo su contenido?`
+    : `¿Eliminar el archivo ${path}?`;
+  if (!confirm(question)) return;
+  await api(
+    `/api/v1/files?domain=${encodeURIComponent(S.files.domain)}&path=${encodeURIComponent(path)}&recursive=${isDir ? 'true' : 'false'}`,
+    { method: 'DELETE' },
+  );
+  toast('Eliminado');
+  await navigate('files');
 }
 
 /* ---------------- mail ---------------- */
@@ -2074,6 +2318,21 @@ async function handleAction(action, id) {
     }
     case 'website-new':
       return openWebsiteModal();
+    case 'files-refresh':
+      return navigate('files');
+    case 'file-open':
+      S.files.path = id;
+      return navigate('files');
+    case 'file-edit':
+      return openFileEditor(id);
+    case 'file-download':
+      return downloadFile(id);
+    case 'file-rename':
+      return renameFile(id);
+    case 'file-delete':
+      return deleteFile(id);
+    case 'file-new-folder':
+      return openNewFolderModal();
     case 'website-delete': {
       if (!confirm(`¿Eliminar el sitio ${id}?`)) return;
       await api(`/api/v1/websites/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -2271,8 +2530,9 @@ async function renderDatabases() {
     td(esc(fmtDate(db.created_at))),
     td(writable ? btn('Eliminar', 'database-delete', db.id, 'tiny danger') : '', 'actions'),
   ]);
+  const phpMyAdmin = '<a class="btn ghost" href="/phpmyadmin/" target="_blank" rel="noopener">phpMyAdmin</a>';
   $('#view').innerHTML =
-    sectionHead('Bases de datos por dominio', writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '') +
+    sectionHead('Bases de datos por dominio', phpMyAdmin + (writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '')) +
     table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
 }
 

@@ -1,10 +1,15 @@
 //! Linux executor. Every external command is invoked with an explicit argv,
 //! a scrubbed environment and no shell.
 
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use async_trait::async_trait;
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};
 use nix::unistd::{chown, Gid, Uid, User};
 use time::{format_description::well_known::Rfc3339, macros::format_description, OffsetDateTime};
 use tokio::io::AsyncWriteExt;
@@ -12,11 +17,14 @@ use tokio::io::AsyncWriteExt;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, MailDomainSpec, PackageUpdate, ProgramInfo,
-    SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, MailDomainSpec, PackageUpdate,
+    ProgramInfo, SystemInfo,
 };
 
-use super::{merge_dkim_table, ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
+use super::{
+    merge_dkim_table, validate_file_name, validate_relative_path, validate_site_root, ExecError,
+    ExecResult, Executor, MailAccountConfig, UnitStatus, MAX_FILE_BYTES,
+};
 
 const SAFE_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const VMAIL_ROOT: &str = "/var/vmail";
@@ -187,6 +195,49 @@ async fn dovecot_is_v24() -> bool {
     }
 }
 
+struct SiteRoot {
+    dir: Dir,
+    uid: u32,
+    gid: u32,
+}
+
+/// Opens the site document root as a capability directory. The account home and
+/// docroot themselves must be real directories, and cap-std confines every
+/// subsequent operation to the docroot (no `..` or symlink escapes).
+fn open_site_root(cfg: &DaemonConfig, username: &str, docroot: &str) -> ExecResult<SiteRoot> {
+    validate_site_root(username, docroot)?;
+    let home_root = Dir::open_ambient_dir(&cfg.home_root, ambient_authority())?;
+    let home_meta = home_root.symlink_metadata(username)?;
+    if home_meta.file_type().is_symlink() || !home_meta.is_dir() {
+        return Err(ExecError::Io("the account home is not a directory".into()));
+    }
+    let account_home = home_root.open_dir(username)?;
+    let doc_meta = account_home.symlink_metadata(docroot)?;
+    if doc_meta.file_type().is_symlink() || !doc_meta.is_dir() {
+        return Err(ExecError::Io(
+            "the website document root is not a directory".into(),
+        ));
+    }
+    let dir = account_home.open_dir(docroot)?;
+    Ok(SiteRoot {
+        dir,
+        uid: home_meta.uid(),
+        gid: home_meta.gid(),
+    })
+}
+
+fn set_owner_mode(fd: std::os::fd::RawFd, uid: u32, gid: u32, mode: u32) -> ExecResult<()> {
+    let rc = unsafe { libc::fchown(fd, uid, gid) };
+    if rc != 0 {
+        return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
+    }
+    let rc = unsafe { libc::fchmod(fd, mode) };
+    if rc != 0 {
+        return Err(ExecError::Io(std::io::Error::last_os_error().to_string()));
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl Executor for RealExecutor {
     fn mode(&self) -> &'static str {
@@ -275,6 +326,167 @@ impl Executor for RealExecutor {
         }
         let gid = self.gid_for(username)?;
         self.make_dir(path, 0o755, uid, gid)
+    }
+
+    async fn file_list(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+    ) -> ExecResult<Vec<FileEntry>> {
+        validate_relative_path(path)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        let mut read_dir = if path.is_empty() {
+            site.dir.entries()?
+        } else {
+            site.dir.read_dir(path)?
+        };
+        let mut entries = Vec::new();
+        for entry in &mut read_dir {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            let relative = if path.is_empty() {
+                PathBuf::from(&name)
+            } else {
+                Path::new(path).join(&name)
+            };
+            let meta = site.dir.symlink_metadata(&relative)?;
+            let kind = if meta.is_dir() {
+                "dir"
+            } else if meta.is_file() {
+                "file"
+            } else if meta.file_type().is_symlink() {
+                "symlink"
+            } else {
+                "other"
+            };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|value| OffsetDateTime::from(value).format(&Rfc3339).ok());
+            entries.push(FileEntry {
+                name,
+                kind: kind.to_string(),
+                size: meta.len(),
+                modified,
+            });
+        }
+        entries.sort_by(|left, right| {
+            (left.kind != "dir")
+                .cmp(&(right.kind != "dir"))
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        Ok(entries)
+    }
+
+    async fn file_read(&self, username: &str, docroot: &str, path: &str) -> ExecResult<Vec<u8>> {
+        if path.is_empty() {
+            return Err(ExecError::Io("a file path is required".into()));
+        }
+        validate_relative_path(path)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        let meta = site.dir.symlink_metadata(path)?;
+        if meta.file_type().is_symlink() {
+            return Err(ExecError::Io("symbolic links cannot be edited".into()));
+        }
+        if !meta.is_file() {
+            return Err(ExecError::Io("not a regular file".into()));
+        }
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(ExecError::Io("file is too large".into()));
+        }
+        let mut file = site.dir.open(path)?;
+        let mut data = Vec::with_capacity(meta.len() as usize);
+        file.read_to_end(&mut data)?;
+        Ok(data)
+    }
+
+    async fn file_write(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        data: &[u8],
+    ) -> ExecResult<()> {
+        if path.is_empty() {
+            return Err(ExecError::Io("a file path is required".into()));
+        }
+        if data.len() as u64 > MAX_FILE_BYTES {
+            return Err(ExecError::Io("file is too large".into()));
+        }
+        validate_relative_path(path)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        if let Ok(meta) = site.dir.symlink_metadata(path) {
+            if meta.file_type().is_symlink() {
+                return Err(ExecError::Io("symbolic links cannot be edited".into()));
+            }
+            if !meta.is_file() {
+                return Err(ExecError::Io("not a regular file".into()));
+            }
+        }
+        let mut options = CapOpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut file = site.dir.open_with(path, &options)?;
+        file.write_all(data)?;
+        file.flush()?;
+        set_owner_mode(file.as_raw_fd(), site.uid, site.gid, 0o644)?;
+        Ok(())
+    }
+
+    async fn file_mkdir(&self, username: &str, docroot: &str, path: &str) -> ExecResult<()> {
+        if path.is_empty() {
+            return Err(ExecError::Io("a directory path is required".into()));
+        }
+        validate_relative_path(path)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        site.dir.create_dir(path)?;
+        let dir = site.dir.open_dir(path)?;
+        set_owner_mode(dir.as_raw_fd(), site.uid, site.gid, 0o755)?;
+        Ok(())
+    }
+
+    async fn file_rename(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        new_name: &str,
+    ) -> ExecResult<()> {
+        if path.is_empty() {
+            return Err(ExecError::Io("a source path is required".into()));
+        }
+        validate_relative_path(path)?;
+        validate_file_name(new_name)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        let source = Path::new(path);
+        let target = source.parent().unwrap_or(Path::new("")).join(new_name);
+        site.dir.rename(source, &site.dir, &target)?;
+        Ok(())
+    }
+
+    async fn file_delete(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        recursive: bool,
+    ) -> ExecResult<()> {
+        if path.is_empty() {
+            return Err(ExecError::Io("refusing to delete the site root".into()));
+        }
+        validate_relative_path(path)?;
+        let site = open_site_root(&self.cfg, username, docroot)?;
+        let meta = site.dir.symlink_metadata(path)?;
+        if meta.is_dir() {
+            if recursive {
+                site.dir.remove_dir_all(path)?;
+            } else {
+                site.dir.remove_dir(path)?;
+            }
+        } else {
+            site.dir.remove_file(path)?;
+        }
+        Ok(())
     }
 
     async fn ensure_welcome(

@@ -35,6 +35,7 @@ fn exec_error(err: ExecError) -> WireError {
         }
         ExecError::NotFound(msg) => WireError::not_found(msg),
         ExecError::Unsupported(msg) => WireError::unsupported(msg),
+        ExecError::InvalidInput(msg) => WireError::invalid(msg),
         other => WireError::internal(other.to_string()),
     }
 }
@@ -69,6 +70,49 @@ impl Reconciler {
             Request::AccountList => {
                 let accounts = self.state.list_accounts().map_err(internal)?;
                 Ok(Response::Accounts { accounts })
+            }
+
+            Request::FileList {
+                username,
+                domain,
+                path,
+            } => self.file_list(&username, &domain, &path, actor).await,
+            Request::FileRead {
+                username,
+                domain,
+                path,
+            } => self.file_read(&username, &domain, &path, actor).await,
+            Request::FileWrite {
+                username,
+                domain,
+                path,
+                data,
+            } => {
+                self.file_write(&username, &domain, &path, &data, actor)
+                    .await
+            }
+            Request::FileMkdir {
+                username,
+                domain,
+                path,
+            } => self.file_mkdir(&username, &domain, &path, actor).await,
+            Request::FileRename {
+                username,
+                domain,
+                path,
+                new_name,
+            } => {
+                self.file_rename(&username, &domain, &path, &new_name, actor)
+                    .await
+            }
+            Request::FileDelete {
+                username,
+                domain,
+                path,
+                recursive,
+            } => {
+                self.file_delete(&username, &domain, &path, recursive, actor)
+                    .await
             }
 
             Request::WebsiteUpsert(spec) => self.website_upsert(spec, actor).await,
@@ -445,6 +489,140 @@ impl Reconciler {
         )?;
         Ok(Response::Ack {
             message: format!("account '{username}' deleted"),
+        })
+    }
+
+    fn website_docroot(&self, username: &str, domain: &str) -> Result<String, WireError> {
+        let website = self
+            .state
+            .get_website(domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found("website not found"))?;
+        if website.spec.username != username {
+            return Err(WireError::not_found("website not found"));
+        }
+        Ok(website.spec.docroot)
+    }
+
+    async fn file_list(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        let entries = self
+            .exec
+            .file_list(username, &docroot, path)
+            .await
+            .map_err(exec_error)?;
+        self.log(actor, "file.list", &format!("{domain}:{path}"), "")?;
+        Ok(Response::Files {
+            entries,
+            path: path.to_string(),
+        })
+    }
+
+    async fn file_read(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        let data = self
+            .exec
+            .file_read(username, &docroot, path)
+            .await
+            .map_err(exec_error)?;
+        self.log(actor, "file.read", &format!("{domain}:{path}"), "")?;
+        Ok(Response::FileData { data })
+    }
+
+    async fn file_write(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        data: &[u8],
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        self.exec
+            .file_write(username, &docroot, path, data)
+            .await
+            .map_err(exec_error)?;
+        self.log(
+            actor,
+            "file.write",
+            &format!("{domain}:{path}"),
+            &format!("{} bytes", data.len()),
+        )?;
+        Ok(Response::Ack {
+            message: "file saved".into(),
+        })
+    }
+
+    async fn file_mkdir(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        self.exec
+            .file_mkdir(username, &docroot, path)
+            .await
+            .map_err(exec_error)?;
+        self.log(actor, "file.mkdir", &format!("{domain}:{path}"), "")?;
+        Ok(Response::Ack {
+            message: "directory created".into(),
+        })
+    }
+
+    async fn file_rename(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        new_name: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        self.exec
+            .file_rename(username, &docroot, path, new_name)
+            .await
+            .map_err(exec_error)?;
+        self.log(actor, "file.rename", &format!("{domain}:{path}"), new_name)?;
+        Ok(Response::Ack {
+            message: "renamed".into(),
+        })
+    }
+
+    async fn file_delete(
+        &self,
+        username: &str,
+        domain: &str,
+        path: &str,
+        recursive: bool,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        let docroot = self.website_docroot(username, domain)?;
+        self.exec
+            .file_delete(username, &docroot, path, recursive)
+            .await
+            .map_err(exec_error)?;
+        self.log(
+            actor,
+            "file.delete",
+            &format!("{domain}:{path}"),
+            if recursive { "recursive" } else { "" },
+        )?;
+        Ok(Response::Ack {
+            message: "deleted".into(),
         })
     }
 

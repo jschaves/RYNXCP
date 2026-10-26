@@ -411,6 +411,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 textarea { min-height: 92px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+.file-editor { min-height: 340px; }
 select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; }
@@ -425,6 +426,11 @@ select { appearance: none; background-image: linear-gradient(45deg, transparent 
 .form-section p { margin: 4px 0 0; }
 .limit-row { display: flex; align-items: center; gap: 8px; }
 .limit-row input { flex: 1; min-width: 0; }
+.file-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
+.file-site { min-width: 200px; }
+.breadcrumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+.crumb { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 2px 4px; font: inherit; }
+.crumb:hover { text-decoration: underline; }
 .package-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 2px; }
 .package-summary > div { border: 1px solid var(--line-soft); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); }
 .package-summary span { display: block; color: var(--muted); font-size: 11px; }

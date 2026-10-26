@@ -1,5 +1,6 @@
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
-use axum::routing::{any, delete, get, patch, post};
+use axum::routing::{any, delete, get, patch, post, put};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -14,6 +15,7 @@ pub mod certs;
 pub mod console;
 pub mod databases;
 pub mod dns;
+pub mod files;
 pub mod firewall;
 pub mod ftp;
 pub mod mail;
@@ -71,6 +73,12 @@ pub fn router(state: ApiState) -> Router {
             get(websites::list).post(websites::create),
         )
         .route("/api/v1/websites/{domain}", delete(websites::delete))
+        .route("/api/v1/files", get(files::list).delete(files::delete))
+        .route("/api/v1/files/read", get(files::read))
+        .route("/api/v1/files/write", put(files::write))
+        .route("/api/v1/files/mkdir", post(files::mkdir))
+        .route("/api/v1/files/upload", post(files::upload))
+        .route("/api/v1/files/rename", post(files::rename))
         .route("/api/v1/php-pools", get(php::list).post(php::create))
         .route("/api/v1/php-pools/{username}", delete(php::delete))
         .route("/api/v1/apps", get(apps::list).post(apps::create))
@@ -134,6 +142,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/system/email/test", post(system::email_test))
         .route("/api/v1/audit", get(audit_route::list))
         .route("/api/v1/reconcile", post(system::reconcile))
+        .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             crate::auth::require_auth,

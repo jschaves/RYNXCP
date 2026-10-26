@@ -23,6 +23,8 @@ reconciliation engine and UI are original.
 | Email | Postfix + Dovecot mailboxes, aliases/forwarding, quotas, DKIM/OpenDKIM, DMARC, SRV, TLS-RPT and Roundcube webmail |
 | Panel email | Local Postfix notifications for credentials, password resets, certificate alerts and delivery tests |
 | Databases | MariaDB per domain, dedicated user/password, local-only access |
+| Files | Per-site document-root file manager with strict account isolation |
+| phpMyAdmin | MariaDB web UI protected by the panel login gate |
 | FTP | Pure-FTPd virtual users, chrooted to the document root, read-only or read-write |
 | Backups | Home + managed configuration, retention, restore and daily timer |
 | Certificates | Let's Encrypt with SANs, bulk renewal and daily timer |
@@ -154,6 +156,54 @@ GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
 GET        /api/v1/packages/assignments
 PATCH      /api/v1/packages/assignments/{account}
 ```
+
+## File manager
+
+The **Archivos** view manages the document root of each website. Global users
+choose any site; scoped users only see their own sites. The daemon opens the
+site document root as a capability directory and every operation stays beneath
+it:
+
+- Absolute paths, `..`, backslashes, NUL bytes and symlink edits are rejected.
+- The account home and docroot must be real directories (no symlink roots).
+- The daemon re-checks that the requested website belongs to the account.
+- cap-std provides `openat`-style confinement, so a symlink cannot escape the
+  docroot or reach another account.
+- Mutations require operator or higher; viewers can list and download.
+- Files are capped at 5 MB for read/write/upload, and created files/directories
+  are chowned to the account UID/GID.
+
+Operations: list, create folder, upload, read/edit text files, download, rename
+and delete (recursive for directories). The editor refuses binaries and files
+larger than 1 MB.
+
+```
+GET        /api/v1/files?domain=example.com&path=assets
+GET        /api/v1/files/read?domain=example.com&path=assets/app.js
+PUT        /api/v1/files/write
+POST       /api/v1/files/mkdir
+POST       /api/v1/files/upload
+POST       /api/v1/files/rename
+DELETE     /api/v1/files?domain=example.com&path=assets&recursive=true
+```
+
+## phpMyAdmin
+
+The one-shot installer also installs phpMyAdmin under
+`/usr/share/phpmyadmin` and writes
+`/etc/nginx/snippets/rynxcp-phpmyadmin.conf`. The panel vhost includes that
+snippet, so `/phpmyadmin/` is protected by an Nginx `auth_request` subrequest to
+`/api/v1/auth/me`:
+
+- A valid panel session is required; without it the request is redirected to
+  the panel login.
+- Direct access to `config.inc.php`, `libraries/` and `setup/` is denied.
+- phpMyAdmin still asks for MariaDB credentials; the panel does not embed or
+  store database passwords in its configuration.
+- Set `RYNX_SKIP_PHPMYADMIN=1` when running `deploy/preinstall.sh` to skip it.
+
+The **Bases de datos** view exposes a **phpMyAdmin** button that opens
+`/phpmyadmin/` in a new tab.
 
 Creating an enabled site with `tls = "lets_encrypt"` also starts a certificate
 job immediately. The API returns the job in `cert_job`; the panel polls
@@ -342,6 +392,9 @@ What it installs and configures:
   delivery test.
 - The panel database is initialized on first start, including the editable
   **Por defecto** package available under **Administración > Paquetes**.
+- phpMyAdmin in `/usr/share/phpmyadmin` behind the panel login gate, with the
+  Nginx snippet included in the panel vhost. Set `RYNX_SKIP_PHPMYADMIN=1` to
+  skip it.
 - A panel virtual host and, for a domain with working DNS, a Let's Encrypt
   certificate with HTTP-to-HTTPS redirect. If issuance fails, the panel stays on
   HTTP and the script explains how to retry.
@@ -373,8 +426,12 @@ Build and install:
 cargo build --release
 sudo bash deploy/install.sh
 sudo bash deploy/mail-setup.sh
+sudo bash deploy/phpmyadmin-setup.sh
 sudo bash deploy/panel-dns-zone.sh panel.example.com 203.0.113.10 mail
 ```
+
+For phpMyAdmin, uncomment the `include /etc/nginx/snippets/rynxcp-phpmyadmin.conf;`
+line inside the panel `server` block before reloading Nginx.
 
 The installer creates the `rynx`/`rynxftp` users and groups, directories, token,
 authentication log, fail2ban integration, logrotate rules, units and timers, then
@@ -463,6 +520,10 @@ POST       /api/v1/dns/{domain}/records
 DELETE     /api/v1/dns/{domain}/records/{id}
 POST       /api/v1/dns/{domain}/mail
 GET|POST   /api/v1/databases         DELETE /api/v1/databases/{id}
+GET        /api/v1/files             DELETE /api/v1/files
+GET        /api/v1/files/read        PUT    /api/v1/files/write
+POST       /api/v1/files/mkdir       POST   /api/v1/files/upload
+POST       /api/v1/files/rename
 GET|POST   /api/v1/ftp               DELETE /api/v1/ftp/{id}
 GET        /api/v1/monitor/services
 GET        /api/v1/monitor/history?minutes=1440
@@ -530,4 +591,7 @@ Copyright (C) 2026 RYNXCP contributors.
 - Package limits are stored and shown, and the account disk quota is derived
   from the package; web/mail/database/backup counts are not enforced as hard
   limits yet.
+- The file manager is limited to a website document root and 5 MB per
+  read/write/upload; symlinks are listed but cannot be edited.
+- phpMyAdmin requires both the panel session and a valid MariaDB login.
 - Multi-node, secondary DNS, remote metrics and 2FA are planned for later versions.

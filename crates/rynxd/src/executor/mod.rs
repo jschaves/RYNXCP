@@ -16,7 +16,8 @@ use async_trait::async_trait;
 
 use rynx_core::{CoreError, DaemonConfig};
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, MailDomainSpec, PackageUpdate, ProgramInfo, SystemInfo,
+    AccountSpec, AppSpec, CertView, FileEntry, MailDomainSpec, PackageUpdate, ProgramInfo,
+    SystemInfo,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -32,6 +33,8 @@ pub enum ExecError {
     Io(String),
     #[error("unsupported: {0}")]
     Unsupported(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
     #[error("not found: {0}")]
     NotFound(String),
     #[error("account '{0}' does not exist")]
@@ -51,6 +54,55 @@ impl From<CoreError> for ExecError {
 }
 
 pub type ExecResult<T> = Result<T, ExecError>;
+
+/// Upper bound for files read or written through the panel file manager.
+pub const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+
+fn invalid_path(message: &str) -> ExecError {
+    ExecError::InvalidInput(format!("invalid file path: {message}"))
+}
+
+/// Rejects absolute paths, traversal, backslashes and NUL bytes. An empty path
+/// is allowed and means the site document root.
+pub fn validate_relative_path(path: &str) -> ExecResult<()> {
+    if path.is_empty() {
+        return Ok(());
+    }
+    if path.starts_with('/') || path.contains('\\') || path.contains('\0') {
+        return Err(invalid_path("absolute, backslash or NUL"));
+    }
+    for component in Path::new(path).components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(invalid_path("'.', '..' or root component"));
+        }
+    }
+    Ok(())
+}
+
+/// Rejects names that could escape the current directory or break the protocol.
+pub fn validate_file_name(name: &str) -> ExecResult<()> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.len() > 255
+    {
+        return Err(invalid_path("invalid file name"));
+    }
+    Ok(())
+}
+
+/// Ensures a site root is a valid account/docroot pair.
+pub fn validate_site_root(username: &str, docroot: &str) -> ExecResult<()> {
+    rynx_core::validate_username(username)
+        .map_err(|err| ExecError::InvalidInput(format!("invalid account: {err}")))?;
+    rynx_core::validate_docroot(docroot)
+        .map_err(|err| ExecError::InvalidInput(format!("invalid document root: {err}")))?;
+    validate_relative_path(docroot)?;
+    Ok(())
+}
 
 /// Merge service-managed panel entries into a generated OpenDKIM table.
 ///
@@ -115,6 +167,36 @@ pub trait Executor: Send + Sync {
     async fn ensure_account(&self, spec: &AccountSpec, uid: u32) -> ExecResult<()>;
     async fn remove_account(&self, username: &str, purge: bool) -> ExecResult<()>;
     async fn ensure_docroot(&self, username: &str, uid: u32, path: &Path) -> ExecResult<()>;
+
+    async fn file_list(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+    ) -> ExecResult<Vec<FileEntry>>;
+    async fn file_read(&self, username: &str, docroot: &str, path: &str) -> ExecResult<Vec<u8>>;
+    async fn file_write(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        data: &[u8],
+    ) -> ExecResult<()>;
+    async fn file_mkdir(&self, username: &str, docroot: &str, path: &str) -> ExecResult<()>;
+    async fn file_rename(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        new_name: &str,
+    ) -> ExecResult<()>;
+    async fn file_delete(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        recursive: bool,
+    ) -> ExecResult<()>;
 
     #[allow(clippy::too_many_arguments)]
     async fn ensure_welcome(
@@ -239,5 +321,27 @@ pub fn build(cfg: &DaemonConfig) -> anyhow::Result<Arc<dyn Executor>> {
                 "simulate=false is only supported on Linux; enable simulate for this platform"
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_paths_reject_traversal_and_absolute_paths() {
+        assert!(validate_relative_path("assets/app.js").is_ok());
+        assert!(validate_relative_path("").is_ok());
+        assert!(validate_relative_path("../other").is_err());
+        assert!(validate_relative_path("a/../../b").is_err());
+        assert!(validate_relative_path("/etc/passwd").is_err());
+        assert!(validate_relative_path("a\\b").is_err());
+    }
+
+    #[test]
+    fn file_names_reject_separators() {
+        assert!(validate_file_name("index.php").is_ok());
+        assert!(validate_file_name("..").is_err());
+        assert!(validate_file_name("a/b").is_err());
     }
 }

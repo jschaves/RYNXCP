@@ -162,6 +162,36 @@ try {
     $poolConf = Join-Path $root 'data/daemon/sandbox/php/8.3/fpm/pool.d/rynx-acme.conf'
     if (-not (Test-Path $poolConf)) { throw 'php pool was not rendered' }
 
+    Write-Host '==> file manager'
+    $files = RequestJson 'GET' '/api/v1/files?domain=example.com&path='
+    if (-not ($files.entries | Where-Object { $_.name -like 'index.*' })) {
+        throw 'file manager did not list the site root'
+    }
+    $null = RequestJson 'POST' '/api/v1/files/mkdir' @{ domain = 'example.com'; path = ''; name = 'assets' }
+    $hello = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('hello'))
+    $null = RequestJson 'POST' '/api/v1/files/upload' @{
+        domain = 'example.com'; path = 'assets'; name = 'hello.txt'; data = $hello
+    }
+    $readFile = RequestJson 'GET' '/api/v1/files/read?domain=example.com&path=assets%2Fhello.txt'
+    if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($readFile.data)) -ne 'hello') {
+        throw 'file read failed'
+    }
+    $bye = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('bye'))
+    $null = RequestJson 'PUT' '/api/v1/files/write' @{
+        domain = 'example.com'; path = 'assets/hello.txt'; data = $bye
+    }
+    $null = RequestJson 'POST' '/api/v1/files/rename' @{
+        domain = 'example.com'; path = 'assets/hello.txt'; new_name = 'bye.txt'
+    }
+    $renamed = RequestJson 'GET' '/api/v1/files/read?domain=example.com&path=assets%2Fbye.txt'
+    if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($renamed.data)) -ne 'bye') {
+        throw 'file rename failed'
+    }
+    $null = RequestJson 'DELETE' '/api/v1/files?domain=example.com&path=assets%2Fbye.txt&recursive=false'
+    $null = RequestJson 'DELETE' '/api/v1/files?domain=example.com&path=assets&recursive=true'
+    ExpectStatus 400 { RequestJson 'GET' '/api/v1/files?domain=example.com&path=..%2F..%2Fetc%2Fpasswd' }
+    ExpectStatus 404 { RequestJson 'GET' '/api/v1/files?domain=missing.example.com&path=' }
+
     Write-Host '==> account suspension/resume'
     $suspended = PostJson '/api/v1/accounts' @{
         username = 'acme'; email = 'acme@example.com'; disk_limit_mb = 2048
@@ -368,7 +398,7 @@ try {
     $null = RequestJson 'DELETE' "/api/v1/backups/$($backup.backup.id)"
 
     Write-Host ''
-    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
+    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, files, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }

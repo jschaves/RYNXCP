@@ -465,6 +465,10 @@ if [[ "${RYNX_SKIP_MAIL:-0}" != "1" ]]; then
   bash "$ROOT_DIR/deploy/mail-setup.sh"
   DKIM_SELECTOR="mail"
 fi
+if [[ "${RYNX_SKIP_PHPMYADMIN:-0}" != "1" ]]; then
+  log "Installing phpMyAdmin behind the panel login"
+  bash "$ROOT_DIR/deploy/phpmyadmin-setup.sh"
+fi
 if is_domain "$HOST"; then
   set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
   if [[ -z "$PUBLIC_IP" ]]; then
@@ -489,6 +493,12 @@ set_toml "$API_CONF" "trust_proxy_headers" "true"
 # and port 80 only redirects.
 # ---------------------------------------------------------------------------
 PANEL_SITE="/etc/nginx/sites-available/rynxcp-panel"
+
+panel_pma_include() {
+  if [[ -f /etc/nginx/snippets/rynxcp-phpmyadmin.conf ]]; then
+    printf '    include /etc/nginx/snippets/rynxcp-phpmyadmin.conf;\n'
+  fi
+}
 
 panel_proxy_block() {
   cat <<EOF
@@ -522,6 +532,7 @@ server {
 
 EOF
     panel_proxy_block
+    panel_pma_include
     cat <<EOF
 }
 EOF
@@ -562,6 +573,7 @@ server {
 
 EOF
     panel_proxy_block
+    panel_pma_include
     cat <<EOF
 }
 EOF
@@ -611,6 +623,7 @@ server {
 
 EOF
     panel_proxy_block
+    panel_pma_include
     cat <<EOF
 }
 EOF
@@ -790,7 +803,7 @@ RYNXCP is ready.
 Installed:
   Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
   OpenDKIM, fail2ban, nftables, unattended-upgrades, Node.js, Python,
-  Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot and Roundcube
+  Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot, Roundcube and phpMyAdmin
 
 Timers:
   rynxcp-cert-renew.timer  daily Let's Encrypt renewal
@@ -806,6 +819,8 @@ Next steps:
   4. Log in, open "Programas" to review updates and "Consola" for diagnostics.
   5. Open "Sistema > Correo del panel" and send a test message; then use
      "¿Olvidaste tu contraseña?" to verify password-reset delivery.
+  6. Use "Bases de datos > phpMyAdmin": it requires the active panel session
+     and your MariaDB credentials.
 
 Log: $LOG
 EOF

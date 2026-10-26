@@ -10,11 +10,48 @@ use rynx_core::crypto::random_hex;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, MailDomainSpec, PackageUpdate, ProgramInfo,
-    SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, MailDomainSpec, PackageUpdate,
+    ProgramInfo, SystemInfo,
 };
 
-use super::{merge_dkim_table, ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus};
+use super::{
+    merge_dkim_table, ExecError, ExecResult, Executor, MailAccountConfig, UnitStatus,
+    MAX_FILE_BYTES,
+};
+
+fn safe_join(root: &Path, rel: &str) -> ExecResult<PathBuf> {
+    safe_join_path(root, Path::new(rel))
+}
+
+fn safe_join_path(root: &Path, rel: &Path) -> ExecResult<PathBuf> {
+    for component in rel.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(ExecError::Io("invalid file path".into()));
+        }
+    }
+    let root_canon = std::fs::canonicalize(root).map_err(|err| ExecError::Io(err.to_string()))?;
+    let target = if rel.as_os_str().is_empty() {
+        root_canon.clone()
+    } else {
+        root_canon.join(rel)
+    };
+    let checked = if target.exists() {
+        std::fs::canonicalize(&target).map_err(|err| ExecError::Io(err.to_string()))?
+    } else {
+        let parent = target
+            .parent()
+            .ok_or_else(|| ExecError::Io("invalid target path".into()))?;
+        let parent = std::fs::canonicalize(parent).map_err(|err| ExecError::Io(err.to_string()))?;
+        let name = target
+            .file_name()
+            .ok_or_else(|| ExecError::Io("invalid target name".into()))?;
+        parent.join(name)
+    };
+    if !checked.starts_with(&root_canon) {
+        return Err(ExecError::Io("path escapes the site root".into()));
+    }
+    Ok(target)
+}
 
 pub struct SimExecutor {
     cfg: DaemonConfig,
@@ -120,6 +157,160 @@ impl Executor for SimExecutor {
         }
         std::fs::create_dir_all(path)?;
         let _ = uid;
+        Ok(())
+    }
+
+    async fn file_list(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+    ) -> ExecResult<Vec<FileEntry>> {
+        super::validate_site_root(username, docroot)?;
+        super::validate_relative_path(path)?;
+        let root = self.home(username).join(docroot);
+        let target = safe_join(&root, path)?;
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&target)? {
+            let entry = entry?;
+            let meta = std::fs::symlink_metadata(entry.path())?;
+            let kind = if meta.file_type().is_dir() {
+                "dir"
+            } else if meta.file_type().is_file() {
+                "file"
+            } else if meta.file_type().is_symlink() {
+                "symlink"
+            } else {
+                "other"
+            };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|value| OffsetDateTime::from(value).format(&Rfc3339).ok());
+            entries.push(FileEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                kind: kind.to_string(),
+                size: meta.len(),
+                modified,
+            });
+        }
+        entries.sort_by(|left, right| {
+            (left.kind != "dir")
+                .cmp(&(right.kind != "dir"))
+                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+        });
+        Ok(entries)
+    }
+
+    async fn file_read(&self, username: &str, docroot: &str, path: &str) -> ExecResult<Vec<u8>> {
+        super::validate_site_root(username, docroot)?;
+        if path.is_empty() {
+            return Err(ExecError::Io("a file path is required".into()));
+        }
+        super::validate_relative_path(path)?;
+        let root = self.home(username).join(docroot);
+        let target = safe_join(&root, path)?;
+        let meta = std::fs::symlink_metadata(&target)?;
+        if meta.file_type().is_symlink() {
+            return Err(ExecError::Io("symbolic links cannot be edited".into()));
+        }
+        if !meta.is_file() {
+            return Err(ExecError::Io("not a regular file".into()));
+        }
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(ExecError::Io("file is too large".into()));
+        }
+        Ok(std::fs::read(target)?)
+    }
+
+    async fn file_write(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        data: &[u8],
+    ) -> ExecResult<()> {
+        super::validate_site_root(username, docroot)?;
+        if path.is_empty() {
+            return Err(ExecError::Io("a file path is required".into()));
+        }
+        if data.len() as u64 > MAX_FILE_BYTES {
+            return Err(ExecError::Io("file is too large".into()));
+        }
+        super::validate_relative_path(path)?;
+        let root = self.home(username).join(docroot);
+        let target = safe_join(&root, path)?;
+        if let Ok(meta) = std::fs::symlink_metadata(&target) {
+            if meta.file_type().is_symlink() {
+                return Err(ExecError::Io("symbolic links cannot be edited".into()));
+            }
+            if !meta.is_file() {
+                return Err(ExecError::Io("not a regular file".into()));
+            }
+        }
+        std::fs::write(target, data)?;
+        Ok(())
+    }
+
+    async fn file_mkdir(&self, username: &str, docroot: &str, path: &str) -> ExecResult<()> {
+        super::validate_site_root(username, docroot)?;
+        if path.is_empty() {
+            return Err(ExecError::Io("a directory path is required".into()));
+        }
+        super::validate_relative_path(path)?;
+        let root = self.home(username).join(docroot);
+        let target = safe_join(&root, path)?;
+        std::fs::create_dir(target)?;
+        Ok(())
+    }
+
+    async fn file_rename(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        new_name: &str,
+    ) -> ExecResult<()> {
+        super::validate_site_root(username, docroot)?;
+        if path.is_empty() {
+            return Err(ExecError::Io("a source path is required".into()));
+        }
+        super::validate_relative_path(path)?;
+        super::validate_file_name(new_name)?;
+        let root = self.home(username).join(docroot);
+        let source = safe_join(&root, path)?;
+        let parent = source
+            .parent()
+            .ok_or_else(|| ExecError::Io("invalid source path".into()))?;
+        let target = parent.join(new_name);
+        std::fs::rename(source, target)?;
+        Ok(())
+    }
+
+    async fn file_delete(
+        &self,
+        username: &str,
+        docroot: &str,
+        path: &str,
+        recursive: bool,
+    ) -> ExecResult<()> {
+        super::validate_site_root(username, docroot)?;
+        if path.is_empty() {
+            return Err(ExecError::Io("refusing to delete the site root".into()));
+        }
+        super::validate_relative_path(path)?;
+        let root = self.home(username).join(docroot);
+        let target = safe_join(&root, path)?;
+        let meta = std::fs::symlink_metadata(&target)?;
+        if meta.is_dir() {
+            if recursive {
+                std::fs::remove_dir_all(target)?;
+            } else {
+                std::fs::remove_dir(target)?;
+            }
+        } else {
+            std::fs::remove_file(target)?;
+        }
         Ok(())
     }
 

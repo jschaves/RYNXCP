@@ -430,6 +430,37 @@
     "Solo cambia el backend web; el resto del paquete sigue bloqueado.":
       "Only the web backend changes; the rest of the package stays locked.",
     "Backend actualizado": "Backend updated",
+    "Archivos": "Files",
+    "Gestor de archivos del document root, aislado por cuenta":
+      "File manager for the document root, isolated per account",
+    "No hay sitios web": "No websites",
+    "Crea un sitio web para gestionar sus archivos.":
+      "Create a website to manage its files.",
+    "No se pudo abrir el gestor": "The file manager could not be opened",
+    "Nueva carpeta": "New folder",
+    "Subir archivo": "Upload file",
+    "Abrir": "Open",
+    "Descargar": "Download",
+    "Renombrar": "Rename",
+    "Modificado": "Modified",
+    "Esta carpeta está vacía.": "This folder is empty.",
+    "Carpeta": "Folder",
+    "Archivo": "File",
+    "Enlace": "Link",
+    "Otro": "Other",
+    "Raíz": "Root",
+    "Contenido": "Content",
+    "Archivo subido": "File uploaded",
+    "Archivo guardado": "File saved",
+    "Archivo renombrado": "File renamed",
+    "Carpeta creada": "Folder created",
+    "Eliminado": "Deleted",
+    "El archivo supera 5 MB": "The file exceeds 5 MB",
+    "El archivo es demasiado grande para editarlo; descárgalo":
+      "The file is too large to edit; download it",
+    "El archivo parece binario; descárgalo para editarlo":
+      "The file looks binary; download it to edit",
+    "No se pudo leer el archivo": "The file could not be read",
   };
 
   const PT = {

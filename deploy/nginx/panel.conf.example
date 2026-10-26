@@ -42,4 +42,8 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 120s;
     }
+
+    # After deploy/phpmyadmin-setup.sh, uncomment to expose phpMyAdmin behind
+    # the panel login:
+    # include /etc/nginx/snippets/rynxcp-phpmyadmin.conf;
 }
