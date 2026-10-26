@@ -104,12 +104,29 @@ try {
     $scriptJs = Invoke-WebRequest -Uri "$base/app.js" -UseBasicParsing
     if ($scriptJs.StatusCode -ne 200) { throw 'app.js was not served' }
 
+    $seedPackages = @(RequestJson 'GET' '/api/v1/packages')
+    if ($seedPackages.Count -lt 1 -or -not $seedPackages[0].is_default) {
+        throw 'the default package was not seeded'
+    }
+    $seedPackage = $seedPackages[0]
+
     Write-Host '==> accounts, apps, websites'
     $account = PostJson '/api/v1/accounts' @{
         username = 'acme'; email = 'acme@example.com'; disk_limit_mb = 2048
         php_version = '8.3'; enabled = $true
+        package_id = $seedPackage.id; web_backend = 'php'
     }
     if ($account.account.kind -ne 'account') { throw 'unexpected account response' }
+    if (-not $account.package -or $account.package.web_backend -ne 'php') {
+        throw 'the account package assignment failed'
+    }
+    $assignment = @(RequestJson 'GET' '/api/v1/packages/assignments') |
+        Where-Object { $_.account -eq 'acme' }
+    if (-not $assignment -or $assignment.package_id -ne $seedPackage.id) {
+        throw 'the account package assignment was not stored'
+    }
+    $updatedBackend = RequestJson 'PATCH' '/api/v1/packages/assignments/acme' @{ web_backend = 'node' }
+    if ($updatedBackend.web_backend -ne 'node') { throw 'the account backend override failed' }
 
     $app = PostJson '/api/v1/apps' @{
         username = 'acme'; name = 'api'; runtime = @{ engine = 'node'; version = '22' }
@@ -293,6 +310,17 @@ try {
     $editedDefault = RequestJson 'PATCH' "/api/v1/packages/$($defaultPackage.id)" $defaultBody
     if (-not $editedDefault.is_default) { throw 'the default package lost its flag' }
     ExpectStatus 409 { RequestJson 'DELETE' "/api/v1/packages/$($defaultPackage.id)" }
+
+    $pkgAccount = PostJson '/api/v1/accounts' @{
+        username = 'pkgacct'; email = 'pkgacct@example.com'; disk_limit_mb = 1
+        php_version = $null; enabled = $true
+        package_id = $newPackage.id; web_backend = 'node'
+    }
+    if ($pkgAccount.account.account.spec.disk_limit_mb -ne 200 -or $pkgAccount.package.web_backend -ne 'node') {
+        throw 'the account did not inherit the package limits'
+    }
+    ExpectStatus 409 { RequestJson 'DELETE' "/api/v1/packages/$($newPackage.id)" }
+    $null = RequestJson 'DELETE' '/api/v1/accounts/pkgacct?purge=true'
     $null = RequestJson 'DELETE' "/api/v1/packages/$($newPackage.id)"
 
     Write-Host '==> security checks'

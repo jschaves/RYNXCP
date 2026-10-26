@@ -11,7 +11,10 @@ use serde::{Deserialize, Serialize};
 use rynx_core::crypto::{now_rfc3339, now_unix, random_hex, sha256_hex};
 use rynx_core::{validate_email, validate_panel_username, PasswordPolicy};
 
-use crate::packages::{default_package, normalize_and_validate, PackageInput, PackageView};
+use crate::packages::{
+    default_package, normalize_and_validate, AccountPackageView, PackageInput, PackageView,
+    WEB_BACKENDS,
+};
 use crate::role::Role;
 
 pub const SESSION_COOKIE: &str = "rynx_session";
@@ -102,6 +105,15 @@ CREATE TABLE IF NOT EXISTS packages (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_name_lower ON packages(lower(name));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_default ON packages(is_default) WHERE is_default = 1;
+
+CREATE TABLE IF NOT EXISTS account_packages (
+    account     TEXT PRIMARY KEY,
+    package_id  TEXT NOT NULL REFERENCES packages(id) ON DELETE RESTRICT,
+    web_backend TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_account_packages_package ON account_packages(package_id);
 "#;
 
 #[derive(Debug, thiserror::Error)]
@@ -1120,10 +1132,105 @@ impl PanelDb {
                 "the default package cannot be deleted".into(),
             ));
         }
+        if self.package_is_assigned(id)? {
+            return Err(PanelError::Conflict(
+                "the package is assigned to one or more accounts".into(),
+            ));
+        }
         let conn = self.conn()?;
         conn.execute("DELETE FROM packages WHERE id = ?1", params![id])?;
         Ok(())
     }
+
+    pub fn set_account_package(
+        &self,
+        account: &str,
+        package_id: &str,
+        web_backend: &str,
+    ) -> Result<AccountPackageView, PanelError> {
+        if !WEB_BACKENDS.contains(&web_backend) {
+            return Err(PanelError::Validation(format!(
+                "invalid web backend '{web_backend}'"
+            )));
+        }
+        let package = self
+            .get_package(package_id)?
+            .ok_or_else(|| PanelError::NotFound(format!("package '{package_id}' not found")))?;
+        let conn = self.conn()?;
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO account_packages (account, package_id, web_backend, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?4) \
+             ON CONFLICT(account) DO UPDATE SET package_id = excluded.package_id, \
+                 web_backend = excluded.web_backend, updated_at = excluded.updated_at",
+            params![account, package_id, web_backend, now],
+        )?;
+        Ok(AccountPackageView {
+            account: account.to_string(),
+            package_id: package_id.to_string(),
+            package_name: package.package.name,
+            web_backend: web_backend.to_string(),
+        })
+    }
+
+    pub fn get_account_package(
+        &self,
+        account: &str,
+    ) -> Result<Option<AccountPackageView>, PanelError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT ap.account, ap.package_id, p.name, ap.web_backend \
+                 FROM account_packages ap JOIN packages p ON p.id = ap.package_id \
+                 WHERE ap.account = ?1",
+                params![account],
+                map_account_package,
+            )
+            .optional()?)
+    }
+
+    pub fn list_account_packages(&self) -> Result<Vec<AccountPackageView>, PanelError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT ap.account, ap.package_id, p.name, ap.web_backend \
+             FROM account_packages ap JOIN packages p ON p.id = ap.package_id \
+             ORDER BY ap.account",
+        )?;
+        let rows = stmt.query_map([], map_account_package)?;
+        let mut assignments = Vec::new();
+        for row in rows {
+            assignments.push(row?);
+        }
+        Ok(assignments)
+    }
+
+    pub fn delete_account_package(&self, account: &str) -> Result<(), PanelError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM account_packages WHERE account = ?1",
+            params![account],
+        )?;
+        Ok(())
+    }
+
+    pub fn package_is_assigned(&self, package_id: &str) -> Result<bool, PanelError> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM account_packages WHERE package_id = ?1",
+            params![package_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+}
+
+fn map_account_package(row: &rusqlite::Row<'_>) -> rusqlite::Result<AccountPackageView> {
+    Ok(AccountPackageView {
+        account: row.get(0)?,
+        package_id: row.get(1)?,
+        package_name: row.get(2)?,
+        web_backend: row.get(3)?,
+    })
 }
 
 fn package_name_exists(
@@ -1416,5 +1523,39 @@ mod tests {
             db.delete_package(&default_id),
             Err(PanelError::Conflict(_))
         ));
+    }
+
+    #[test]
+    fn assigns_packages_and_blocks_in_use_deletion() {
+        let (_dir, db) = temp_db();
+        let default = db.list_packages().unwrap()[0].clone();
+        let assignment = db.set_account_package("acme", &default.id, "php").unwrap();
+        assert_eq!(assignment.package_name, "Por defecto");
+        assert!(db.package_is_assigned(&default.id).unwrap());
+        assert_eq!(
+            db.get_account_package("acme").unwrap().unwrap().web_backend,
+            "php"
+        );
+        assert_eq!(
+            db.set_account_package("acme", &default.id, "node")
+                .unwrap()
+                .web_backend,
+            "node"
+        );
+        assert!(matches!(
+            db.set_account_package("acme", &default.id, "perl"),
+            Err(PanelError::Validation(_))
+        ));
+
+        let mut input = default_package();
+        input.name = "Custom".into();
+        let custom = db.create_package(input).unwrap();
+        db.set_account_package("acme", &custom.id, "php").unwrap();
+        assert!(matches!(
+            db.delete_package(&custom.id),
+            Err(PanelError::Conflict(_))
+        ));
+        db.delete_account_package("acme").unwrap();
+        assert!(db.delete_package(&custom.id).is_ok());
     }
 }

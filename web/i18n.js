@@ -416,6 +416,20 @@
     "Paquete no encontrado": "Package not found",
     "El paquete Por defecto no se puede eliminar": "The Default package cannot be deleted",
     "El nombre del paquete es obligatorio": "The package name is required",
+    "Nueva cuenta de hosting": "New hosting account",
+    "Backend plantilla": "Backend template",
+    "Los límites del paquete quedan bloqueados para esta cuenta.":
+      "The package limits are locked for this account.",
+    "Preseleccionado por el paquete; puedes cambiarlo.":
+      "Preselected by the package; you can change it.",
+    "Límites del paquete": "Package limits",
+    "Primero crea un paquete en Administración > Paquetes":
+      "First create a package under Administration > Packages",
+    "Selecciona un paquete": "Select a package",
+    "La cuenta no tiene un paquete asignado": "The account has no package assigned",
+    "Solo cambia el backend web; el resto del paquete sigue bloqueado.":
+      "Only the web backend changes; the rest of the package stays locked.",
+    "Backend actualizado": "Backend updated",
   };
 
   const PT = {

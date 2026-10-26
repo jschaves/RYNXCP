@@ -16,7 +16,7 @@ reconciliation engine and UI are original.
 
 | Area | What is included |
 | --- | --- |
-| Accounts | Isolated Linux users, home directory, declared quota, real suspension (Nginx/apps/FTP) and deletion |
+| Accounts | Isolated Linux users, package-assigned quota/backend, real suspension (Nginx/apps/FTP) and deletion |
 | Web | Nginx virtual hosts, aliases, TLS, PHP-FPM, reverse proxy, security headers |
 | Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go and static sites |
 | DNS | Authoritative BIND zones, A/AAAA/CNAME/MX/TXT/NS/SRV/CAA records |
@@ -139,10 +139,20 @@ record counters are calculated and shown read-only.
 Packages live in `panel.db` (`/var/lib/rynxcp/panel/panel.db`) and are seeded on
 first API start, so a clean installation already contains the editable default
 package. The auto-installers need no extra step: they start the API, which
-creates the table and the default plan. The API is admin-only:
+creates the table and the default plan.
+
+When a hosting account is created, the form asks for a package. Its limits are
+inherited and shown read-only; the only package field the account can override
+is **Backend plantilla**, preselected from the package and editable at creation
+or later from the account's **Backend** action. The account list shows the
+assigned package and backend. Package CRUD is admin-only; operators can list
+packages to assign them, and scoped operators can change only their own backend.
+A package cannot be deleted while it is assigned to an account.
 
 ```
 GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
+GET        /api/v1/packages/assignments
+PATCH      /api/v1/packages/assignments/{account}
 ```
 
 Creating an enabled site with `tls = "lets_encrypt"` also starts a certificate
@@ -468,6 +478,8 @@ GET        /api/v1/system/email      POST   /api/v1/system/email/test
 POST       /api/v1/console
 GET|POST   /api/v1/users             PATCH|DELETE /api/v1/users/{username}
 GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
+GET        /api/v1/packages/assignments
+PATCH      /api/v1/packages/assignments/{account}
 POST       /api/v1/reconcile
 ```
 
@@ -515,4 +527,7 @@ Copyright (C) 2026 RYNXCP contributors.
 
 - Reverse PTR is configured at the IP provider.
 - FTP uses Pure-FTPd's global TLS certificate (explicit FTPS).
+- Package limits are stored and shown, and the account disk quota is derived
+  from the package; web/mail/database/backup counts are not enforced as hard
+  limits yet.
 - Multi-node, secondary DNS, remote metrics and 2FA are planned for later versions.

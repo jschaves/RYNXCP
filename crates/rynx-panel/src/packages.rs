@@ -48,6 +48,15 @@ pub struct PackageView {
     pub updated_at: String,
 }
 
+/// Package assigned to a hosting account, with the account-level backend override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountPackageView {
+    pub account: String,
+    pub package_id: String,
+    pub package_name: String,
+    pub web_backend: String,
+}
+
 /// The seeded, editable package used as the installation default.
 pub fn default_package() -> PackageInput {
     PackageInput {

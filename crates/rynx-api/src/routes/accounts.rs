@@ -3,7 +3,7 @@ use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
 use rynx_core::crypto::random_hex;
-use rynx_panel::{Role, UserView};
+use rynx_panel::{AccountPackageView, Role, UserView, WEB_BACKENDS};
 use rynx_proto::{AccountSpec, AccountView, Request, Response as DaemonResponse};
 
 use crate::auth::AuthUser;
@@ -33,6 +33,12 @@ pub struct CreateAccount {
     /// Only `viewer` and `operator` are allowed. Defaults to `viewer`.
     #[serde(default)]
     pub panel_role: Option<Role>,
+    /// Package assigned to the new account. Limits and templates come from it.
+    #[serde(default)]
+    pub package_id: Option<String>,
+    /// Account-level backend override, preselected from the package.
+    #[serde(default)]
+    pub web_backend: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,6 +48,17 @@ pub struct CreateAccountResponse {
     pub panel_user: Option<UserView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub panel_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<AccountPackageView>,
+}
+
+/// The panel treats 0 as unlimited; the daemon needs a concrete quota.
+fn package_disk_limit(account_mb: u64) -> u64 {
+    if account_mb == 0 {
+        rynx_core::MAX_DISK_LIMIT_MB
+    } else {
+        account_mb.min(rynx_core::MAX_DISK_LIMIT_MB)
+    }
 }
 
 async fn account_list(state: &ApiState, actor: &str) -> Result<Vec<AccountView>, ApiError> {
@@ -70,7 +87,7 @@ pub async fn create(
 ) -> Result<Json<CreateAccountResponse>, ApiError> {
     auth.require_write()?;
     auth.require_global()?;
-    let spec = body.spec;
+    let mut spec = body.spec;
 
     if let Some(role) = body.panel_role {
         if !matches!(role, Role::Viewer | Role::Operator) {
@@ -81,6 +98,45 @@ pub async fn create(
     }
 
     let accounts = account_list(&state, &auth.user.username).await?;
+    let existing_account = accounts
+        .iter()
+        .find(|account| account.spec.username == spec.username)
+        .cloned();
+    let existing_assignment = state.db.get_account_package(&spec.username)?;
+    let mut new_assignment: Option<(String, String)> = None;
+
+    if let Some(existing) = existing_assignment.as_ref() {
+        if let Some(package_id) = body.package_id.as_deref() {
+            if package_id != existing.package_id {
+                return Err(ApiError::Conflict(
+                    "the package assigned to this account cannot be changed".into(),
+                ));
+            }
+        }
+        // Package limits are locked for assigned accounts.
+        if let Some(account) = existing_account.as_ref() {
+            spec.disk_limit_mb = account.spec.disk_limit_mb;
+        } else if let Some(package) = state.db.get_package(&existing.package_id)? {
+            spec.disk_limit_mb = package_disk_limit(package.package.account_mb);
+        }
+    } else if let Some(package_id) = body.package_id.as_deref() {
+        let package = state
+            .db
+            .get_package(package_id)?
+            .ok_or_else(|| ApiError::NotFound(format!("package '{package_id}' not found")))?;
+        let backend = body
+            .web_backend
+            .as_deref()
+            .unwrap_or(&package.package.web_backend)
+            .to_string();
+        if !WEB_BACKENDS.contains(&backend.as_str()) {
+            return Err(ApiError::BadRequest(format!(
+                "invalid web backend '{backend}'"
+            )));
+        }
+        spec.disk_limit_mb = package_disk_limit(package.package.account_mb);
+        new_assignment = Some((package_id.to_string(), backend));
+    }
 
     if accounts.iter().any(|account| {
         account.spec.username != spec.username
@@ -167,10 +223,21 @@ pub async fn create(
         }
     }
 
+    let package = if let Some((package_id, backend)) = new_assignment {
+        Some(
+            state
+                .db
+                .set_account_package(&spec.username, &package_id, &backend)?,
+        )
+    } else {
+        existing_assignment
+    };
+
     Ok(Json(CreateAccountResponse {
         account: response,
         panel_user,
         panel_password,
+        package,
     }))
 }
 
@@ -195,5 +262,6 @@ pub async fn delete(
     if let Some(user) = state.db.find_user_by_account(&username)? {
         let _ = state.db.delete_user(&user.username);
     }
+    state.db.delete_account_package(&username)?;
     Ok(Json(response))
 }

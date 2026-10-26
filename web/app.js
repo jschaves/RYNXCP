@@ -11,7 +11,7 @@ const S = {
   mode: null,
   impersonatedBy: null,
   resetToken: null,
-  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], mailDomains: [], mailAccounts: [] },
+  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], accountPackages: [], mailDomains: [], mailAccounts: [] },
 };
 
 const RUNTIMES = {
@@ -26,6 +26,17 @@ const RUNTIMES = {
 };
 
 const MANAGED = ['node', 'python', 'ruby', 'java', 'dotnet', 'go'];
+
+const WEB_BACKEND_OPTIONS = [
+  { value: 'static', label: 'Estático' },
+  { value: 'php', label: 'PHP (FPM)' },
+  { value: 'node', label: 'Node.js (systemd)' },
+  { value: 'python', label: 'Python (WSGI/ASGI)' },
+  { value: 'ruby', label: 'Ruby' },
+  { value: 'java', label: 'Java (JAR)' },
+  { value: 'dotnet', label: '.NET' },
+  { value: 'go', label: 'Go (binario compilado)' },
+];
 
 const NAV_ITEMS = [
   { id: 'overview', label: 'Resumen', group: 'Operación' },
@@ -426,6 +437,7 @@ const LIST_ENDPOINTS = {
   updates: ['/api/v1/system/updates', 'updates'],
   users: ['/api/v1/users', null],
   packages: ['/api/v1/packages', null],
+  accountPackages: ['/api/v1/packages/assignments', null],
 };
 
 async function loadList(key) {
@@ -555,8 +567,29 @@ function fTextarea(name, label, opts = {}) {
 
 /* ---------------- package helpers ---------------- */
 
+const UNLIMITED_DISK_MB = 10485760;
+
 function limitText(value) {
   return Number(value) === 0 ? T('Sin límite') : String(value);
+}
+
+function diskText(mb) {
+  return Number(mb) >= UNLIMITED_DISK_MB ? T('Sin límite') : `${mb} MB`;
+}
+
+function packageSummary(pkg) {
+  if (!pkg) return '';
+  const rows = [
+    ['Cuenta', diskText(pkg.account_mb)],
+    ['Ancho de banda', limitText(pkg.bandwidth_mb)],
+    ['Backups', pkg.backups],
+    ['Dominios web', limitText(pkg.web_domains)],
+    ['Alias web', limitText(pkg.web_aliases)],
+    ['Dominios de email', limitText(pkg.mail_domains)],
+    ['Cuentas de email', limitText(pkg.mail_accounts)],
+    ['Bases de datos', limitText(pkg.databases)],
+  ];
+  return `<div class="package-summary">${rows.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>`;
 }
 
 function formSection(title, help = '') {
@@ -714,13 +747,20 @@ async function renderOverview() {
 async function renderAccounts() {
   await loadList('accounts');
   if (isAdmin() && !isScoped()) await loadList('users');
+  if (!isScoped() && canWrite()) await loadList('packages');
+  await loadList('accountPackages');
+  const assignments = new Map((S.data.accountPackages || []).map((item) => [item.account, item]));
   const rows = S.data.accounts.map((account) => {
     const spec = account.spec;
     const scoped = isScoped();
+    const assignment = assignments.get(spec.username);
     const panelUser = isAdmin() && !scoped
       ? (S.data.users || []).find((user) => user.account === spec.username)
       : null;
     const actions = [];
+    if (assignment && canWrite()) {
+      actions.push(btn('Backend', 'account-backend', spec.username, 'tiny ghost'));
+    }
     if (isAdmin() && !scoped) {
       actions.push(panelUser
         ? btn('Entrar', 'impersonate', panelUser.username, 'tiny ghost')
@@ -732,8 +772,9 @@ async function renderAccounts() {
     }
     return [
       td(`<div class="cell-title">${esc(spec.username)}</div><div class="cell-sub">${esc(spec.email)}</div>`),
+      td(assignment ? `<div class="cell-title">${esc(assignment.package_name)}</div><div class="cell-sub">${esc(assignment.web_backend)}</div>` : '<span class="muted">—</span>'),
       td(`<span class="chip">UID ${esc(account.uid)}</span>`),
-      td(`${esc(spec.disk_limit_mb)} MB`),
+      td(esc(diskText(spec.disk_limit_mb))),
       td(spec.php_version ? `PHP ${esc(spec.php_version)}` : '<span class="muted">—</span>'),
       td(statusBadge(spec.enabled)),
       td(`<span class="mono small">${esc(account.home)}</span>`),
@@ -742,21 +783,31 @@ async function renderAccounts() {
   });
 
   const scoped = isScoped();
+  const createButton = !scoped && canWrite()
+    ? '<button class="btn primary" data-action="account-new">Nueva cuenta</button>'
+    : '';
   $('#view').innerHTML =
-    sectionHead(scoped ? 'Mi cuenta' : 'Cuentas de hosting',
-      scoped ? '' : `<button class="btn primary" data-action="account-new">Nueva cuenta</button>`) +
-    table(['Cuenta', 'UID', 'Disco', 'PHP', 'Estado', 'Home', ''], rows,
+    sectionHead(scoped ? 'Mi cuenta' : 'Cuentas de hosting', createButton) +
+    table(['Cuenta', 'Paquete', 'UID', 'Disco', 'PHP', 'Estado', 'Home', ''], rows,
       scoped ? 'No tienes una cuenta vinculada.' : 'Crea la primera cuenta para empezar.');
 }
 
 function openAccountModal() {
+  const packages = S.data.packages || [];
+  if (!packages.length) {
+    toast('Primero crea un paquete en Administración > Paquetes', 'error');
+    return;
+  }
+  const defaultPackage = packages.find((pkg) => pkg.is_default) || packages[0];
   openModal({
     title: 'Nueva cuenta de hosting',
     submitLabel: 'Crear cuenta',
     html: `<div class="form-grid">
       ${fInput('username', 'Usuario del sistema', { required: true, placeholder: 'acme', help: 'minúsculas, 3-24 caracteres; se crea un usuario Linux' })}
       ${fInput('email', 'Email', { type: 'email', required: true, placeholder: 'admin@example.com' })}
-      ${fInput('disk_limit_mb', 'Cuota de disco (MB)', { type: 'number', value: 1024, min: 64, required: true })}
+      ${fSelect('package_id', 'Paquete', packages.map((pkg) => ({ value: pkg.id, label: pkg.name })), { value: defaultPackage.id, help: 'Los límites del paquete quedan bloqueados para esta cuenta.' })}
+      ${fSelect('web_backend', 'Backend plantilla', WEB_BACKEND_OPTIONS, { value: defaultPackage.web_backend, help: 'Preseleccionado por el paquete; puedes cambiarlo.' })}
+      <div class="field full"><span>Límites del paquete</span><div id="package-summary"></div></div>
       ${fSelect('php_version', 'PHP por defecto', [{ value: '', label: '— sin pool —' }, ...RUNTIMES.php.versions.map((v) => ({ value: v, label: `PHP ${v}` }))], { value: '8.3' })}
       <div class="full">${fCheck('enabled', 'Cuenta activa', true)}</div>
       ${fSelect('panel_access', 'Acceso al panel del cliente', [
@@ -765,14 +816,35 @@ function openAccountModal() {
         { value: 'none', label: 'Sin acceso al panel' },
       ], { value: 'viewer', help: 'El operador puede gestionar los recursos de su propia cuenta; el viewer es solo lectura.' })}
     </div>`,
+    onMount: (form) => {
+      const packageSelect = form.elements.package_id;
+      const backend = form.elements.web_backend;
+      const summary = form.querySelector('#package-summary');
+      const sync = () => {
+        const pkg = packages.find((item) => item.id === packageSelect.value);
+        if (!pkg) {
+          summary.innerHTML = '';
+          return;
+        }
+        backend.value = pkg.web_backend;
+        summary.innerHTML = packageSummary(pkg);
+        translateUi(summary);
+      };
+      packageSelect.addEventListener('change', sync);
+      sync();
+    },
     onSubmit: async (form) => {
+      const pkg = packages.find((item) => item.id === val(form, 'package_id'));
+      if (!pkg) throw new Error('Selecciona un paquete');
       const access = val(form, 'panel_access');
       const body = {
         username: val(form, 'username').toLowerCase(),
         email: toAsciiEmail(val(form, 'email')),
-        disk_limit_mb: num(form, 'disk_limit_mb', 1024),
+        disk_limit_mb: pkg.account_mb,
         php_version: val(form, 'php_version') || null,
         enabled: bool(form, 'enabled'),
+        package_id: pkg.id,
+        web_backend: val(form, 'web_backend'),
         panel_access: access !== 'none',
       };
       if (access !== 'none') body.panel_role = access;
@@ -793,10 +865,33 @@ function openAccountModal() {
   });
 }
 
+function openBackendModal(account) {
+  const assignment = (S.data.accountPackages || []).find((item) => item.account === account);
+  if (!assignment) {
+    toast('La cuenta no tiene un paquete asignado', 'error');
+    return;
+  }
+  openModal({
+    title: `Backend plantilla · ${account}`,
+    submitLabel: 'Guardar',
+    html: `<div class="form-grid">
+      ${fSelect('web_backend', 'Backend plantilla', WEB_BACKEND_OPTIONS, { value: assignment.web_backend, help: 'Solo cambia el backend web; el resto del paquete sigue bloqueado.' })}
+    </div>`,
+    onSubmit: async (form) => {
+      await api(`/api/v1/packages/assignments/${encodeURIComponent(account)}`, {
+        method: 'PATCH',
+        body: { web_backend: val(form, 'web_backend') },
+      });
+      toast('Backend actualizado');
+      await refresh();
+    },
+  });
+}
+
 /* ---------------- websites ---------------- */
 
 async function renderWebsites() {
-  await Promise.all([loadList('websites'), loadList('accounts'), loadList('apps')]);
+  await Promise.all([loadList('websites'), loadList('accounts'), loadList('apps'), loadList('accountPackages')]);
   const writable = canWrite();
   const rows = S.data.websites.map((website) => {
     const spec = website.spec;
@@ -872,10 +967,19 @@ function openWebsiteModal() {
         app.disabled = !managed || !items.length;
       };
 
+      const assignments = new Map((S.data.accountPackages || []).map((item) => [item.account, item]));
+      const applyAccountBackend = () => {
+        const assignment = assignments.get(username.value);
+        if (assignment && RUNTIMES[assignment.web_backend]) {
+          engine.value = assignment.web_backend;
+        }
+        syncVersions();
+        syncApps();
+      };
+
       engine.addEventListener('change', () => { syncVersions(); syncApps(); });
-      username.addEventListener('change', syncApps);
-      syncVersions();
-      syncApps();
+      username.addEventListener('change', applyAccountBackend);
+      applyAccountBackend();
     },
     onSubmit: async (form) => {
       const engine = val(form, 'engine');
@@ -1657,16 +1761,6 @@ async function renderPackages() {
 }
 
 function openPackageModal(pkg = null) {
-  const backendOptions = [
-    { value: 'static', label: 'Estático' },
-    { value: 'php', label: 'PHP (FPM)' },
-    { value: 'node', label: 'Node.js (systemd)' },
-    { value: 'python', label: 'Python (WSGI/ASGI)' },
-    { value: 'ruby', label: 'Ruby' },
-    { value: 'java', label: 'Java (JAR)' },
-    { value: 'dotnet', label: '.NET' },
-    { value: 'go', label: 'Go (binario compilado)' },
-  ];
   const nginxOptions = [
     { value: 'caching', label: 'Caching' },
     { value: 'hosting', label: 'Hosting' },
@@ -1699,7 +1793,7 @@ function openPackageModal(pkg = null) {
       ${formSection('Web')}
       ${pkgNumber('web_domains', 'Dominios web', { value: pick('web_domains', 1) })}
       ${pkgNumber('web_aliases', 'Alias web', { value: pick('web_aliases', 1) })}
-      ${fSelect('web_backend', 'Backend', backendOptions, { value: pick('web_backend', 'php') })}
+      ${fSelect('web_backend', 'Backend', WEB_BACKEND_OPTIONS, { value: pick('web_backend', 'php') })}
       ${fSelect('nginx_template', 'Plantilla proxy Nginx', nginxOptions, { value: pick('nginx_template', 'hosting') })}
 
       ${formSection('DNS')}
@@ -1946,6 +2040,8 @@ async function handleAction(action, id) {
       toast('Cuenta eliminada');
       return refresh();
     }
+    case 'account-backend':
+      return openBackendModal(id);
     case 'mail-new':
       return openMailEnableModal();
     case 'mail-enable':

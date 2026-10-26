@@ -176,9 +176,13 @@ pub fn validate_docroot(value: &str) -> CoreResult<()> {
     validate_relative_path(value, "docroot")
 }
 
+pub const MAX_DISK_LIMIT_MB: u64 = 10_485_760;
+
 pub fn validate_disk_limit(mb: u64) -> CoreResult<()> {
-    if !(64..=10_485_760).contains(&mb) {
-        return Err(invalid("disk_limit_mb must be between 64 and 10485760"));
+    if !(1..=MAX_DISK_LIMIT_MB).contains(&mb) {
+        return Err(invalid(format!(
+            "disk_limit_mb must be between 1 and {MAX_DISK_LIMIT_MB}"
+        )));
     }
     Ok(())
 }
