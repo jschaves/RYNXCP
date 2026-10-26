@@ -1085,6 +1085,10 @@ impl Reconciler {
                 domains.push(alias.clone());
             }
         }
+        if self.cfg.dns_enabled {
+            self.dns_ensure_zone(domain, self.cfg.mail_enabled).await?;
+            self.dns_render(domain).await?;
+        }
         self.exec
             .issue_cert(domain, &domains, email, &webroot, staging)
             .await
@@ -1957,8 +1961,50 @@ impl Reconciler {
             self.dns_seed_defaults(domain).await?;
         }
         self.dns_seed_aliases(domain).await?;
+        self.dns_seed_nameserver_glue(domain).await?;
         if enable_mail || self.cfg.mail_enabled {
             self.dns_seed_mail(domain).await?;
+        }
+        Ok(())
+    }
+
+    fn effective_nameservers(&self, domain: &str) -> Vec<String> {
+        if self.cfg.dns_nameservers.is_empty() {
+            vec![format!("ns1.{domain}"), format!("ns2.{domain}")]
+        } else {
+            self.cfg.dns_nameservers.clone()
+        }
+    }
+
+    async fn dns_seed_nameserver_glue(&self, domain: &str) -> Result<(), WireError> {
+        let suffix = format!(".{domain}");
+        for ns in self.effective_nameservers(domain) {
+            let Some(label) = ns.strip_suffix(&suffix) else {
+                continue;
+            };
+            if label.is_empty() {
+                continue;
+            }
+            if let Some(ipv4) = &self.cfg.default_ipv4 {
+                if self
+                    .state
+                    .find_dns_record(domain, label, "A")
+                    .map_err(internal)?
+                    .is_none()
+                {
+                    self.dns_put(domain, label, "A", ipv4, None, true)?;
+                }
+            }
+            if let Some(ipv6) = &self.cfg.default_ipv6 {
+                if self
+                    .state
+                    .find_dns_record(domain, label, "AAAA")
+                    .map_err(internal)?
+                    .is_none()
+                {
+                    self.dns_put(domain, label, "AAAA", ipv6, None, true)?;
+                }
+            }
         }
         Ok(())
     }

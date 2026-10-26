@@ -1204,7 +1204,7 @@ impl Executor for RealExecutor {
         let path_s = path.display().to_string();
         let check = vec![domain.to_string(), path_s];
         run_combined(&self.cfg.bind_checkzone_bin, &check).await?;
-        self.reload_unit(&self.cfg.bind_reload_unit).await
+        Ok(())
     }
 
     async fn remove_zone(&self, domain: &str) -> ExecResult<()> {

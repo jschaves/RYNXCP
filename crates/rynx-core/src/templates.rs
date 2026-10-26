@@ -566,7 +566,12 @@ pub fn bind_zone(
     serial: u32,
     default_ttl: u32,
 ) -> String {
-    let primary_ns = nameservers
+    let effective_nameservers: Vec<String> = if nameservers.is_empty() {
+        vec![format!("ns1.{domain}"), format!("ns2.{domain}")]
+    } else {
+        nameservers.to_vec()
+    };
+    let primary_ns = effective_nameservers
         .first()
         .cloned()
         .unwrap_or_else(|| format!("ns1.{domain}"));
@@ -585,7 +590,7 @@ pub fn bind_zone(
     let _ = writeln!(out, "    1209600 ; expire");
     let _ = writeln!(out, "    300 ; minimum");
     let _ = writeln!(out, ")");
-    for ns in nameservers {
+    for ns in &effective_nameservers {
         let _ = writeln!(out, "@ IN NS {}", zone_fqdn(ns));
     }
 
@@ -676,6 +681,14 @@ mod tests {
             cert_dir: cert,
             acme_root: "/var/www/_acme",
         }
+    }
+
+    #[test]
+    fn bind_zone_defaults_nameservers_when_unset() {
+        let zone = bind_zone("example.com", &[], &[], 42, 300);
+        assert!(zone.contains("@ IN SOA ns1.example.com."));
+        assert!(zone.contains("@ IN NS ns1.example.com."));
+        assert!(zone.contains("@ IN NS ns2.example.com."));
     }
 
     #[test]
