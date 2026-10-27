@@ -814,8 +814,12 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
-    async fn resolve_user_ids(&self, _username: &str) -> ExecResult<Option<(u32, u32)>> {
-        Ok(Some((1000, 1000)))
+    async fn resolve_user_ids(&self, username: &str) -> ExecResult<Option<(u32, u32)>> {
+        if username == self.cfg.ftp_readonly_user {
+            Ok(Some((1000, 1000)))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn apply_firewall(&self, ruleset: &str) -> ExecResult<()> {

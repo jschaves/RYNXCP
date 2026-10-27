@@ -428,7 +428,7 @@ impl Executor for RealExecutor {
     }
 
     async fn ensure_account(&self, spec: &AccountSpec, uid: u32) -> ExecResult<()> {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let home = self.home(&spec.username);
         let existing = User::from_name(&spec.username).map_err(|e| ExecError::Io(e.to_string()))?;
@@ -453,18 +453,35 @@ impl Executor for RealExecutor {
         }
 
         let gid = self.gid_for(&spec.username)?;
+        let account_uid = existing
+            .as_ref()
+            .map(|user| user.uid.as_raw())
+            .unwrap_or(uid);
         let account_home = open_account_home(&self.cfg, &spec.username, true)?;
+        let home_s = home.display().to_string();
+        if let Ok(meta) = std::fs::symlink_metadata(&home) {
+            if meta.uid() != account_uid || meta.gid() != gid {
+                // Repair homes created for a stale UID (for example after a
+                // pre-existing Linux user was adopted by the panel). Do not
+                // follow symlinks outside the account home.
+                run(
+                    "chown",
+                    &["-R", "-h", &format!("{account_uid}:{gid}"), &home_s],
+                )
+                .await?;
+            }
+        }
         // Nginx (www-data) must traverse the home to reach public_html, but it
         // must not be able to list the home. Other internal directories keep
         // their own restrictive modes.
-        set_owner_mode(account_home.as_raw_fd(), uid, gid, 0o711)?;
+        set_owner_mode(account_home.as_raw_fd(), account_uid, gid, 0o711)?;
         for (relative, mode) in [
             ("public_html", 0o755),
             ("logs", 0o750),
             ("apps", 0o750),
             ("tmp", 0o700),
         ] {
-            ensure_dir_components(&account_home, Path::new(relative), mode, uid, gid)?;
+            ensure_dir_components(&account_home, Path::new(relative), mode, account_uid, gid)?;
         }
 
         // PHP sessions are system-managed. Keep them outside the account home
@@ -475,7 +492,7 @@ impl Executor for RealExecutor {
             std::fs::set_permissions(sessions_root, std::fs::Permissions::from_mode(0o755))?;
         }
         let session_dir = sessions_root.join(&spec.username);
-        self.make_dir(&session_dir, 0o700, uid, gid)?;
+        self.make_dir(&session_dir, 0o700, account_uid, gid)?;
         let old_sessions = home.join(".php/sessions");
         if old_sessions.is_dir() {
             if let Ok(entries) = std::fs::read_dir(&old_sessions) {

@@ -276,9 +276,19 @@ impl Reconciler {
             .ensure_account(&spec, uid)
             .await
             .map_err(exec_error)?;
+        // A pre-existing Linux user may have a different UID than the value
+        // allocated from the panel state. Trust the real system UID so the home
+        // and all file operations stay consistent.
+        let actual_uid = self
+            .exec
+            .resolve_user_ids(&spec.username)
+            .await
+            .map_err(exec_error)?
+            .map(|(uid, _)| uid)
+            .unwrap_or(uid);
         let view = self
             .state
-            .upsert_account(&spec, uid, &home)
+            .upsert_account(&spec, actual_uid, &home)
             .map_err(internal)?;
 
         match existing {
@@ -304,7 +314,7 @@ impl Reconciler {
                     actor,
                     "account.create",
                     &spec.username,
-                    &format!("uid={uid} home={home} disk={}MB", spec.disk_limit_mb),
+                    &format!("uid={actual_uid} home={home} disk={}MB", spec.disk_limit_mb),
                 )?;
             }
         }
@@ -2839,7 +2849,20 @@ impl Reconciler {
 
         let accounts = self.state.list_accounts().map_err(internal)?;
         for account in &accounts {
-            match self.exec.ensure_account(&account.spec, account.uid).await {
+            let actual_uid = self
+                .exec
+                .resolve_user_ids(&account.spec.username)
+                .await
+                .ok()
+                .flatten()
+                .map(|(uid, _)| uid)
+                .unwrap_or(account.uid);
+            if actual_uid != account.uid {
+                self.state
+                    .upsert_account(&account.spec, actual_uid, &account.home)
+                    .map_err(internal)?;
+            }
+            match self.exec.ensure_account(&account.spec, actual_uid).await {
                 Ok(_) => applied += 1,
                 Err(err) => {
                     failures += 1;
