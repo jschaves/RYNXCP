@@ -63,6 +63,35 @@ const NAV_ITEMS = [
   { id: 'system', label: 'Sistema', group: 'Administración' },
 ];
 
+const NAV_ICON_PATHS = {
+  overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  accounts: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 7a3 3 0 0 1 0 6"/><path d="M21 20a5 5 0 0 0-3-4.6"/>',
+  websites: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>',
+  files: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  apps: '<path d="M12 3 4 7v10l8 4 8-4V7z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/>',
+  php: '<path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="m13 5-2 14"/>',
+  databases: '<ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"/><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
+  ftp: '<path d="M8 4v12"/><path d="m5 7 3-3 3 3"/><path d="M16 20V8"/><path d="m13 17 3 3 3-3"/>',
+  dns: '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="5" r="1.5"/><circle cx="5" cy="19" r="1.5"/><circle cx="19" cy="19" r="1.5"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  ssl: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  backups: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+  monitor: '<path d="M3 12h4l2-6 3 12 2-6h7"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M2 20a7 7 0 0 1 14 0"/><circle cx="17" cy="9" r="2"/><path d="M16 14a5 5 0 0 1 6 4"/>',
+  packages: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
+  security: '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  firewall: '<path d="M12 3c3 4 6 6 6 10a6 6 0 0 1-12 0c0-2 1-3 2-5 0 2 1 3 2 3 0-3 1-5 2-8z"/>',
+  programs: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h8"/>',
+  console: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
+  audit: '<path d="M9 3h6l1 3h3v15H5V6h3z"/><path d="m9 13 2 2 4-4"/>',
+  system: '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
+};
+
+function navIcon(id, label) {
+  const paths = NAV_ICON_PATHS[id] || '<circle cx="12" cy="12" r="8"/>';
+  return `<span class="nav-icon" role="img" aria-label="${esc(label)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><title>${esc(label)}</title>${paths}</svg></span>`;
+}
+
 const TITLES = {
   databases: ['Bases de datos', 'MariaDB aislada por dominio, con usuario y contraseña propios'],
   ftp: ['FTP', 'Usuarios virtuales Pure-FTPd con chroot al home de la cuenta'],
@@ -351,7 +380,7 @@ function buildNav() {
       html += `<div class="nav-group">${esc(group)}</div>`;
     }
     const label = item.id === 'accounts' && isScoped() ? 'Mi cuenta' : item.label;
-    html += `<button data-view="${item.id}"><span class="dot"></span>${esc(label)}</button>`;
+    html += `<button data-view="${item.id}" title="${esc(label)}" aria-label="${esc(label)}">${navIcon(item.id, label)}</button>`;
   }
   nav.innerHTML = html;
   $$('#nav button').forEach((button) => {
