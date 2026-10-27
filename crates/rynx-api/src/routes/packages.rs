@@ -62,6 +62,25 @@ pub async fn assignments(
     Ok(Json(state.db.list_account_packages()?))
 }
 
+/// Package assigned to the authenticated user's linked hosting account.
+pub async fn mine(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Result<Json<PackageView>, ApiError> {
+    let account = auth
+        .scoped_account()
+        .ok_or_else(|| ApiError::NotFound("the user is not linked to an account".into()))?;
+    let assignment = state
+        .db
+        .get_account_package(account)?
+        .ok_or_else(|| ApiError::NotFound("no package is assigned to this account".into()))?;
+    let package = state
+        .db
+        .get_package(&assignment.package_id)?
+        .ok_or_else(|| ApiError::NotFound("assigned package not found".into()))?;
+    Ok(Json(package))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AssignmentUpdate {
     pub web_backend: String,

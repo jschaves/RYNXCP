@@ -594,8 +594,12 @@ function packageSummary(pkg) {
     ['Alias web', limitText(pkg.web_aliases)],
     ['Dominios de email', limitText(pkg.mail_domains)],
     ['Cuentas de email', limitText(pkg.mail_accounts)],
+    ['Tasa de correo', limitText(pkg.mail_rate_limit)],
     ['Bases de datos', limitText(pkg.databases)],
     ['Cuentas FTP', limitText(pkg.ftp_accounts)],
+    ['Zonas DNS', limitText(pkg.dns_zones)],
+    ['Registros DNS', limitText(pkg.dns_records)],
+    ['BD del sistema', limitText(pkg.system_databases)],
   ];
   return `<div class="package-summary">${rows.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>`;
 }
@@ -757,10 +761,18 @@ async function renderAccounts() {
   if (isAdmin() && !isScoped()) await loadList('users');
   if (!isScoped() && canWrite()) await loadList('packages');
   await loadList('accountPackages');
+  const scoped = isScoped();
+  let myPackage = null;
+  if (scoped) {
+    try {
+      myPackage = await api('/api/v1/packages/me');
+    } catch (err) {
+      myPackage = null;
+    }
+  }
   const assignments = new Map((S.data.accountPackages || []).map((item) => [item.account, item]));
   const rows = S.data.accounts.map((account) => {
     const spec = account.spec;
-    const scoped = isScoped();
     const assignment = assignments.get(spec.username);
     const panelUser = isAdmin() && !scoped
       ? (S.data.users || []).find((user) => user.account === spec.username)
@@ -768,6 +780,7 @@ async function renderAccounts() {
     const actions = [];
     if (assignment && canWrite()) {
       actions.push(btn('Backend', 'account-backend', spec.username, 'tiny ghost'));
+      if (!scoped) actions.push(btn('Límites', 'account-limits', spec.username, 'tiny ghost'));
     }
     if (isAdmin() && !scoped) {
       actions.push(panelUser
@@ -790,14 +803,19 @@ async function renderAccounts() {
     ];
   });
 
-  const scoped = isScoped();
   const createButton = !scoped && canWrite()
     ? '<button class="btn primary" data-action="account-new">Nueva cuenta</button>'
     : '';
-  $('#view').innerHTML =
-    sectionHead(scoped ? 'Mi cuenta' : 'Cuentas de hosting', createButton) +
+  let html = sectionHead(scoped ? 'Mi cuenta' : 'Cuentas de hosting', createButton) +
     table(['Cuenta', 'Paquete', 'UID', 'Disco', 'PHP', 'Estado', 'Home', ''], rows,
       scoped ? 'No tienes una cuenta vinculada.' : 'Crea la primera cuenta para empezar.');
+  if (scoped && myPackage) {
+    html += `<div class="card" style="margin-top:16px">
+      <div class="section-head"><h2>Límites · ${esc(myPackage.name)}</h2></div>
+      ${packageSummary(myPackage)}
+    </div>`;
+  }
+  $('#view').innerHTML = html;
 }
 
 function openAccountModal() {
@@ -2475,6 +2493,20 @@ async function handleAction(action, id) {
     }
     case 'account-backend':
       return openBackendModal(id);
+    case 'account-limits': {
+      const assignment = (S.data.accountPackages || []).find((item) => item.account === id);
+      const pkg = assignment
+        ? (S.data.packages || []).find((item) => item.id === assignment.package_id)
+        : null;
+      if (!pkg) throw new Error('Paquete no encontrado');
+      openModal({
+        title: `Límites · ${id}`,
+        submitLabel: 'Cerrar',
+        html: packageSummary(pkg),
+        onSubmit: async () => {},
+      });
+      return;
+    }
     case 'mail-new':
       return openMailEnableModal();
     case 'mail-enable':

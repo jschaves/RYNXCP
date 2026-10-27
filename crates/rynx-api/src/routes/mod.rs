@@ -55,6 +55,7 @@ pub fn router(state: ApiState) -> Router {
             get(packages::list).post(packages::create),
         )
         .route("/api/v1/packages/assignments", get(packages::assignments))
+        .route("/api/v1/packages/me", get(packages::mine))
         .route(
             "/api/v1/packages/assignments/{account}",
             patch(packages::update_assignment),
