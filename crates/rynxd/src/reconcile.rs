@@ -2332,7 +2332,7 @@ impl Reconciler {
                 .map_err(exec_error)?
                 .unwrap_or((account.uid, account.uid))
         };
-        let home = PathBuf::from(&website.document_root);
+        let home = PathBuf::from(&account.home);
         self.exec
             .apply_ftp_user(&login, uid, gid, &home, &password)
             .await
@@ -2964,12 +2964,18 @@ impl Reconciler {
                 self.exec.resolve_user_ids(&account.spec.username).await
             };
             let (uid, gid) = ids.ok().flatten().unwrap_or((account.uid, account.uid));
+            let home = account.home.clone();
             match self
                 .exec
-                .apply_ftp_user(&ftp.login, uid, gid, Path::new(&ftp.home), &ftp.password)
+                .apply_ftp_user(&ftp.login, uid, gid, Path::new(&home), &ftp.password)
                 .await
             {
-                Ok(_) => applied += 1,
+                Ok(_) => {
+                    if ftp.home != home {
+                        self.state.set_ftp_home(&ftp.id, &home).map_err(internal)?;
+                    }
+                    applied += 1;
+                }
                 Err(err) => {
                     failures += 1;
                     tracing::warn!(login = %ftp.login, error = %err, "reconcile ftp failed");

@@ -1143,6 +1143,15 @@ impl StateStore {
         Ok(out)
     }
 
+    pub fn set_ftp_home(&self, id: &str, home: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE ftp_accounts SET home = ?1 WHERE id = ?2",
+            params![home, id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_ftp(&self, id: &str) -> Result<Option<FtpView>> {
         let conn = self.conn()?;
         Ok(conn

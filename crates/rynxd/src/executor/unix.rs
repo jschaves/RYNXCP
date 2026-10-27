@@ -247,6 +247,24 @@ fn switch_fs_identity(uid: u32, gid: u32) -> ExecResult<FsIdentityGuard> {
     Ok(FsIdentityGuard)
 }
 
+/// Opens the account home as a capability directory. The file manager uses it so
+/// the owner can manage everything above the site document root.
+fn open_account_root(cfg: &DaemonConfig, username: &str) -> ExecResult<SiteRoot> {
+    rynx_core::validate_username(username)
+        .map_err(|err| ExecError::InvalidInput(format!("invalid account: {err}")))?;
+    let home_root = Dir::open_ambient_dir(&cfg.home_root, ambient_authority())?;
+    let home_meta = home_root.symlink_metadata(username)?;
+    if home_meta.file_type().is_symlink() || !home_meta.is_dir() {
+        return Err(ExecError::Io("the account home is not a directory".into()));
+    }
+    let identity = switch_fs_identity(home_meta.uid(), home_meta.gid())?;
+    let dir = home_root.open_dir(username)?;
+    Ok(SiteRoot {
+        dir,
+        _identity: identity,
+    })
+}
+
 /// Opens the site document root as a capability directory. The account home and
 /// docroot themselves must be real directories, and cap-std confines every
 /// subsequent operation to the docroot (no `..` or symlink escapes). On Linux
@@ -488,11 +506,11 @@ impl Executor for RealExecutor {
     async fn file_list(
         &self,
         username: &str,
-        docroot: &str,
+        _docroot: &str,
         path: &str,
     ) -> ExecResult<Vec<FileEntry>> {
         validate_relative_path(path)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         let read_dir = if path.is_empty() {
             site.dir.entries()?
         } else {
@@ -536,12 +554,12 @@ impl Executor for RealExecutor {
         Ok(entries)
     }
 
-    async fn file_read(&self, username: &str, docroot: &str, path: &str) -> ExecResult<Vec<u8>> {
+    async fn file_read(&self, username: &str, _docroot: &str, path: &str) -> ExecResult<Vec<u8>> {
         if path.is_empty() {
             return Err(ExecError::Io("a file path is required".into()));
         }
         validate_relative_path(path)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         let meta = site.dir.symlink_metadata(path)?;
         if meta.file_type().is_symlink() {
             return Err(ExecError::Io("symbolic links cannot be edited".into()));
@@ -561,7 +579,7 @@ impl Executor for RealExecutor {
     async fn file_write(
         &self,
         username: &str,
-        docroot: &str,
+        _docroot: &str,
         path: &str,
         data: &[u8],
     ) -> ExecResult<()> {
@@ -572,7 +590,7 @@ impl Executor for RealExecutor {
             return Err(ExecError::Io("file is too large".into()));
         }
         validate_relative_path(path)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         let mut existing = false;
         if let Ok(meta) = site.dir.symlink_metadata(path) {
             existing = true;
@@ -596,12 +614,12 @@ impl Executor for RealExecutor {
         Ok(())
     }
 
-    async fn file_mkdir(&self, username: &str, docroot: &str, path: &str) -> ExecResult<()> {
+    async fn file_mkdir(&self, username: &str, _docroot: &str, path: &str) -> ExecResult<()> {
         if path.is_empty() {
             return Err(ExecError::Io("a directory path is required".into()));
         }
         validate_relative_path(path)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         site.dir.create_dir(path)?;
         let dir = site.dir.open_dir(path)?;
         set_mode(dir.as_raw_fd(), 0o755)?;
@@ -611,7 +629,7 @@ impl Executor for RealExecutor {
     async fn file_rename(
         &self,
         username: &str,
-        docroot: &str,
+        _docroot: &str,
         path: &str,
         new_name: &str,
     ) -> ExecResult<()> {
@@ -620,7 +638,7 @@ impl Executor for RealExecutor {
         }
         validate_relative_path(path)?;
         validate_file_name(new_name)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         let source = Path::new(path);
         let target = source.parent().unwrap_or(Path::new("")).join(new_name);
         site.dir.rename(source, &site.dir, target.as_path())?;
@@ -630,15 +648,15 @@ impl Executor for RealExecutor {
     async fn file_delete(
         &self,
         username: &str,
-        docroot: &str,
+        _docroot: &str,
         path: &str,
         recursive: bool,
     ) -> ExecResult<()> {
         if path.is_empty() {
-            return Err(ExecError::Io("refusing to delete the site root".into()));
+            return Err(ExecError::Io("refusing to delete the account home".into()));
         }
         validate_relative_path(path)?;
-        let site = open_site_root(&self.cfg, username, docroot)?;
+        let site = open_account_root(&self.cfg, username)?;
         let meta = site.dir.symlink_metadata(path)?;
         if meta.is_dir() {
             if recursive {

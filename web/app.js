@@ -65,7 +65,7 @@ const NAV_ITEMS = [
 
 const TITLES = {
   databases: ['Bases de datos', 'MariaDB aislada por dominio, con usuario y contraseña propios'],
-  ftp: ['FTP', 'Usuarios virtuales Pure-FTPd con chroot al document root'],
+  ftp: ['FTP', 'Usuarios virtuales Pure-FTPd con chroot al home de la cuenta'],
   dns: ['DNS', 'Zonas autoritativas con SPF, DKIM, DMARC, MX y CAA'],
   backups: ['Backups', 'Copias de home, vhosts, pools y unidades con retención'],
   monitor: ['Monitor', 'Series históricas y estado de cada servicio'],
@@ -76,7 +76,7 @@ const TITLES = {
   overview: ['Resumen', 'Estado del nodo y de los recursos gestionados'],
   accounts: ['Cuentas', 'Usuarios Linux aislados con cuota y home dedicado'],
   websites: ['Sitios web', 'Virtual hosts Nginx con TLS y reverse proxy'],
-  files: ['Archivos', 'Gestor de archivos del document root, aislado por cuenta'],
+  files: ['Archivos', 'Gestor de archivos del home de la cuenta (incluye public_html)'],
   apps: ['Aplicaciones', 'Procesos gestionados por systemd (Node, Python, Ruby, Java, .NET, Go)'],
   php: ['PHP-FPM', 'Pools por cuenta con open_basedir y funciones restringidas'],
   mail: ['Correo', 'Dominios, buzones, webmail y seguridad DNS'],
@@ -1885,18 +1885,24 @@ async function renderSsl() {
   await Promise.all([loadList('certs'), loadList('websites')]);
   const writable = canWrite();
   const scoped = isScoped();
-  const rows = S.data.certs.map((cert) => [
-    td(`<div class="cell-title">${esc(cert.domain)}</div><div class="cell-sub mono">${esc(cert.path)}</div>`),
-    td(esc(cert.issuer || '—')),
-    td(esc(fmtDate(cert.not_after))),
-    td(certBadge(cert.status)),
-  ]);
+  const sites = new Map((S.data.websites || []).map((site) => [site.spec.domain, site]));
+  const rows = S.data.certs.map((cert) => {
+    const site = sites.get(cert.domain);
+    const canReissue = writable && site && site.spec.tls === 'lets_encrypt';
+    return [
+      td(`<div class="cell-title">${esc(cert.domain)}</div><div class="cell-sub mono">${esc(cert.path)}</div>`),
+      td(esc(cert.issuer || '—')),
+      td(esc(fmtDate(cert.not_after))),
+      td(certBadge(cert.status)),
+      td(canReissue ? btn('Reemitir', 'cert-reissue', cert.domain, 'tiny ghost') : '', 'actions'),
+    ];
+  });
 
   const renew = scoped ? '' : '<button class="btn ghost" data-action="cert-renew">Renovar todos</button>';
   const issue = writable ? '<button class="btn primary" data-action="cert-new">Emitir certificado</button>' : '';
   $('#view').innerHTML =
     sectionHead('Certificados TLS', renew + issue) +
-    table(['Dominio', 'Emisor', 'Vence', 'Estado'], rows, 'No hay certificados; publica un sitio con TLS Let\'s Encrypt.');
+    table(['Dominio', 'Emisor', 'Vence', 'Estado', ''], rows, 'No hay certificados; publica un sitio con TLS Let\'s Encrypt.');
 }
 
 function openCertModal() {
@@ -2536,6 +2542,14 @@ async function handleAction(action, id) {
     }
     case 'cert-new':
       return openCertModal();
+    case 'cert-reissue': {
+      const email = S.user.email;
+      const job = await api('/api/v1/certs/jobs', {
+        method: 'POST',
+        body: { domain: id, email, staging: false },
+      });
+      return showCertJob(job, id, { email, staging: false });
+    }
     case 'user-new':
       return openUserModal();
     case 'user-toggle': {
@@ -2751,7 +2765,7 @@ async function renderFtp() {
   ]);
   $('#view').innerHTML =
     sectionHead('Usuarios FTP', writable ? '<button class="btn primary" data-action="ftp-new">Nuevo usuario FTP</button>' : '') +
-    table(['Login', 'Home (chroot)', 'Permisos', 'Contraseña', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al document root del sitio.');
+    table(['Login', 'Home (chroot)', 'Permisos', 'Contraseña', 'Creado', ''], rows, 'Crea usuarios FTPS con chroot al home de la cuenta.');
 }
 
 function openFtpModal() {
