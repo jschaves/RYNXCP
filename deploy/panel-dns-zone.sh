@@ -127,7 +127,7 @@ if [[ -n "$DKIM_SELECTOR" ]]; then
     echo "error: cannot derive the DKIM public key from $PRIVATE_KEY" >&2
     exit 1
   }
-  DKIM_TXT='"v=DKIM1; h=sha256; k=rsa; " '
+  DKIM_TXT='"v=DKIM1; h=sha256; k=rsa; p=" '
   while IFS= read -r chunk; do
     DKIM_TXT+="\"${chunk}\" "
   done < <(printf '%s' "$public_key" | fold -w 255)
