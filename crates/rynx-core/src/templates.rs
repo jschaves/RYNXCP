@@ -300,9 +300,10 @@ pub fn php_fpm_pool(spec: &PhpPoolSpec, socket: &str, home: &str) -> String {
     let _ = writeln!(out, "decorate_workers_output = no");
     let _ = writeln!(out, "clear_env = yes");
     let _ = writeln!(out, "security.limit_extensions = .php");
+    let sessions = format!("{}/{}", crate::paths::PHP_SESSION_ROOT, spec.username);
     let _ = writeln!(
         out,
-        "php_admin_value[open_basedir] = {home}/:/tmp/:/usr/share/php/"
+        "php_admin_value[open_basedir] = {home}/:/tmp/:/usr/share/php/:{sessions}/"
     );
     let _ = writeln!(
         out,
@@ -319,10 +320,7 @@ pub fn php_fpm_pool(spec: &PhpPoolSpec, socket: &str, home: &str) -> String {
         "php_admin_value[post_max_size] = {}M",
         spec.upload_max_mb.saturating_add(2)
     );
-    let _ = writeln!(
-        out,
-        "php_admin_value[session.save_path] = {home}/.php/sessions"
-    );
+    let _ = writeln!(out, "php_admin_value[session.save_path] = {sessions}");
     let _ = writeln!(
         out,
         "php_admin_value[error_log] = {home}/logs/php-error.log"

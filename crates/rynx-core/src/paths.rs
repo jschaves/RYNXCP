@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 use crate::{crypto, CoreError, CoreResult};
 
+/// Root for per-account PHP session storage. It lives outside the account home
+/// so FTP and the file manager cannot read or modify session files.
+pub const PHP_SESSION_ROOT: &str = "/var/lib/php/sessions";
+
 /// Join a validated relative path to `base`, refusing traversal.
 pub fn safe_join(base: &Path, relative: &str) -> CoreResult<PathBuf> {
     crate::validate::validate_relative_path(relative, "path")?;

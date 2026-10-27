@@ -428,6 +428,8 @@ impl Executor for RealExecutor {
     }
 
     async fn ensure_account(&self, spec: &AccountSpec, uid: u32) -> ExecResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+
         let home = self.home(&spec.username);
         let existing = User::from_name(&spec.username).map_err(|e| ExecError::Io(e.to_string()))?;
         if existing.is_none() {
@@ -460,11 +462,35 @@ impl Executor for RealExecutor {
             ("public_html", 0o755),
             ("logs", 0o750),
             ("apps", 0o750),
-            (".php/sessions", 0o700),
             ("tmp", 0o700),
         ] {
             ensure_dir_components(&account_home, Path::new(relative), mode, uid, gid)?;
         }
+
+        // PHP sessions are system-managed. Keep them outside the account home
+        // so FTP and the file manager cannot read or alter them.
+        let sessions_root = Path::new(rynx_core::paths::PHP_SESSION_ROOT);
+        if !sessions_root.exists() {
+            std::fs::create_dir_all(sessions_root)?;
+            std::fs::set_permissions(sessions_root, std::fs::Permissions::from_mode(0o755))?;
+        }
+        let session_dir = sessions_root.join(&spec.username);
+        self.make_dir(&session_dir, 0o700, uid, gid)?;
+        let old_sessions = home.join(".php/sessions");
+        if old_sessions.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&old_sessions) {
+                for entry in entries.flatten() {
+                    let target = session_dir.join(entry.file_name());
+                    if target.exists() {
+                        continue;
+                    }
+                    if std::fs::rename(entry.path(), &target).is_err() {
+                        let _ = std::fs::copy(entry.path(), &target);
+                    }
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(home.join(".php"));
         Ok(())
     }
 

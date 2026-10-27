@@ -110,7 +110,6 @@ impl Executor for SimExecutor {
             home.join("public_html"),
             home.join("logs"),
             home.join("apps"),
-            home.join(".php/sessions"),
             home.join("tmp"),
         ] {
             std::fs::create_dir_all(&dir)?;
