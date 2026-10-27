@@ -110,6 +110,8 @@ postconf -e "mydomain = ${MAIL_DOMAIN}"
 postconf -e "myorigin = \$myhostname"
 postconf -e "inet_interfaces = all"
 postconf -e "inet_protocols = all"
+# Prefer IPv4 for outbound mail so SPF and PTR match the server's A record.
+postconf -e "smtp_address_preference = ipv4"
 postconf -e "mydestination = localhost, localhost.localdomain"
 # The panel submits transactional mail over loopback. Keep relay rights
 # limited to localhost so this is not an open relay.
