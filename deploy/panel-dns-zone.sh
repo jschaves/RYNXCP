@@ -127,11 +127,16 @@ if [[ -n "$DKIM_SELECTOR" ]]; then
     echo "error: cannot derive the DKIM public key from $PRIVATE_KEY" >&2
     exit 1
   }
-  DKIM_TXT='"v=DKIM1; h=sha256; k=rsa; p=" '
-  while IFS= read -r chunk; do
-    DKIM_TXT+="\"${chunk}\" "
-  done < <(printf '%s' "$public_key" | fold -w 255)
-  DKIM_TXT="${DKIM_TXT% }"
+  if (( ${#public_key} % 4 != 0 )); then
+    echo "error: DKIM public key is truncated" >&2
+    exit 1
+  fi
+  DKIM_TXT='"v=DKIM1; h=sha256; k=rsa; p="'
+  offset=0
+  while (( offset < ${#public_key} )); do
+    DKIM_TXT+=" \"${public_key:offset:255}\""
+    offset=$((offset + 255))
+  done
 
   MAIL_RECORDS=$(cat <<EOF
 mail IN A ${IP}
