@@ -2247,20 +2247,20 @@ impl Reconciler {
             .get_website(domain)
             .map_err(internal)?
             .ok_or_else(|| WireError::not_found(format!("website '{domain}' not found")))?;
+        let identifier = format!("{}_{}", website.spec.username, name);
+        if identifier.len() > 64 {
+            return Err(WireError::invalid("the prefixed database name is too long"));
+        }
         if self
             .state
             .list_databases()
             .map_err(internal)?
             .iter()
-            .any(|db| db.domain == domain)
+            .any(|db| db.username == identifier)
         {
             return Err(WireError::conflict(format!(
-                "domain '{domain}' already has a database"
+                "database '{identifier}' already exists"
             )));
-        }
-        let identifier = format!("{}_{}", website.spec.username, name);
-        if identifier.len() > 64 {
-            return Err(WireError::invalid("the prefixed database name is too long"));
         }
         let password = random_hex(16);
         self.exec

@@ -2730,22 +2730,22 @@ async function renderDatabases() {
   const phpMyAdmin = '<a class="btn ghost" href="/phpmyadmin/" target="_blank" rel="noopener noreferrer">phpMyAdmin</a>';
   $('#view').innerHTML =
     sectionHead('Bases de datos por dominio', phpMyAdmin + (writable ? '<button class="btn primary" data-action="database-new">Nueva base</button>' : '')) +
-    table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Publica un sitio y crea su base de datos aislada.');
+    table(['Dominio', 'Usuario', 'Contraseña', 'Motor', 'Creada', ''], rows, 'Crea bases de datos aisladas para tus sitios.');
 }
 
 function openDatabaseModal() {
-  const candidates = S.data.websites.filter((w) => !S.data.databases.some((db) => db.domain === w.spec.domain));
+  const candidates = S.data.websites;
   if (!candidates.length) {
-    toast('Todos los sitios ya tienen base de datos', 'error');
+    toast('Primero publica un sitio', 'error');
     return;
   }
   openModal({
     title: 'Nueva base de datos',
     submitLabel: 'Crear base',
     html: `<div class="form-grid">
-      ${fSelect('domain', 'Dominio', candidates.map((w) => ({ value: w.spec.domain, label: w.spec.domain })), { required: true })}
+      ${fSelect('domain', 'Sitio', candidates.map((w) => ({ value: w.spec.domain, label: w.spec.domain })), { required: true })}
       ${fInput('name', 'Nombre corto', { required: true, placeholder: 'tienda', help: 'La base y el usuario serán <cuenta>_<nombre>.' })}
-      <p class="hint full">Se crea una base utf8mb4 y un usuario MariaDB con contraseña aleatoria de 32 caracteres. Solo puede acceder por socket local.</p>
+      <p class="hint full">Puedes crear varias bases para el mismo sitio. Se crea una base utf8mb4 y un usuario MariaDB con contraseña aleatoria de 32 caracteres. Solo puede acceder por socket local.</p>
     </div>`,
     onSubmit: async (form) => {
       const result = await api('/api/v1/databases', { method: 'POST', body: { domain: val(form, 'domain'), name: val(form, 'name') } });
