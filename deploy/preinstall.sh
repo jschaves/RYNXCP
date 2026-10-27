@@ -473,11 +473,11 @@ if [[ "${RYNX_SKIP_PHPMYADMIN:-0}" != "1" ]]; then
   log "Installing phpMyAdmin behind the panel login"
   bash "$ROOT_DIR/deploy/phpmyadmin-setup.sh"
 fi
+if [[ -z "$PUBLIC_IP" ]]; then
+  PUBLIC_IP="$(detect_public_ip || true)"
+fi
 if is_domain "$HOST"; then
   set_toml "$DAEMON_CONF" "dns_nameservers" "[\"ns1.$HOST\", \"ns2.$HOST\"]"
-  if [[ -z "$PUBLIC_IP" ]]; then
-    PUBLIC_IP="$(detect_public_ip || true)"
-  fi
   if is_ipv4 "$PUBLIC_IP"; then
     log "Creating the panel DNS zone for $HOST"
     bash "$ROOT_DIR/deploy/panel-dns-zone.sh" "$HOST" "$PUBLIC_IP" "$DKIM_SELECTOR" || \
@@ -485,6 +485,21 @@ if is_domain "$HOST"; then
   else
     warn "no public IPv4 detected; the panel DNS zone for $HOST was not created"
   fi
+fi
+
+# Refresh every panel-managed zone so DKIM/DNS fixes are applied on each run,
+# even when the panel host is an IP or differs from the signed mail domain.
+if is_ipv4 "$PUBLIC_IP" && [[ -d /etc/bind/zones ]]; then
+  for panel_zone in /etc/bind/zones/*.db; do
+    [[ -f "$panel_zone" ]] || continue
+    grep -q 'managed-by: RYNXCP panel' "$panel_zone" 2>/dev/null || continue
+    panel_zone_domain="$(basename "$panel_zone" .db)"
+    [[ "$panel_zone_domain" == "$HOST" ]] && continue
+    is_domain "$panel_zone_domain" || continue
+    log "Refreshing the panel DNS zone for $panel_zone_domain"
+    bash "$ROOT_DIR/deploy/panel-dns-zone.sh" "$panel_zone_domain" "$PUBLIC_IP" "$DKIM_SELECTOR" || \
+      warn "the panel DNS zone for $panel_zone_domain could not be refreshed"
+  done
 fi
 
 set_toml "$API_CONF" "trust_proxy_headers" "true"
