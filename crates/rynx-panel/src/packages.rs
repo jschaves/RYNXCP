@@ -35,6 +35,8 @@ pub struct PackageInput {
     pub mail_rate_limit: u64,
     pub databases: u64,
     pub system_databases: u64,
+    #[serde(default)]
+    pub ftp_accounts: u64,
 }
 
 /// Stored package plus its identity and timestamps.
@@ -78,6 +80,7 @@ pub fn default_package() -> PackageInput {
         mail_rate_limit: 200,
         databases: 0,
         system_databases: 0,
+        ftp_accounts: 0,
     }
 }
 
@@ -107,6 +110,7 @@ pub fn normalize_and_validate(mut input: PackageInput) -> Result<PackageInput, P
         ("mail_rate_limit", input.mail_rate_limit),
         ("databases", input.databases),
         ("system_databases", input.system_databases),
+        ("ftp_accounts", input.ftp_accounts),
     ] {
         if value > MAX_LIMIT {
             return Err(PanelError::Validation(format!(

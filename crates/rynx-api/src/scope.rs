@@ -82,6 +82,22 @@ pub async fn list_response(
     }
 }
 
+/// Return the website record for a domain, including its owning account.
+pub async fn website_for_domain(
+    state: &ApiState,
+    actor: &str,
+    domain: &str,
+) -> Result<rynx_proto::WebsiteView, ApiError> {
+    let response = state.daemon.call(Request::WebsiteList, actor).await?;
+    let DaemonResponse::Websites { websites } = response else {
+        return Err(ApiError::internal("unexpected daemon response"));
+    };
+    websites
+        .into_iter()
+        .find(|website| website.spec.domain.eq_ignore_ascii_case(domain))
+        .ok_or_else(|| ApiError::NotFound(format!("website '{domain}' not found")))
+}
+
 /// Ensure a domain belongs to the linked account (no-op for global users).
 pub async fn ensure_domain(
     state: &ApiState,

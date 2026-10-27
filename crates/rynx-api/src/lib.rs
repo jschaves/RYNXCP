@@ -6,6 +6,7 @@ pub mod cert_jobs;
 pub mod daemon;
 pub mod email;
 pub mod error;
+pub mod limits;
 pub mod ratelimit;
 pub mod routes;
 pub mod scope;

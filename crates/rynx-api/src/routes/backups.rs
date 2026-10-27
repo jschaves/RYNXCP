@@ -33,6 +33,7 @@ pub async fn create(
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
     auth.ensure_account(&body.username)?;
+    crate::limits::check_backup(&state, &auth.user.username, &body.username).await?;
     let response = state
         .daemon
         .call(

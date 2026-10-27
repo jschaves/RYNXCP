@@ -27,6 +27,7 @@ pub async fn create(
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
     scope::ensure_domain(&state, &auth, &spec.domain).await?;
+    crate::limits::check_ftp(&state, &auth.user.username, &spec.domain).await?;
     let response = state
         .daemon
         .call(Request::FtpCreate(spec), &auth.user.username)

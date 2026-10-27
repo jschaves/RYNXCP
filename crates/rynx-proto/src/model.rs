@@ -166,6 +166,7 @@ pub enum Request {
 
     DatabaseCreate {
         domain: String,
+        name: String,
     },
     DatabaseList,
     DatabaseDelete {

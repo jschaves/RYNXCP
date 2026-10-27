@@ -8,7 +8,7 @@ use rynx_core::audit::{self, AuditLog};
 use rynx_core::crypto::{now_rfc3339, now_unix, random_hex};
 use rynx_core::templates::{self, NginxContext};
 use rynx_core::validate::{
-    self, db_identifier, validate_account_spec, validate_app_spec, validate_ban_ip,
+    self, validate_account_spec, validate_app_spec, validate_ban_ip, validate_database_name,
     validate_dns_record_spec, validate_domain, validate_email, validate_firewall_rule_spec,
     validate_ftp_spec, validate_ip_or_cidr, validate_mail_account_spec, validate_mail_domain_spec,
     validate_php_pool_spec, validate_website_spec,
@@ -177,7 +177,9 @@ impl Reconciler {
             }
             Request::DnsMailProvision { domain } => self.dns_mail_provision(&domain, actor).await,
 
-            Request::DatabaseCreate { domain } => self.database_create(&domain, actor).await,
+            Request::DatabaseCreate { domain, name } => {
+                self.database_create(&domain, &name, actor).await
+            }
             Request::DatabaseList => {
                 let databases = self.state.list_databases().map_err(internal)?;
                 Ok(Response::Databases { databases })
@@ -2227,18 +2229,24 @@ impl Reconciler {
         let _ = self.dns_sync_dkim_tables().await;
     }
 
-    async fn database_create(&self, domain: &str, actor: &str) -> Result<Response, WireError> {
+    async fn database_create(
+        &self,
+        domain: &str,
+        name: &str,
+        actor: &str,
+    ) -> Result<Response, WireError> {
         validate_domain(domain).map_err(invalid)?;
+        validate_database_name(name).map_err(invalid)?;
         if !self.cfg.db_enabled {
             return Err(WireError::unsupported(
                 "database management is disabled (db_enabled = false)",
             ));
         }
-        if self.state.get_website(domain).map_err(internal)?.is_none() {
-            return Err(WireError::not_found(format!(
-                "website '{domain}' not found"
-            )));
-        }
+        let website = self
+            .state
+            .get_website(domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found(format!("website '{domain}' not found")))?;
         if self
             .state
             .list_databases()
@@ -2250,9 +2258,9 @@ impl Reconciler {
                 "domain '{domain}' already has a database"
             )));
         }
-        let identifier = db_identifier(domain);
-        if identifier.len() < 6 || identifier.len() > 32 {
-            return Err(WireError::invalid("cannot derive a database name"));
+        let identifier = format!("{}_{}", website.spec.username, name);
+        if identifier.len() > 64 {
+            return Err(WireError::invalid("the prefixed database name is too long"));
         }
         let password = random_hex(16);
         self.exec
@@ -2313,7 +2321,10 @@ impl Reconciler {
             .map_err(internal)?
             .ok_or_else(|| WireError::not_found(format!("website '{}' not found", spec.domain)))?;
         let account = self.require_account(&website.spec.username)?;
-        let login = format!("ftp_{}", spec.username);
+        let login = format!("{}_{}", account.spec.username, spec.username);
+        if login.len() > 64 {
+            return Err(WireError::invalid("the prefixed FTP login is too long"));
+        }
         if self.state.ftp_login_exists(&login).map_err(internal)? {
             return Err(WireError::conflict(format!(
                 "FTP login '{login}' already exists"

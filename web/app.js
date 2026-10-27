@@ -595,6 +595,7 @@ function packageSummary(pkg) {
     ['Dominios de email', limitText(pkg.mail_domains)],
     ['Cuentas de email', limitText(pkg.mail_accounts)],
     ['Bases de datos', limitText(pkg.databases)],
+    ['Cuentas FTP', limitText(pkg.ftp_accounts)],
   ];
   return `<div class="package-summary">${rows.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join('')}</div>`;
 }
@@ -2243,6 +2244,9 @@ function openPackageModal(pkg = null) {
       ${formSection('Bases de datos')}
       ${pkgNumber('databases', 'Bases de datos', { value: pick('databases', 0) })}
 
+      ${formSection('FTP')}
+      ${pkgNumber('ftp_accounts', 'Cuentas FTP', { value: pick('ftp_accounts', 0) })}
+
       ${formSection('Sistema')}
       ${pkgNumber('system_databases', 'Bases de datos', { value: pick('system_databases', 0), help: 'Límite de bases de datos del sistema.' })}
     </div>`,
@@ -2290,6 +2294,7 @@ function openPackageModal(pkg = null) {
         mail_rate_limit: num(form, 'mail_rate_limit'),
         databases: num(form, 'databases'),
         system_databases: num(form, 'system_databases'),
+        ftp_accounts: num(form, 'ftp_accounts'),
       };
       if (!payload.name) throw new Error('El nombre del paquete es obligatorio');
       if (pkg) {
@@ -2739,10 +2744,11 @@ function openDatabaseModal() {
     submitLabel: 'Crear base',
     html: `<div class="form-grid">
       ${fSelect('domain', 'Dominio', candidates.map((w) => ({ value: w.spec.domain, label: w.spec.domain })), { required: true })}
+      ${fInput('name', 'Nombre corto', { required: true, placeholder: 'tienda', help: 'La base y el usuario serán <cuenta>_<nombre>.' })}
       <p class="hint full">Se crea una base utf8mb4 y un usuario MariaDB con contraseña aleatoria de 32 caracteres. Solo puede acceder por socket local.</p>
     </div>`,
     onSubmit: async (form) => {
-      const result = await api('/api/v1/databases', { method: 'POST', body: { domain: val(form, 'domain') } });
+      const result = await api('/api/v1/databases', { method: 'POST', body: { domain: val(form, 'domain'), name: val(form, 'name') } });
       const db = result.database;
       showOutput('Base de datos creada', `dominio: ${db.domain}\nusuario: ${db.username}\ncontraseña: ${db.password}\nhost: ${db.host}\n\nGuarda la contraseña ahora.`);
       await refresh();
@@ -2778,9 +2784,9 @@ function openFtpModal() {
     submitLabel: 'Crear usuario',
     html: `<div class="form-grid">
       ${fSelect('domain', 'Sitio', S.data.websites.map((w) => ({ value: w.spec.domain, label: w.spec.domain })), { required: true })}
-      ${fInput('username', 'Nombre corto', { required: true, placeholder: 'deploy', help: 'se usará como ftp_<nombre>' })}
+      ${fInput('username', 'Nombre corto', { required: true, placeholder: 'deploy', help: 'se usará como <cuenta>_<nombre>' })}
       ${fInput('password', 'Contraseña', { type: 'password', placeholder: 'vacío = generar', help: 'mínimo 12 caracteres, 3 clases', autocomplete: 'new-password' })}
-      <div class="full">${fCheck('readonly', 'Solo lectura (sin escritura en el docroot)', false)}</div>
+      <div class="full">${fCheck('readonly', 'Solo lectura (sin escritura en el home)', false)}</div>
     </div>`,
     onSubmit: async (form) => {
       const body = { domain: val(form, 'domain'), username: val(form, 'username').toLowerCase(), readonly: bool(form, 'readonly') };

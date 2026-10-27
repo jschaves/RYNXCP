@@ -41,6 +41,7 @@ pub async fn upsert_domain(
     rynx_core::validate_mail_domain_spec(&spec)
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
     scope::ensure_website_upsert(&state, &auth, &spec.domain, &spec.username).await?;
+    crate::limits::check_mail_domain(&state, &auth.user.username, &spec).await?;
     let enabled = spec.enabled;
     let domain_name = spec.domain.clone();
     let response = state
@@ -123,6 +124,7 @@ pub async fn upsert_account(
     rynx_core::validate_mail_account_spec(&spec)
         .map_err(|err| ApiError::BadRequest(err.to_string()))?;
     scope::ensure_domain(&state, &auth, &spec.domain).await?;
+    crate::limits::check_mail_account(&state, &auth.user.username, &spec).await?;
     let response = state
         .daemon
         .call(Request::MailAccountUpsert(spec), &auth.user.username)

@@ -555,6 +555,25 @@ pub fn validate_dns_record_spec(spec: &rynx_proto::DnsRecordSpec) -> CoreResult<
     Ok(())
 }
 
+/// Short user-provided database name; the account prefix is added later.
+pub fn validate_database_name(value: &str) -> CoreResult<()> {
+    if value.is_empty()
+        || value.len() > 32
+        || !value
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        || !value
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+    {
+        return Err(invalid(
+            "database name must be 1-32 chars, start with a letter or digit and contain only a-z, 0-9 or _",
+        ));
+    }
+    Ok(())
+}
+
 /// Deterministic, collision-resistant MariaDB identifier for a domain.
 pub fn db_identifier(domain: &str) -> String {
     let mut out = String::from("rynx_");

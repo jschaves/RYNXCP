@@ -12,6 +12,7 @@ use crate::state::ApiState;
 #[derive(Debug, Deserialize)]
 pub struct CreateDatabase {
     pub domain: String,
+    pub name: String,
 }
 
 pub async fn list(
@@ -33,11 +34,15 @@ pub async fn create(
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
     scope::ensure_domain(&state, &auth, &body.domain).await?;
+    rynx_core::validate::validate_database_name(&body.name)
+        .map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    crate::limits::check_database(&state, &auth.user.username, &body.domain).await?;
     let response = state
         .daemon
         .call(
             Request::DatabaseCreate {
                 domain: body.domain,
+                name: body.name,
             },
             &auth.user.username,
         )

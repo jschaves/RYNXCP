@@ -28,6 +28,7 @@ pub async fn create(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     auth.require_write()?;
     scope::ensure_website_upsert(&state, &auth, &spec.domain, &spec.username).await?;
+    crate::limits::check_website(&state, &auth.user.username, &spec).await?;
     let wants_cert = spec.enabled && spec.tls == TlsMode::LetsEncrypt;
     let domain = spec.domain.clone();
     let response = state
