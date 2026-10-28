@@ -7,6 +7,7 @@ use crate::cert_jobs::CertJobs;
 use crate::daemon::DaemonClient;
 use crate::email::Mailer;
 use crate::ratelimit::LoginLimiter;
+use crate::two_factor::TwoFactor;
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -17,4 +18,5 @@ pub struct ApiState {
     pub reset_limiter: Arc<LoginLimiter>,
     pub cert_jobs: CertJobs,
     pub mailer: Option<Arc<Mailer>>,
+    pub two_factor: Arc<TwoFactor>,
 }

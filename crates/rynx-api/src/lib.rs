@@ -12,6 +12,7 @@ pub mod routes;
 pub mod scope;
 pub mod security;
 pub mod state;
+pub mod two_factor;
 
 pub use error::ApiError;
 pub use state::ApiState;

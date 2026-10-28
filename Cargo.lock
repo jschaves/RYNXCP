@@ -1125,6 +1125,7 @@ dependencies = [
  "clap",
  "http",
  "mime_guess",
+ "rand",
  "rynx-core",
  "rynx-panel",
  "rynx-proto",

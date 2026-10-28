@@ -89,6 +89,7 @@ async fn main() -> Result<()> {
         )),
         cert_jobs: rynx_api::cert_jobs::new_store(),
         mailer,
+        two_factor: Arc::new(Default::default()),
     };
 
     if args.check {

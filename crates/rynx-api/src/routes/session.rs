@@ -16,11 +16,26 @@ use crate::authlog;
 use crate::error::ApiError;
 use crate::security::check_origin;
 use crate::state::ApiState;
+use crate::two_factor::VerifyError;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct VerifyTwoFactorRequest {
+    pub challenge: String,
+    pub code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TwoFactorResponse {
+    pub two_factor_required: bool,
+    pub challenge: String,
+    pub email: String,
+    pub expires_in: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -127,19 +142,151 @@ pub async fn login(
         }
     };
     state.limiter.reset(&identity);
-    let _ = state
-        .db
-        .record_auth_event(&user.username, &ip, &user_agent(&headers), "success", "ok");
+    start_two_factor(&state, user, &ip, &headers).await
+}
+
+fn masked_email(email: &str) -> String {
+    let Some((local, domain)) = email.split_once('@') else {
+        return "***".into();
+    };
+    let first = local.chars().next().unwrap_or('*');
+    format!("{first}***@{domain}")
+}
+
+async fn start_two_factor(
+    state: &ApiState,
+    user: UserView,
+    ip: &str,
+    headers: &HeaderMap,
+) -> Result<Response, ApiError> {
+    if state.mailer.is_none() {
+        #[cfg(windows)]
+        {
+            tracing::warn!(
+                user = %user.username,
+                "SMTP is disabled; skipping two-factor authentication in Windows development mode"
+            );
+            let _ = state.db.record_auth_event(
+                &user.username,
+                ip,
+                &user_agent(headers),
+                "success",
+                "two_factor_disabled_development",
+            );
+            return finish_login(state, user, ip, headers, None);
+        }
+        #[cfg(not(windows))]
+        {
+            return Err(ApiError::internal(
+                "two-factor email delivery is not configured",
+            ));
+        }
+    }
+    let (challenge, code) = state.two_factor.issue(user.clone());
+    if let Err(err) = crate::email::send_login_code(state, &user.email, &user.username, &code).await
+    {
+        state.two_factor.cancel(&challenge);
+        tracing::warn!(user = %user.username, error = %err, "two-factor email could not be sent");
+        let _ = state.db.record_auth_event(
+            &user.username,
+            ip,
+            &user_agent(headers),
+            "failure",
+            "two_factor_delivery",
+        );
+        return Err(ApiError::internal(
+            "the verification code could not be sent by email",
+        ));
+    }
+    let _ = state.db.record_auth_event(
+        &user.username,
+        ip,
+        &user_agent(headers),
+        "pending",
+        "two_factor_required",
+    );
     authlog::log(
         &state.cfg.auth_log,
-        "login_success",
+        "login_2fa_required",
         &user.username,
-        &ip,
-        &user_agent(&headers),
+        ip,
+        &user_agent(headers),
         None,
     );
+    Ok(Json(TwoFactorResponse {
+        two_factor_required: true,
+        challenge,
+        email: masked_email(&user.email),
+        expires_in: 600,
+    })
+    .into_response())
+}
 
-    finish_login(&state, user, &ip, &headers, None)
+pub async fn verify_two_factor(
+    State(state): State<ApiState>,
+    connect: ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<VerifyTwoFactorRequest>,
+) -> Result<Response, ApiError> {
+    check_origin(&headers, &state.cfg)?;
+    let code = body.code.trim();
+    if body.challenge.len() != 64 || code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError::BadRequest(
+            "invalid or expired verification challenge".into(),
+        ));
+    }
+    let ip = client_ip(&headers, Some(&connect), state.cfg.trust_proxy_headers);
+    let attempted_user = state
+        .two_factor
+        .username(&body.challenge)
+        .unwrap_or_else(|| "two-factor".into());
+    match state.two_factor.verify(&body.challenge, code) {
+        Ok(user) => {
+            let Some(user) = state.db.find_user(&user.username)? else {
+                return Err(ApiError::Unauthorized);
+            };
+            if !user.active {
+                return Err(ApiError::Forbidden);
+            }
+            let _ = state.db.record_auth_event(
+                &user.username,
+                &ip,
+                &user_agent(&headers),
+                "success",
+                "two_factor",
+            );
+            authlog::log(
+                &state.cfg.auth_log,
+                "login_success",
+                &user.username,
+                &ip,
+                &user_agent(&headers),
+                None,
+            );
+            finish_login(&state, user, &ip, &headers, None)
+        }
+        Err(VerifyError::Invalid | VerifyError::TooManyAttempts) => {
+            let _ = state.db.record_auth_event(
+                &attempted_user,
+                &ip,
+                &user_agent(&headers),
+                "failure",
+                "invalid_2fa",
+            );
+            authlog::log(
+                &state.cfg.auth_log,
+                "login_2fa_failed",
+                &attempted_user,
+                &ip,
+                &user_agent(&headers),
+                None,
+            );
+            Err(ApiError::Unauthorized)
+        }
+        Err(VerifyError::Expired | VerifyError::NotFound) => Err(ApiError::BadRequest(
+            "the verification code expired; sign in again".into(),
+        )),
+    }
 }
 
 /// Public password-reset request. The response is always generic to avoid

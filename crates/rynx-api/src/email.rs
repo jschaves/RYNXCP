@@ -241,6 +241,21 @@ pub async fn send_password_reset(
         .await
 }
 
+pub async fn send_login_code(state: &ApiState, to: &str, username: &str, code: &str) -> Result<()> {
+    let mailer = state
+        .mailer
+        .as_deref()
+        .ok_or_else(|| anyhow!("SMTP is not configured for two-factor login"))?;
+    let body = format!(
+        "Hola {username},\n\n\
+         Tu código de verificación para acceder a RYNXCP es:\n\n\
+             {code}\n\n\
+         Caduca en 10 minutos. Si no has intentado iniciar sesión, \
+         cambia tu contraseña y revisa los accesos al panel.\n",
+    );
+    mailer.send(to, "Código de acceso a RYNXCP", &body).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

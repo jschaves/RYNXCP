@@ -11,6 +11,7 @@ const S = {
   mode: null,
   impersonatedBy: null,
   resetToken: null,
+  twoFactorChallenge: null,
   data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], accountPackages: [], mailDomains: [], mailAccounts: [] },
   files: { domain: '', path: '', entries: [] },
 };
@@ -335,10 +336,12 @@ function showLoginForm(mode = 'login') {
   const login = $('#login-form');
   const forgot = $('#forgot-form');
   const reset = $('#reset-form');
+  const twofa = $('#twofa-form');
   if (!login || !forgot || !reset) return;
   login.classList.toggle('hidden', mode !== 'login');
   forgot.classList.toggle('hidden', mode !== 'forgot');
   reset.classList.toggle('hidden', mode !== 'reset');
+  if (twofa) twofa.classList.add('hidden');
   translateUi(document.body);
   const form = mode === 'reset' ? reset : mode === 'forgot' ? forgot : login;
   const field = mode === 'login' ? 'username' : mode === 'forgot' ? 'email' : 'password';
@@ -346,10 +349,27 @@ function showLoginForm(mode = 'login') {
   if (input) setTimeout(() => input.focus(), 30);
 }
 
+function showTwoFactor(email, challenge) {
+  S.twoFactorChallenge = challenge;
+  $('#login-form').classList.add('hidden');
+  $('#forgot-form').classList.add('hidden');
+  $('#reset-form').classList.add('hidden');
+  $('#twofa-form').classList.remove('hidden');
+  const target = $('#twofa-email');
+  if (target) target.textContent = email || 'tu email';
+  const input = $('#twofa-form').elements.code;
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 30);
+  }
+  translateUi(document.body);
+}
+
 function showLogin() {
   S.user = null;
   S.csrf = null;
   S.impersonatedBy = null;
+  S.twoFactorChallenge = null;
   S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
@@ -3429,6 +3449,11 @@ document.addEventListener('DOMContentLoaded', () => {
         username: val(form, 'username'),
         password: form.elements.password.value,
       });
+      if (data && data.two_factor_required) {
+        form.reset();
+        showTwoFactor(data.email, data.challenge);
+        return;
+      }
       S.user = data.user;
       S.csrf = data.csrf_token;
       S.impersonatedBy = data.impersonated_by || null;
@@ -3442,6 +3467,36 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('#forgot-open').addEventListener('click', () => showLoginForm('forgot'));
+
+  $('#twofa-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const data = await publicPost('/api/v1/auth/verify-2fa', {
+        challenge: S.twoFactorChallenge,
+        code: form.elements.code.value.trim(),
+      });
+      S.user = data.user;
+      S.csrf = data.csrf_token;
+      S.impersonatedBy = data.impersonated_by || null;
+      S.twoFactorChallenge = null;
+      form.reset();
+      enterApp();
+    } catch (err) {
+      form.elements.code.value = '';
+      form.elements.code.focus();
+      toast(err.message, 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('#twofa-cancel').addEventListener('click', () => {
+    S.twoFactorChallenge = null;
+    showLoginForm('login');
+  });
 
   $('#forgot-cancel').addEventListener('click', () => showLoginForm('login'));
 

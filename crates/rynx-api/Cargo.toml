@@ -16,6 +16,7 @@ base64.workspace = true
 clap.workspace = true
 http.workspace = true
 mime_guess.workspace = true
+rand.workspace = true
 rynx-core = { path = "../rynx-core" }
 rynx-panel = { path = "../rynx-panel" }
 rynx-proto = { path = "../rynx-proto" }

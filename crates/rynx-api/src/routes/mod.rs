@@ -155,6 +155,7 @@ pub fn router(state: ApiState) -> Router {
 
     let public = Router::new()
         .route("/api/v1/auth/login", post(session::login))
+        .route("/api/v1/auth/verify-2fa", post(session::verify_two_factor))
         .route(
             "/api/v1/auth/forgot-password",
             post(session::forgot_password),
