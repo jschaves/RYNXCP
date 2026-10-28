@@ -757,6 +757,10 @@ sleep 2
 systemctl is-active --quiet rynxd || die "rynxd failed to start (journalctl -u rynxd)"
 systemctl is-active --quiet rynx-api || die "rynx-api failed to start (journalctl -u rynx-api)"
 
+log "Applying the initial reconcile"
+rynxctl --config "$API_CONF" reconcile >/dev/null 2>&1 || \
+  warn "the initial reconcile failed; rynxd will retry on its next start"
+
 # ---------------------------------------------------------------------------
 # Create or update the administrator
 # ---------------------------------------------------------------------------
