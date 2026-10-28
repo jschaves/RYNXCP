@@ -27,6 +27,7 @@ pub async fn create(
 ) -> Result<Json<DaemonResponse>, ApiError> {
     auth.require_write()?;
     auth.ensure_account(&spec.username)?;
+    crate::limits::check_app(&state, &auth.user.username, &spec).await?;
     let response = state
         .daemon
         .call(Request::AppUpsert(spec), &auth.user.username)

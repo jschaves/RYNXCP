@@ -138,8 +138,25 @@ function td(html, cls = '') {
   return `<td class="${cls}">${html}</td>`;
 }
 
+const STATUS_LABELS = {
+  active: 'activo', enabled: 'activo', suspended: 'suspendida', disabled: 'deshabilitado',
+  stopped: 'detenida', failed: 'fallido', error: 'Error', ok: 'correcto',
+  installed: 'instalado', absent: 'ausente', missing: 'Ausente', expiring: 'Por vencer',
+  expired: 'Vencido', success: 'Correcto', blocked: 'Bloqueado', allow: 'Permitir',
+  deny: 'Denegar', simulated: 'Simulado', pending: 'Pendiente', running: 'En ejecución',
+  completed: 'Completado', 'brute-force': 'Fuerza bruta', security: 'Seguridad',
+  normal: 'Normal', 'read-only': 'Solo lectura', 'read-write': 'Lectura/escritura',
+  'no-mail': 'Sin correo', 'no-tls': 'Sin TLS', owner: 'Propietario',
+  admin: 'Administrador', operator: 'Operador', viewer: 'Solo lectura',
+  simulation: 'Simulación', production: 'Producción',
+};
+
+function statusLabel(value) {
+  return STATUS_LABELS[value] || value;
+}
+
 function badge(text, kind = '') {
-  return `<span class="badge ${kind}">${esc(text)}</span>`;
+  return `<span class="badge ${kind}">${esc(statusLabel(text))}</span>`;
 }
 
 function btn(label, action, id = '', cls = 'tiny ghost', title = '') {
@@ -268,6 +285,24 @@ function toAsciiEmail(value) {
   return `${raw.slice(0, at + 1)}${toAsciiDomain(raw.slice(at + 1))}`;
 }
 
+function TF(text, vars = {}) {
+  let out = T(text);
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.split(`{${key}}`).join(String(value));
+  }
+  return out;
+}
+
+function humanizeError(message) {
+  const text = String(message || '');
+  const match = /^the package limit for websites and apps has been reached \((\d+)\)$/.exec(text);
+  if (match) return TF('El paquete ha alcanzado el límite de sitios y apps ({limit}).', { limit: match[1] });
+  return text;
+}
+
+const nativeConfirm = window.confirm.bind(window);
+window.confirm = (message) => nativeConfirm(T(String(message)));
+
 function translateUi(root) {
   if (window.RYNX_I18N) window.RYNX_I18N.translateDom(root || document.body);
 }
@@ -277,7 +312,7 @@ function toast(message, kind = 'ok') {
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   const title = kind === 'error' ? T('Error') : T('Hecho');
-  el.innerHTML = `<div class="t-title">${esc(title)}</div><div>${esc(T(message))}</div>`;
+  el.innerHTML = `<div class="t-title">${esc(title)}</div><div>${esc(T(humanizeError(message)))}</div>`;
   root.appendChild(el);
   setTimeout(() => el.remove(), kind === 'error' ? 7000 : 3500);
 }
@@ -310,7 +345,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     const message = data && data.error && data.error.message
       ? data.error.message
-      : `Error HTTP ${response.status}`;
+      : TF('Error HTTP {status}', { status: response.status });
     throw new Error(message);
   }
   return data;
@@ -325,7 +360,7 @@ async function publicPost(path, body) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data && data.error ? data.error.message : `Error HTTP ${response.status}`);
+    throw new Error(data && data.error ? data.error.message : TF('Error HTTP {status}', { status: response.status }));
   }
   return data;
 }
@@ -356,7 +391,7 @@ function showTwoFactor(email, challenge) {
   $('#reset-form').classList.add('hidden');
   $('#twofa-form').classList.remove('hidden');
   const target = $('#twofa-email');
-  if (target) target.textContent = email || 'tu email';
+  if (target) target.textContent = email || T('tu email');
   const input = $('#twofa-form').elements.code;
   if (input) {
     input.value = '';
@@ -381,7 +416,7 @@ function enterApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#user-name').textContent = S.user.username;
-  $('#user-role').textContent = S.user.role;
+  $('#user-role').textContent = statusLabel(S.user.role);
   $('#avatar').textContent = S.user.username.slice(0, 1);
   const banner = $('#impersonation');
   if (banner) {
@@ -683,7 +718,7 @@ function packageSummary(pkg) {
     ['Cuenta', diskText(pkg.account_mb)],
     ['Ancho de banda', limitText(pkg.bandwidth_mb)],
     ['Backups', pkg.backups],
-    ['Dominios web', limitText(pkg.web_domains)],
+    ['Dominios webs - apps', limitText(pkg.web_domains)],
     ['Alias web', limitText(pkg.web_aliases)],
     ['Dominios de email', limitText(pkg.mail_domains)],
     ['Cuentas de email', limitText(pkg.mail_accounts)],
@@ -717,7 +752,7 @@ function pkgNumber(name, label, opts = {}) {
 function accountOptions(includeEmpty = false) {
   let items = S.data.accounts.map((a) => ({
     value: a.spec.username,
-    label: `${a.spec.username}${a.spec.enabled ? '' : ' (suspendida)'}`,
+    label: `${a.spec.username}${a.spec.enabled ? '' : ' ' + T('(suspendida)')}`,
   }));
   if (S.user && S.user.account) {
     items = items.filter((item) => item.value === S.user.account);
@@ -842,7 +877,7 @@ async function renderOverview() {
   }
 
   if (failed.length) {
-    html += `<p class="muted small">${failed.length} consulta(s) fallaron al cargar el resumen.</p>`;
+    html += `<p class="muted small">${TF('{count} consulta(s) fallaron al cargar el resumen.', { count: failed.length })}</p>`;
   }
   $('#view').innerHTML = html;
 }
@@ -991,7 +1026,7 @@ function openBackendModal(account) {
     return;
   }
   openModal({
-    title: `Backend plantilla · ${account}`,
+    title: T('Backend plantilla') + ' · ' + account,
     submitLabel: 'Guardar',
     html: `<div class="form-grid">
       ${fSelect('web_backend', 'Backend plantilla', WEB_BACKEND_OPTIONS, { value: assignment.web_backend, help: 'Solo cambia el backend web; el resto del paquete sigue bloqueado.' })}
@@ -1169,7 +1204,7 @@ const FILE_UPLOAD_LIMIT = 5 * 1024 * 1024;
 
 async function uploadOneFile(file, targetPath) {
   if (file.size > FILE_UPLOAD_LIMIT) {
-    throw new Error(`${file.name}: supera 5 MB`);
+    throw new Error(TF('{name}: supera 5 MB', { name: file.name }));
   }
   const data = await fileToBase64(file);
   await api('/api/v1/files/upload', {
@@ -1246,7 +1281,7 @@ async function uploadDroppedItems(items) {
   const status = $('#file-upload-status');
   if (status) {
     status.hidden = false;
-    status.textContent = 'Subiendo…';
+    status.textContent = T('Subiendo…');
   }
   for (const file of files) {
     try {
@@ -1260,13 +1295,13 @@ async function uploadDroppedItems(items) {
   for (const entry of entries) {
     await uploadDroppedEntry(entry, S.files.path, stats);
     if (status) {
-      status.textContent = `${stats.files} archivo(s) subido(s), ${stats.directories} carpeta(s)…`;
+      status.textContent = TF('Subiendo: {files} archivo(s), {directories} carpeta(s)…', stats);
     }
   }
   if (stats.failed) {
-    toast(`${stats.files} archivo(s) subido(s). ${stats.failed} error(es): ${stats.lastError}`, 'error');
+    toast(uploadSummary(stats), 'error');
   } else {
-    toast(`${stats.files} archivo(s) y ${stats.directories} carpeta(s) subidos`);
+    toast(uploadSummary(stats));
   }
   await navigate('files');
 }
@@ -1306,9 +1341,9 @@ async function uploadFileList(files, targetPath, stats) {
 
 function uploadSummary(stats) {
   if (stats.failed) {
-    return `${stats.files} archivo(s) subido(s). ${stats.failed} error(es): ${stats.lastError}`;
+    return TF('Archivos subidos: {files}. Errores: {failed}. Último error: {lastError}', stats);
   }
-  return `${stats.files} archivo(s) y ${stats.directories} carpeta(s) subidos`;
+  return TF('Archivos subidos: {files}. Carpetas subidas: {directories}.', stats);
 }
 
 async function runUpload(files, targetPath) {
@@ -1316,7 +1351,7 @@ async function runUpload(files, targetPath) {
   const status = $('#file-upload-status');
   if (status) {
     status.hidden = false;
-    status.textContent = 'Subiendo…';
+    status.textContent = T('Subiendo…');
   }
   await uploadFileList(files, targetPath, stats);
   toast(uploadSummary(stats), stats.failed ? 'error' : 'ok');
@@ -1473,7 +1508,7 @@ async function openFileEditor(path) {
   }
   const text = new TextDecoder().decode(bytes);
   openModal({
-    title: `Editar · ${path}`,
+    title: T('Editar') + ' · ' + path,
     submitLabel: 'Guardar',
     html: `<div class="stack">${field('content', 'Contenido', `<textarea name="content" class="file-editor">${esc(text)}</textarea>`, '', true)}</div>`,
     onSubmit: async (form) => {
@@ -1538,8 +1573,8 @@ async function deleteFile(path) {
   const entry = (S.files.entries || []).find((item) => fileJoin(S.files.path, item.name) === path);
   const isDir = entry && entry.kind === 'dir';
   const question = isDir
-    ? `¿Eliminar la carpeta ${path} y todo su contenido?`
-    : `¿Eliminar el archivo ${path}?`;
+    ? TF('¿Eliminar la carpeta {path} y todo su contenido?', { path })
+    : TF('¿Eliminar el archivo {path}?', { path });
   if (!confirm(question)) return;
   await api(
     `/api/v1/files?domain=${encodeURIComponent(S.files.domain)}&path=${encodeURIComponent(path)}&recursive=${isDir ? 'true' : 'false'}`,
@@ -1703,7 +1738,7 @@ async function toggleMailDomain(domain) {
 
 function openMailAccountModal(domain) {
   openModal({
-    title: `Nuevo buzón · ${domain}`,
+    title: T('Nuevo buzón') + ' · ' + domain,
     submitLabel: 'Crear buzón',
     html: `<div class="form-grid">
       ${fInput('local_part', 'Buzón', { required: true, placeholder: 'info', help: 'se usará como info@dominio' })}
@@ -1735,7 +1770,7 @@ function openMailAccountModal(domain) {
 function openMailPasswordModal(account) {
   if (!account) return;
   openModal({
-    title: `Contraseña · ${account.address}`,
+    title: T('Contraseña') + ' · ' + account.address,
     submitLabel: 'Actualizar',
     html: `<div class="stack">${fInput('password', 'Nueva contraseña', { type: 'password', required: true, autocomplete: 'new-password', help: 'mínimo 12 caracteres y 3 clases' })}</div>`,
     onSubmit: async (form) => {
@@ -1761,7 +1796,7 @@ function openMailCatchAllModal(domain) {
   const mail = mailDomainByDomain(domain);
   if (!mail) return;
   openModal({
-    title: `Catch-all · ${domain}`,
+    title: T('Catch-all') + ' · ' + domain,
     submitLabel: 'Guardar',
     html: `<div class="stack">${fInput('catch_all', 'Destino', { type: 'email', value: mail.catch_all || '', placeholder: 'buzon@dominio', help: 'vacío para desactivar el catch-all' })}</div>`,
     onSubmit: async (form) => {
@@ -1904,7 +1939,7 @@ function openAppModal() {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) continue;
         const index = trimmed.indexOf('=');
-        if (index <= 0) throw new Error(`Variable de entorno inválida: ${trimmed}`);
+        if (index <= 0) throw new Error(TF('Variable de entorno inválida: {value}', { value: trimmed }));
         env[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1);
       }
       await api('/api/v1/apps', {
@@ -2254,7 +2289,7 @@ function openUserModal() {
       ${fInput('username', 'Usuario', { required: true, placeholder: 'operador' })}
       ${fInput('email', 'Email', { type: 'email', required: true })}
       ${fInput('password', 'Contraseña', { type: 'password', required: true, autocomplete: 'new-password', help: 'mínimo 12 caracteres, 3 clases' })}
-      ${fSelect('role', 'Rol', roles.map((r) => ({ value: r, label: r })), { value: 'operator' })}
+      ${fSelect('role', 'Rol', roles.map((r) => ({ value: r, label: statusLabel(r) })), { value: 'operator' })}
     </div>`,
     onSubmit: async (form) => {
       await api('/api/v1/users', {
@@ -2294,7 +2329,7 @@ async function renderPackages() {
     sectionHead('Paquetes', `<button class="btn primary" data-action="package-new">${T('Nuevo paquete')}</button>`) +
     `<p class="hint" style="margin:0 0 14px">${esc(T('0 significa sin límite. El paquete Por defecto es editable pero no se puede eliminar.'))}</p>` +
     table(
-      ['Paquete', 'Cuenta (MB)', 'Ancho de banda', 'Backups', 'Dominios web', 'Cuentas de email', 'Bases de datos', ''],
+      ['Paquete', 'Cuenta (MB)', 'Ancho de banda', 'Backups', 'Dominios webs - apps', 'Cuentas de email', 'Bases de datos', ''],
       rows,
       'Aún no hay paquetes.',
     );
@@ -2320,7 +2355,7 @@ function openPackageModal(pkg = null) {
   const pick = (field, fallback) => (pkg && pkg[field] !== undefined ? pkg[field] : fallback);
 
   openModal({
-    title: pkg ? `Editar paquete · ${pkg.name}` : 'Nuevo paquete',
+    title: pkg ? T('Editar paquete') + ' · ' + pkg.name : T('Nuevo paquete'),
     submitLabel: pkg ? 'Guardar cambios' : 'Crear paquete',
     html: `<div class="form-grid">
       ${formSection('General', 'Los límites van de 0 a 1000. 0 significa sin límite.')}
@@ -2330,8 +2365,8 @@ function openPackageModal(pkg = null) {
       ${pkgNumber('backups', 'Backups', { min: 1, max: 3, value: pick('backups', 1), unlimited: false, help: 'Entre 1 y 3.' })}
       ${fSelect('incremental_backup', 'Backup incremental', yesNo, { value: pick('incremental_backup', false) ? '1' : '0' })}
 
-      ${formSection('Web')}
-      ${pkgNumber('web_domains', 'Dominios web', { value: pick('web_domains', 1) })}
+      ${formSection('WEB - APPS')}
+      ${pkgNumber('web_domains', 'Dominios webs - apps', { value: pick('web_domains', 1) })}
       ${pkgNumber('web_aliases', 'Alias web', { value: pick('web_aliases', 1) })}
       ${fSelect('web_backend', 'Backend', WEB_BACKEND_OPTIONS, { value: pick('web_backend', 'php') })}
       ${fSelect('nginx_template', 'Plantilla proxy Nginx', nginxOptions, { value: pick('nginx_template', 'hosting') })}
@@ -2535,7 +2570,7 @@ function openEmailTestModal() {
         method: 'POST',
         body: { to: val(form, 'to') || null },
       });
-      toast(`Correo de prueba enviado a ${result.to}`);
+      toast(TF('Correo de prueba enviado a {to}', { to: result.to }));
     },
   });
 }
@@ -2579,7 +2614,7 @@ async function handleAction(action, id) {
       return refresh();
     }
     case 'account-delete': {
-      if (!confirm(`¿Eliminar la cuenta ${id}? Se borrarán el home, sitios, apps, bases de datos, DNS, FTP, certificados y backups.`)) return;
+      if (!confirm(TF('¿Eliminar la cuenta {id}? Se borrarán el home, sitios, apps, bases de datos, DNS, FTP, certificados y backups.', { id }))) return;
       await api(`/api/v1/accounts/${encodeURIComponent(id)}?purge=true`, { method: 'DELETE' });
       toast('Cuenta eliminada');
       return refresh();
@@ -2615,7 +2650,7 @@ async function handleAction(action, id) {
     case 'mail-account-delete': {
       const account = mailAccountById(id);
       if (!account) throw new Error('Buzón no encontrado');
-      if (!confirm(`¿Eliminar el buzón ${account.address}? Se borrará su correo almacenado.`)) return;
+      if (!confirm(TF('¿Eliminar el buzón {address}? Se borrará su correo almacenado.', { address: account.address }))) return;
       await api(`/api/v1/mail/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Buzón eliminado');
       return refresh();
@@ -2625,7 +2660,7 @@ async function handleAction(action, id) {
     case 'mail-tls':
       return retryMailTls(id);
     case 'mail-delete': {
-      if (!confirm(`¿Eliminar el correo de ${id}? Se borrarán los buzones y el webmail.`)) return;
+      if (!confirm(TF('¿Eliminar el correo de {id}? Se borrarán los buzones y el webmail.', { id }))) return;
       await api(`/api/v1/mail/domains/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Correo eliminado');
       return refresh();
@@ -2648,7 +2683,7 @@ async function handleAction(action, id) {
     case 'file-new-folder':
       return openNewFolderModal();
     case 'website-delete': {
-      if (!confirm(`¿Eliminar el sitio ${id}?`)) return;
+      if (!confirm(TF('¿Eliminar el sitio {id}?', { id }))) return;
       await api(`/api/v1/websites/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Sitio eliminado');
       return refresh();
@@ -2656,7 +2691,7 @@ async function handleAction(action, id) {
     case 'app-new':
       return openAppModal();
     case 'app-delete': {
-      if (!confirm(`¿Eliminar la aplicación ${id}?`)) return;
+      if (!confirm(TF('¿Eliminar la aplicación {id}?', { id }))) return;
       const [user, name] = id.split('/');
       await api(`/api/v1/apps/${encodeURIComponent(user)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
       toast('Aplicación eliminada');
@@ -2665,7 +2700,7 @@ async function handleAction(action, id) {
     case 'php-new':
       return openPhpModal();
     case 'php-delete': {
-      if (!confirm(`¿Eliminar el pool PHP de ${id}?`)) return;
+      if (!confirm(TF('¿Eliminar el pool PHP de {id}?', { id }))) return;
       await api(`/api/v1/php-pools/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Pool eliminado');
       return refresh();
@@ -2695,7 +2730,7 @@ async function handleAction(action, id) {
     }
     case 'user-passwd': {
       openModal({
-        title: `Nueva contraseña · ${id}`,
+        title: T('Nueva contraseña') + ' · ' + id,
         submitLabel: 'Actualizar',
         html: `<div class="stack">${fInput('password', 'Contraseña', { type: 'password', required: true, autocomplete: 'new-password', help: 'mínimo 12 caracteres, 3 clases; revoca sesiones' })}</div>`,
         onSubmit: async (form) => {
@@ -2709,7 +2744,7 @@ async function handleAction(action, id) {
       return;
     }
     case 'user-delete': {
-      if (!confirm(`¿Eliminar al usuario ${id}? Si tiene una cuenta de hosting, también se borrarán su cuenta y todos sus datos.`)) return;
+      if (!confirm(TF('¿Eliminar al usuario {id}? Si tiene una cuenta de hosting, también se borrarán su cuenta y todos sus datos.', { id }))) return;
       await api(`/api/v1/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Usuario eliminado');
       return refresh();
@@ -2825,7 +2860,7 @@ async function handleAction(action, id) {
     case 'updates-apply': {
       if (!confirm('¿Actualizar todos los paquetes del sistema ahora? Puede reiniciar servicios.')) return;
       const result = await api('/api/v1/system/updates/apply', { method: 'POST' });
-      showOutput('Actualización completada', result.output || 'Sin salida.');
+      showOutput(T('Actualización completada'), result.output || T('Sin salida.'));
       return refresh();
     }
     case 'package-new':
@@ -2839,7 +2874,7 @@ async function handleAction(action, id) {
       const pkg = S.data.packages.find((item) => item.id === id);
       if (!pkg) throw new Error('Paquete no encontrado');
       if (pkg.is_default) throw new Error('El paquete Por defecto no se puede eliminar');
-      if (!confirm(`¿Eliminar el paquete ${pkg.name}?`)) return;
+      if (!confirm(TF('¿Eliminar el paquete {name}?', { name: pkg.name }))) return;
       await api(`/api/v1/packages/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Paquete eliminado');
       return refresh();
@@ -2885,7 +2920,7 @@ function openDatabaseModal() {
     onSubmit: async (form) => {
       const result = await api('/api/v1/databases', { method: 'POST', body: { domain: val(form, 'domain'), name: val(form, 'name') } });
       const db = result.database;
-      showOutput('Base de datos creada', `dominio: ${db.domain}\nusuario: ${db.username}\ncontraseña: ${db.password}\nhost: ${db.host}\n\nGuarda la contraseña ahora.`);
+      showOutput(T('Base de datos creada'), `${T('dominio:')} ${db.domain}\n${T('usuario:')} ${db.username}\n${T('contraseña:')} ${db.password}\n${T('host:')} ${db.host}\n\n${T('Guarda la contraseña ahora.')}`);
       await refresh();
     },
   });
@@ -2928,7 +2963,7 @@ function openFtpModal() {
       const password = val(form, 'password');
       if (password) body.password = password;
       const result = await api('/api/v1/ftp', { method: 'POST', body });
-      showOutput('Usuario FTP creado', `login: ${result.account.login}\ncontraseña: ${result.account.password}\nhome: ${result.account.home}\n\nUsa FTPS explícito (puerto 21).`);
+      showOutput(T('Usuario FTP creado'), `${T('login:')} ${result.account.login}\n${T('contraseña:')} ${result.account.password}\n${T('home:')} ${result.account.home}\n\n${T('Usa FTPS explícito (puerto 21).')}`);
       await refresh();
     },
   });
@@ -2991,7 +3026,7 @@ function openDnsRecordModal() {
   const domain = S.dnsDomain;
   if (!domain) return;
   openModal({
-    title: `Nuevo registro · ${domain}`,
+    title: T('Nuevo registro') + ' · ' + domain,
     submitLabel: 'Guardar',
     html: `<div class="form-grid">
       ${fInput('name', 'Nombre', { value: '@', required: true, help: '@, www, _dmarc, mail._domainkey…' })}
@@ -3398,7 +3433,7 @@ async function renderConsole() {
       S.consoleOutput = result.output || '(sin salida)';
       const pre = $('#console-output');
       if (pre) pre.textContent = S.consoleOutput;
-      toast(`${result.action} ejecutado`);
+      toast(TF('{action} ejecutado', { action: T(result.action) }));
     } catch (err) {
       toast(err.message, 'error');
     }

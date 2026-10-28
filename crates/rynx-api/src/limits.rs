@@ -2,7 +2,7 @@
 
 use rynx_panel::PackageInput;
 use rynx_proto::{
-    MailAccountSpec, MailDomainSpec, Request, Response as DaemonResponse, WebsiteSpec,
+    AppSpec, MailAccountSpec, MailDomainSpec, Request, Response as DaemonResponse, WebsiteSpec,
 };
 
 use crate::{error::ApiError, scope, state::ApiState};
@@ -43,6 +43,20 @@ async fn account_websites(
     }
 }
 
+async fn account_apps(
+    state: &ApiState,
+    actor: &str,
+    account: &str,
+) -> Result<Vec<rynx_proto::AppView>, ApiError> {
+    match state.daemon.call(Request::AppList, actor).await? {
+        DaemonResponse::Apps { apps } => Ok(apps
+            .into_iter()
+            .filter(|app| app.spec.username == account)
+            .collect()),
+        _ => Err(ApiError::internal("unexpected daemon response")),
+    }
+}
+
 pub async fn check_website(
     state: &ApiState,
     actor: &str,
@@ -56,7 +70,9 @@ pub async fn check_website(
         .iter()
         .find(|website| website.spec.domain.eq_ignore_ascii_case(&spec.domain));
     if existing.is_none() {
-        enforce(package.web_domains, websites.len() as u64, "web domains")?;
+        let apps = account_apps(state, actor, &spec.username).await?;
+        let current = websites.len() as u64 + apps.len() as u64;
+        enforce(package.web_domains, current, "websites and apps")?;
     }
     let current_aliases: usize = websites
         .iter()
@@ -68,6 +84,22 @@ pub async fn check_website(
         (current_aliases + spec.aliases.len()) as u64,
         "web aliases",
     )
+}
+
+pub async fn check_app(state: &ApiState, actor: &str, spec: &AppSpec) -> Result<(), ApiError> {
+    let Some(package) = package_for(state, &spec.username).await? else {
+        return Ok(());
+    };
+    let apps = account_apps(state, actor, &spec.username).await?;
+    let existing = apps
+        .iter()
+        .any(|app| app.spec.name.eq_ignore_ascii_case(&spec.name));
+    if existing {
+        return Ok(());
+    }
+    let websites = account_websites(state, actor, &spec.username).await?;
+    let current = apps.len() as u64 + websites.len() as u64;
+    enforce(package.web_domains, current, "websites and apps")
 }
 
 pub async fn check_mail_domain(

@@ -224,9 +224,9 @@ try {
     $null = RequestJson 'POST' '/api/v1/dns/example.com/mail'
 
     Write-Host '==> databases and ftp'
-    $database = RequestJson 'POST' '/api/v1/databases' @{ domain = 'example.com' }
+    $database = RequestJson 'POST' '/api/v1/databases' @{ domain = 'example.com'; name = 'smoke' }
     if ($database.kind -ne 'database') { throw 'database creation failed' }
-    if ($database.database.username -notlike 'rynx_*') { throw 'unexpected database name' }
+    if ($database.database.username -notlike 'acme_*') { throw 'unexpected database name' }
     if ((RequestJson 'GET' '/api/v1/databases').databases.Count -ne 1) { throw 'expected one database' }
 
     $ftp = RequestJson 'POST' '/api/v1/ftp' @{ domain = 'example.com'; username = 'deploy'; readonly = $false }
@@ -353,6 +353,45 @@ try {
     $null = RequestJson 'DELETE' '/api/v1/accounts/pkgacct?purge=true'
     $null = RequestJson 'DELETE' "/api/v1/packages/$($newPackage.id)"
 
+    Write-Host '==> combined website/app package limit'
+    $comboBody = PackageBody $newPackage
+    $comboBody.name = 'Combined Plan'
+    $comboBody.web_domains = 1
+    $comboPackage = PostJson '/api/v1/packages' $comboBody
+    $comboAccount = PostJson '/api/v1/accounts' @{
+        username = 'combo'; email = 'combo@example.com'; disk_limit_mb = 100
+        php_version = $null; enabled = $true
+        package_id = $comboPackage.id; web_backend = 'php'
+    }
+    if ($comboAccount.account.kind -ne 'account') { throw 'combined limit account was not created' }
+    $null = PostJson '/api/v1/apps' @{
+        username = 'combo'; name = 'api'; runtime = @{ engine = 'node'; version = '22' }
+        port = 4111; entrypoint = 'server.js'; command = 'node'
+        args = @('server.js'); env = @{ NODE_ENV = 'production' }; enabled = $true
+    }
+    ExpectStatus 409 {
+        PostJson '/api/v1/websites' @{
+            domain = 'combo.example.com'; username = 'combo'; aliases = @()
+            runtime = @{ engine = 'php'; version = '8.3' }; app = $null
+            docroot = 'public_html'; tls = 'disabled'; enabled = $true
+        }
+    }
+    $null = RequestJson 'DELETE' '/api/v1/apps/combo/api'
+    $null = PostJson '/api/v1/websites' @{
+        domain = 'combo.example.com'; username = 'combo'; aliases = @()
+        runtime = @{ engine = 'php'; version = '8.3' }; app = $null
+        docroot = 'public_html'; tls = 'disabled'; enabled = $true
+    }
+    ExpectStatus 409 {
+        PostJson '/api/v1/apps' @{
+            username = 'combo'; name = 'api2'; runtime = @{ engine = 'node'; version = '22' }
+            port = 4112; entrypoint = 'server.js'; command = 'node'
+            args = @('server.js'); env = @{ NODE_ENV = 'production' }; enabled = $true
+        }
+    }
+    $null = RequestJson 'DELETE' '/api/v1/accounts/combo?purge=true'
+    $null = RequestJson 'DELETE' "/api/v1/packages/$($comboPackage.id)"
+
     Write-Host '==> security checks'
     ExpectStatus 400 {
         PostJson '/api/v1/accounts' @{
@@ -361,7 +400,7 @@ try {
         }
     }
     ExpectStatus 409 {
-        RequestJson 'POST' '/api/v1/databases' @{ domain = 'example.com' }
+        RequestJson 'POST' '/api/v1/databases' @{ domain = 'example.com'; name = 'smoke' }
     }
     ExpectStatus 403 {
         $login2 = Invoke-RestMethod -Uri "$base/api/v1/auth/login" -Method Post `
