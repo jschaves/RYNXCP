@@ -11,9 +11,9 @@ use serde::Serialize;
 use rynx_core::crypto::{now_rfc3339, now_unix};
 use rynx_proto::{
     AccountSpec, AccountView, AppSpec, AppView, BackupView, BlockedIpView, CertificateStatus,
-    DatabaseView, DnsRecordSpec, DnsRecordView, FirewallRuleSpec, FirewallRuleView, FtpView,
-    MailAccountSpec, MailAccountView, MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec,
-    PhpPoolView, Runtime, TlsMode, WebsiteSpec, WebsiteView,
+    CronJobView, CronSpec, DatabaseView, DnsRecordSpec, DnsRecordView, FirewallRuleSpec,
+    FirewallRuleView, FtpView, MailAccountSpec, MailAccountView, MailDomainSpec, MailDomainView,
+    MetricSample, PhpPoolSpec, PhpPoolView, Runtime, TlsMode, WebsiteSpec, WebsiteView,
 };
 
 const SCHEMA: &str = r#"
@@ -114,6 +114,17 @@ CREATE TABLE IF NOT EXISTS backups (
     status     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_backups_user ON backups(username, created_at);
+
+CREATE TABLE IF NOT EXISTS cron_jobs (
+    id         TEXT PRIMARY KEY,
+    username   TEXT NOT NULL,
+    schedule   TEXT NOT NULL,
+    command    TEXT NOT NULL,
+    enabled    INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cron_jobs_user ON cron_jobs(username, created_at);
 
 CREATE TABLE IF NOT EXISTS metrics (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -872,6 +883,107 @@ impl StateStore {
         Ok(())
     }
 
+    pub fn upsert_cron(&self, spec: &CronSpec) -> Result<CronJobView> {
+        let now = now_rfc3339();
+        let existing = match &spec.id {
+            Some(id) => self.get_cron(id)?,
+            None => None,
+        };
+        let id = spec
+            .id
+            .clone()
+            .or_else(|| existing.as_ref().map(|job| job.id.clone()))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let created_at = existing
+            .as_ref()
+            .map(|job| job.created_at.clone())
+            .unwrap_or_else(|| now.clone());
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO cron_jobs (id, username, schedule, command, enabled, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+             ON CONFLICT(id) DO UPDATE SET username = excluded.username, \
+                 schedule = excluded.schedule, command = excluded.command, \
+                 enabled = excluded.enabled, updated_at = excluded.updated_at",
+            params![
+                id,
+                spec.username,
+                spec.schedule,
+                spec.command,
+                if spec.enabled { 1 } else { 0 },
+                created_at,
+                now
+            ],
+        )?;
+        self.get_cron(&id)?
+            .ok_or_else(|| anyhow::anyhow!("cron job disappeared after upsert"))
+    }
+
+    pub fn list_cron(&self) -> Result<Vec<CronJobView>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, username, schedule, command, enabled, created_at, updated_at \
+             FROM cron_jobs ORDER BY username, created_at",
+        )?;
+        let rows = stmt.query_map([], map_cron)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn cron_for(&self, username: &str) -> Result<Vec<CronJobView>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, username, schedule, command, enabled, created_at, updated_at \
+             FROM cron_jobs WHERE username = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map(params![username], map_cron)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_cron(&self, id: &str) -> Result<Option<CronJobView>> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, username, schedule, command, enabled, created_at, updated_at \
+                 FROM cron_jobs WHERE id = ?1",
+                params![id],
+                map_cron,
+            )
+            .optional()?)
+    }
+
+    pub fn delete_cron(&self, id: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute("DELETE FROM cron_jobs WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn delete_cron_for(&self, username: &str) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "DELETE FROM cron_jobs WHERE username = ?1",
+            params![username],
+        )?;
+        Ok(())
+    }
+
+    pub fn cron_count(&self, username: &str) -> Result<usize> {
+        let conn = self.conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM cron_jobs WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     pub fn insert_metric(&self, sample: &MetricSample) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
@@ -1420,6 +1532,18 @@ fn map_backup(row: &rusqlite::Row<'_>) -> rusqlite::Result<BackupView> {
         size_bytes: row.get::<_, i64>(3)? as u64,
         path: row.get(4)?,
         status: row.get(5)?,
+    })
+}
+
+fn map_cron(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJobView> {
+    Ok(CronJobView {
+        id: row.get(0)?,
+        username: row.get(1)?,
+        schedule: row.get(2)?,
+        command: row.get(3)?,
+        enabled: row.get::<_, i64>(4)? != 0,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
     })
 }
 

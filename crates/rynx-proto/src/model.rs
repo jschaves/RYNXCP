@@ -151,6 +151,12 @@ pub enum Request {
         id: String,
     },
 
+    CronList,
+    CronUpsert(CronSpec),
+    CronDelete {
+        id: String,
+    },
+
     DnsZone {
         domain: String,
     },
@@ -284,6 +290,12 @@ pub enum Response {
     },
     Backups {
         backups: Vec<BackupView>,
+    },
+    CronJob {
+        job: CronJobView,
+    },
+    CronJobs {
+        jobs: Vec<CronJobView>,
     },
     DnsZone {
         zone: DnsZoneView,
@@ -646,6 +658,26 @@ pub struct BackupView {
     pub size_bytes: u64,
     pub path: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CronSpec {
+    pub id: Option<String>,
+    pub username: String,
+    pub schedule: String,
+    pub command: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CronJobView {
+    pub id: String,
+    pub username: String,
+    pub schedule: String,
+    pub command: String,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

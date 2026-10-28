@@ -52,6 +52,7 @@ const NAV_ITEMS = [
   { id: 'mail', label: 'Correo', group: 'Operación' },
   { id: 'ssl', label: 'Certificados', group: 'Operación' },
   { id: 'backups', label: 'Backups', group: 'Operación' },
+  { id: 'cron', label: 'Cron', group: 'Operación' },
   { id: 'monitor', label: 'Monitor', group: 'Operación' },
   { id: 'users', label: 'Usuarios', group: 'Administración', admin: true },
   { id: 'packages', label: 'Paquetes', group: 'Administración', admin: true },
@@ -76,6 +77,7 @@ const NAV_ICON_PATHS = {
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   ssl: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   backups: '<path d="M12 3v12"/><path d="m8 11 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+  cron: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   monitor: '<path d="M3 12h4l2-6 3 12 2-6h7"/>',
   users: '<circle cx="9" cy="8" r="3"/><path d="M2 20a7 7 0 0 1 14 0"/><circle cx="17" cy="9" r="2"/><path d="M16 14a5 5 0 0 1 6 4"/>',
   packages: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
@@ -97,6 +99,7 @@ const TITLES = {
   ftp: ['FTP', 'Usuarios virtuales Pure-FTPd con chroot al home de la cuenta'],
   dns: ['DNS', 'Zonas autoritativas con SPF, DKIM, DMARC, MX y CAA'],
   backups: ['Backups', 'Copias de home, vhosts, pools y unidades con retención'],
+  cron: ['Cron', 'Tareas programadas que se ejecutan con el usuario de la cuenta'],
   monitor: ['Monitor', 'Series históricas y estado de cada servicio'],
   security: ['Seguridad', 'Intentos de acceso, bloqueos y cadena de auditoría'],
   firewall: ['Cortafuegos', 'Reglas nftables, IPs baneadas y listas blancas'],
@@ -149,6 +152,42 @@ function table(headers, rows, emptyText = 'Sin registros todavía.') {
   const head = headers.map((h) => `<th>${esc(h)}</th>`).join('');
   const body = rows.map((r) => `<tr>${r.join('')}</tr>`).join('');
   return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+const PAGE_SIZE = 20;
+
+function paginateTables(root = document) {
+  root.querySelectorAll('.table-wrap').forEach((wrap) => {
+    const rows = Array.from(wrap.querySelectorAll('tbody tr'));
+    let pager = wrap.nextElementSibling;
+    if (!rows.length || rows.length <= PAGE_SIZE) {
+      rows.forEach((row) => { row.style.display = ''; });
+      if (pager && pager.classList.contains('table-pager')) pager.remove();
+      delete wrap.dataset.page;
+      return;
+    }
+    const pages = Math.ceil(rows.length / PAGE_SIZE);
+    let page = Number(wrap.dataset.page) || 1;
+    page = Math.min(Math.max(page, 1), pages);
+    wrap.dataset.page = String(page);
+    rows.forEach((row, index) => {
+      row.style.display = index >= (page - 1) * PAGE_SIZE && index < page * PAGE_SIZE ? '' : 'none';
+    });
+    if (!pager || !pager.classList.contains('table-pager')) {
+      pager = document.createElement('div');
+      pager.className = 'table-pager';
+      wrap.after(pager);
+    }
+    pager.innerHTML = `<button type="button" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>‹</button>` +
+      `<span>${page} / ${pages}</span>` +
+      `<button type="button" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>›</button>`;
+    pager.querySelectorAll('button[data-page]').forEach((button) => {
+      button.addEventListener('click', () => {
+        wrap.dataset.page = button.dataset.page;
+        paginateTables(root);
+      });
+    });
+  });
 }
 
 function sectionHead(title, actionHtml = '') {
@@ -366,6 +405,7 @@ const SCOPED_NAV = new Set([
   'mail',
   'ssl',
   'backups',
+  'cron',
 ]);
 
 function buildNav() {
@@ -410,6 +450,7 @@ const renderers = {
   mail: renderMail,
   dns: renderDns,
   backups: renderBackups,
+  cron: renderCron,
   monitor: renderMonitor,
   security: renderSecurity,
   firewall: renderFirewall,
@@ -440,6 +481,7 @@ async function navigate(id) {
   try {
     await renderers[id]();
     translateUi(document.body);
+    paginateTables();
     updateCertAlert();
   } catch (err) {
     if (token !== S.navToken) return;
@@ -466,6 +508,7 @@ const LIST_ENDPOINTS = {
   databases: ['/api/v1/databases', 'databases'],
   ftp: ['/api/v1/ftp', 'accounts'],
   backups: ['/api/v1/backups', 'backups'],
+  cron: ['/api/v1/cron', 'jobs'],
   dns: ['/api/v1/dns', 'zones'],
   programs: ['/api/v1/system/programs', 'programs'],
   updates: ['/api/v1/system/updates', 'updates'],
@@ -529,6 +572,7 @@ function openModal(options) {
     </div>`;
 
   translateUi(root);
+  paginateTables(root);
   const form = $('#modal-form');
   const close = () => { root.innerHTML = ''; };
 
@@ -2726,6 +2770,16 @@ async function handleAction(action, id) {
       toast(result.message || 'Backup restaurado');
       return refresh();
     }
+    case 'cron-new':
+      return openCronModal();
+    case 'cron-toggle':
+      return toggleCron(id);
+    case 'cron-delete': {
+      if (!confirm('¿Eliminar esta tarea cron?')) return;
+      await api(`/api/v1/cron/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      toast('Tarea cron eliminada');
+      return refresh();
+    }
     case 'firewall-rule-new':
       return openFirewallRuleModal();
     case 'firewall-rule-delete': {
@@ -2959,6 +3013,7 @@ async function renderBackups() {
     td(badge(backup.status, backup.status === 'simulated' ? 'warn' : 'ok')),
     td(`<span class="mono small">${esc(backup.path)}</span>`),
     td([
+      writable ? `<a class="btn tiny ghost" href="/api/v1/backups/${encodeURIComponent(backup.id)}/download">Descargar</a>` : '',
       isAdmin() && !scoped ? btn('Restaurar', 'backup-restore', backup.id, 'tiny ghost') : '',
       writable ? btn('Eliminar', 'backup-delete', backup.id, 'tiny danger') : '',
     ].join(''), 'actions'),
@@ -2966,6 +3021,72 @@ async function renderBackups() {
   $('#view').innerHTML =
     sectionHead('Copias de seguridad', writable ? '<button class="btn primary" data-action="backup-new">Crear backup</button>' : '') +
     table(['Cuenta', 'Fecha', 'Tamaño', 'Estado', 'Ruta', ''], rows, 'Aún no hay copias. Se conservan las últimas 7 por cuenta.');
+}
+
+async function renderCron() {
+  await Promise.all([loadList('cron'), loadList('accounts')]);
+  const writable = canWrite();
+  const rows = (S.data.cron || []).map((job) => [
+    td(`<div class="cell-title">${esc(job.username)}</div><div class="cell-sub mono">${esc(job.schedule)}</div>`),
+    td(`<span class="mono small">${esc(job.command)}</span>`),
+    td(job.enabled ? badge('activo', 'ok') : badge('desactivado', 'warn')),
+    td(esc(fmtDate(job.created_at))),
+    td(writable ? [
+      btn(job.enabled ? 'Desactivar' : 'Activar', 'cron-toggle', job.id, 'tiny ghost'),
+      btn('Eliminar', 'cron-delete', job.id, 'tiny danger'),
+    ].join('') : '', 'actions'),
+  ]);
+  $('#view').innerHTML =
+    sectionHead('Cron', writable ? '<button class="btn primary" data-action="cron-new">Nueva tarea</button>' : '') +
+    table(['Cuenta', 'Comando', 'Estado', 'Creada', ''], rows, 'No hay tareas programadas. Se ejecutan con el usuario de la cuenta.');
+}
+
+function openCronModal() {
+  const accounts = accountOptions(false);
+  if (!accounts.length) {
+    toast('Primero crea una cuenta', 'error');
+    return;
+  }
+  openModal({
+    title: 'Nueva tarea cron',
+    submitLabel: 'Crear tarea',
+    html: `<div class="form-grid">
+      ${fSelect('username', 'Cuenta', accounts, { required: true })}
+      ${fInput('schedule', 'Programación', { required: true, value: '*/5 * * * *', placeholder: '*/5 * * * *', help: 'Cinco campos: minuto hora día mes día-semana.' })}
+      <div class="full">${field('command', 'Comando', '<textarea name="command" rows="3" required placeholder="php /home/cuenta/public_html/artisan schedule:run"></textarea>', 'Se ejecuta con el shell y el usuario de la cuenta; no puede contener % ni saltos de línea.', true)}</div>
+      <div class="full">${fCheck('enabled', 'Activa', true)}</div>
+    </div>`,
+    onSubmit: async (form) => {
+      await api('/api/v1/cron', {
+        method: 'POST',
+        body: {
+          username: val(form, 'username'),
+          schedule: val(form, 'schedule'),
+          command: val(form, 'command'),
+          enabled: bool(form, 'enabled'),
+        },
+      });
+      toast('Tarea cron creada');
+      await refresh();
+    },
+  });
+}
+
+async function toggleCron(id) {
+  const job = (S.data.cron || []).find((item) => item.id === id);
+  if (!job) throw new Error('Tarea no encontrada');
+  await api('/api/v1/cron', {
+    method: 'POST',
+    body: {
+      id: job.id,
+      username: job.username,
+      schedule: job.schedule,
+      command: job.command,
+      enabled: !job.enabled,
+    },
+  });
+  toast(job.enabled ? 'Tarea desactivada' : 'Tarea activada');
+  await refresh();
 }
 
 function openBackupModal() {

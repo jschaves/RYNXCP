@@ -13,6 +13,7 @@ pub mod audit_route;
 pub mod backups;
 pub mod certs;
 pub mod console;
+pub mod cron;
 pub mod databases;
 pub mod dns;
 pub mod files;
@@ -105,6 +106,9 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/backups", get(backups::list).post(backups::create))
         .route("/api/v1/backups/{id}", delete(backups::delete))
         .route("/api/v1/backups/{id}/restore", post(backups::restore))
+        .route("/api/v1/backups/{id}/download", get(backups::download))
+        .route("/api/v1/cron", get(cron::list).post(cron::upsert))
+        .route("/api/v1/cron/{id}", delete(cron::delete))
         .route("/api/v1/dns", get(dns::list))
         .route("/api/v1/dns/{domain}", get(dns::zone))
         .route("/api/v1/dns/{domain}/records", post(dns::upsert_record))

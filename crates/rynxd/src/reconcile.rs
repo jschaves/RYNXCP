@@ -8,18 +8,20 @@ use rynx_core::audit::{self, AuditLog};
 use rynx_core::crypto::{now_rfc3339, now_unix, random_hex};
 use rynx_core::templates::{self, NginxContext};
 use rynx_core::validate::{
-    self, validate_account_spec, validate_app_spec, validate_ban_ip, validate_database_name,
-    validate_dns_record_spec, validate_domain, validate_email, validate_firewall_rule_spec,
-    validate_ftp_spec, validate_ip_or_cidr, validate_mail_account_spec, validate_mail_domain_spec,
-    validate_php_pool_spec, validate_website_spec,
+    self, validate_account_spec, validate_app_spec, validate_ban_ip, validate_cron_spec,
+    validate_database_name, validate_dns_record_spec, validate_domain, validate_email,
+    validate_firewall_rule_spec, validate_ftp_spec, validate_ip_or_cidr,
+    validate_mail_account_spec, validate_mail_domain_spec, validate_php_pool_spec,
+    validate_website_spec,
 };
 use rynx_core::DaemonConfig;
 use rynx_proto::{
     AccountSpec, AccountView, AppSpec, AppView, AuditEntry, BackupView, CertView,
-    CertificateStatus, ConsoleAction, DatabaseView, DnsRecordSpec, DnsRecordView, DnsZoneView,
-    FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView, MailAccountSpec,
-    MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec, PhpPoolView, Request, Response,
-    Runtime, ServiceStat, SystemInfo, TlsMode, WebsiteSpec, WebsiteView, WireError,
+    CertificateStatus, ConsoleAction, CronJobView, CronSpec, DatabaseView, DnsRecordSpec,
+    DnsRecordView, DnsZoneView, FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView,
+    MailAccountSpec, MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec, PhpPoolView,
+    Request, Response, Runtime, ServiceStat, SystemInfo, TlsMode, WebsiteSpec, WebsiteView,
+    WireError,
 };
 
 use crate::executor::{ExecError, Executor, MailAccountConfig};
@@ -168,6 +170,13 @@ impl Reconciler {
             }
             Request::BackupDelete { id } => self.backup_delete(&id, actor).await,
             Request::BackupRestore { id } => self.backup_restore(&id, actor).await,
+
+            Request::CronList => {
+                let jobs = self.state.list_cron().map_err(internal)?;
+                Ok(Response::CronJobs { jobs })
+            }
+            Request::CronUpsert(spec) => self.cron_upsert(spec, actor).await,
+            Request::CronDelete { id } => self.cron_delete(&id, actor).await,
 
             Request::DnsZone { domain } => self.dns_zone(&domain).await,
             Request::DnsZoneList => self.dns_zone_list().await,
@@ -350,6 +359,7 @@ impl Reconciler {
                 let _ = self.exec.remove_ftp_user(&ftp.login).await;
             }
         }
+        let _ = self.exec.apply_cron(username, "").await;
     }
 
     async fn resume_account(&self, username: &str) {
@@ -393,6 +403,7 @@ impl Reconciler {
                     .await;
             }
         }
+        let _ = self.cron_render(username).await;
     }
 
     async fn account_delete(
@@ -471,6 +482,8 @@ impl Reconciler {
             let _ = self.state.delete_backup(&backup.id);
         }
         let _ = self.exec.remove_backup_dir(username).await;
+        let _ = self.exec.apply_cron(username, "").await;
+        let _ = self.state.delete_cron_for(username);
 
         for app in self
             .state
@@ -1657,6 +1670,10 @@ impl Reconciler {
             .create_backup(&paths, &dest)
             .await
             .map_err(exec_error)?;
+        self.exec
+            .repair_backup_permissions(&dest)
+            .await
+            .map_err(exec_error)?;
         let view = BackupView {
             id: id.clone(),
             username: username.to_string(),
@@ -1755,6 +1772,88 @@ impl Reconciler {
         )?;
         Ok(Response::Ack {
             message: format!("backup restored for '{}'", backup.username),
+        })
+    }
+
+    fn cron_content(&self, username: &str) -> Result<String, WireError> {
+        let jobs = self.state.cron_for(username).map_err(internal)?;
+        let active: Vec<&CronJobView> = jobs.iter().filter(|job| job.enabled).collect();
+        if active.is_empty() {
+            return Ok(String::new());
+        }
+        let mut content = String::from(
+            "# managed-by: RYNXCP\n\
+             SHELL=/bin/sh\n\
+             PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\
+             MAILTO=\"\"\n",
+        );
+        for job in active {
+            content.push_str(&format!(
+                "{} {} {}\n",
+                job.schedule, job.username, job.command
+            ));
+        }
+        Ok(content)
+    }
+
+    async fn cron_render(&self, username: &str) -> Result<(), WireError> {
+        let content = self.cron_content(username)?;
+        self.exec
+            .apply_cron(username, &content)
+            .await
+            .map_err(exec_error)
+    }
+
+    async fn cron_upsert(&self, spec: CronSpec, actor: &str) -> Result<Response, WireError> {
+        validate_cron_spec(&spec).map_err(invalid)?;
+        let account = self.require_account(&spec.username)?;
+        if !account.spec.enabled {
+            return Err(WireError::conflict(format!(
+                "account '{}' is suspended",
+                spec.username
+            )));
+        }
+        if let Some(id) = &spec.id {
+            let existing = self
+                .state
+                .get_cron(id)
+                .map_err(internal)?
+                .ok_or_else(|| WireError::not_found("cron job not found"))?;
+            if existing.username != spec.username {
+                return Err(WireError::conflict("cron job belongs to another account"));
+            }
+        } else if self.state.cron_count(&spec.username).map_err(internal)? >= 50 {
+            return Err(WireError::conflict(
+                "the account reached the limit of 50 cron jobs",
+            ));
+        }
+        let job = self.state.upsert_cron(&spec).map_err(internal)?;
+        self.cron_render(&spec.username).await?;
+        self.log(
+            actor,
+            "cron.upsert",
+            &format!("{}/{}", spec.username, job.id),
+            &format!("schedule={} enabled={}", job.schedule, job.enabled),
+        )?;
+        Ok(Response::CronJob { job })
+    }
+
+    async fn cron_delete(&self, id: &str, actor: &str) -> Result<Response, WireError> {
+        let job = self
+            .state
+            .get_cron(id)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found("cron job not found"))?;
+        self.state.delete_cron(id).map_err(internal)?;
+        self.cron_render(&job.username).await?;
+        self.log(
+            actor,
+            "cron.delete",
+            &format!("{}/{}", job.username, job.id),
+            "",
+        )?;
+        Ok(Response::Ack {
+            message: "cron job deleted".into(),
         })
     }
 
@@ -2880,6 +2979,18 @@ impl Reconciler {
                     tracing::warn!(account = %account.spec.username, error = %err, "reconcile account failed");
                 }
             }
+            if account.spec.enabled {
+                let _ = self.cron_render(&account.spec.username).await;
+            } else {
+                let _ = self.exec.apply_cron(&account.spec.username, "").await;
+            }
+        }
+
+        for backup in self.state.list_backups().map_err(internal)? {
+            let _ = self
+                .exec
+                .repair_backup_permissions(Path::new(&backup.path))
+                .await;
         }
 
         for pool in self.state.list_php_pools().map_err(internal)? {

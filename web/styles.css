@@ -350,6 +350,29 @@ body {
 
 table { width: 100%; border-collapse: collapse; min-width: 640px; }
 
+.table-pager {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.table-pager button {
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 26px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.table-pager button:disabled { opacity: 0.35; cursor: default; }
+
 th, td {
   text-align: left;
   padding: 11px 14px;

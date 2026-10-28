@@ -460,7 +460,7 @@ impl Executor for RealExecutor {
         let account_home = open_account_home(&self.cfg, &spec.username, true)?;
         let home_s = home.display().to_string();
         if let Ok(meta) = std::fs::symlink_metadata(&home) {
-            if meta.uid() != account_uid || meta.gid() != gid {
+            if meta.uid() != account_uid {
                 // Repair homes created for a stale UID (for example after a
                 // pre-existing Linux user was adopted by the panel). Do not
                 // follow symlinks outside the account home.
@@ -472,9 +472,13 @@ impl Executor for RealExecutor {
             }
         }
         // Nginx (www-data) must traverse the home to reach public_html, but it
-        // must not be able to list the home. Other internal directories keep
-        // their own restrictive modes.
-        set_owner_mode(account_home.as_raw_fd(), account_uid, gid, 0o711)?;
+        // must not list it. The home is not readable by other accounts.
+        let web_gid = User::from_name("www-data")
+            .ok()
+            .flatten()
+            .map(|user| user.gid.as_raw());
+        let (home_gid, home_mode) = web_gid.map_or((gid, 0o711), |web| (web, 0o710));
+        set_owner_mode(account_home.as_raw_fd(), account_uid, home_gid, home_mode)?;
         for (relative, mode) in [
             ("public_html", 0o755),
             ("logs", 0o750),
@@ -482,6 +486,10 @@ impl Executor for RealExecutor {
             ("tmp", 0o700),
         ] {
             ensure_dir_components(&account_home, Path::new(relative), mode, account_uid, gid)?;
+        }
+        if let Some(web_gid) = web_gid {
+            let public = account_home.open_dir("public_html")?;
+            set_owner_mode(public.as_raw_fd(), account_uid, web_gid, 0o2750)?;
         }
 
         // PHP sessions are system-managed. Keep them outside the account home
@@ -543,7 +551,15 @@ impl Executor for RealExecutor {
             .map_err(|_| ExecError::InvalidInput("docroot escapes the account home".into()))?;
         let account_home = open_account_home(&self.cfg, username, false)?;
         let gid = self.gid_for(username)?;
-        ensure_dir_components(&account_home, relative, 0o755, uid, gid)
+        ensure_dir_components(&account_home, relative, 0o755, uid, gid)?;
+        if let Some(web) = User::from_name("www-data").ok().flatten() {
+            for docroot in [Path::new("public_html"), relative] {
+                if let Ok(dir) = account_home.open_dir(docroot) {
+                    set_owner_mode(dir.as_raw_fd(), uid, web.gid.as_raw(), 0o2750)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn file_list(
@@ -1229,6 +1245,25 @@ impl Executor for RealExecutor {
         Ok(())
     }
 
+    async fn repair_backup_permissions(&self, path: &Path) -> ExecResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let Some(user) = User::from_name("rynx").ok().flatten() else {
+            return Ok(());
+        };
+        let _ =
+            std::fs::set_permissions(&self.cfg.backup_dir, std::fs::Permissions::from_mode(0o755));
+        if let Some(parent) = path.parent() {
+            let _ = chown(parent, Some(Uid::from_raw(0)), Some(user.gid));
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o750));
+        }
+        if path.exists() {
+            let _ = chown(path, Some(Uid::from_raw(0)), Some(user.gid));
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o640))?;
+        }
+        Ok(())
+    }
+
     async fn delete_backup_file(&self, path: &Path) -> ExecResult<()> {
         let root = std::fs::canonicalize(&self.cfg.backup_dir)
             .unwrap_or_else(|_| self.cfg.backup_dir.clone());
@@ -1249,6 +1284,25 @@ impl Executor for RealExecutor {
         if dir.starts_with(&self.cfg.backup_dir) && dir.exists() {
             let _ = std::fs::remove_dir_all(dir);
         }
+        Ok(())
+    }
+
+    async fn apply_cron(&self, username: &str, content: &str) -> ExecResult<()> {
+        let dir = Path::new("/etc/cron.d");
+        std::fs::create_dir_all(dir)?;
+        let path = dir.join(format!("rynxcp-{username}"));
+        if content.trim().is_empty() {
+            if !path.exists() {
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&path);
+        } else {
+            if std::fs::read_to_string(&path).ok().as_deref() == Some(content) {
+                return Ok(());
+            }
+            write_managed(dir, &path, content, 0o644, Some((0, 0)))?;
+        }
+        let _ = self.reload_unit("cron").await;
         Ok(())
     }
 

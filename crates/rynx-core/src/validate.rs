@@ -9,7 +9,8 @@ use regex::Regex;
 
 use crate::{CoreError, CoreResult};
 use rynx_proto::{
-    AccountSpec, AppSpec, MailAccountSpec, MailDomainSpec, PhpPoolSpec, Runtime, WebsiteSpec,
+    AccountSpec, AppSpec, CronSpec, MailAccountSpec, MailDomainSpec, PhpPoolSpec, Runtime,
+    WebsiteSpec,
 };
 
 static USERNAME_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z][a-z0-9_]{2,23}$").unwrap());
@@ -570,6 +571,57 @@ pub fn validate_database_name(value: &str) -> CoreResult<()> {
         return Err(invalid(
             "database name must be 1-32 chars, start with a letter or digit and contain only a-z, 0-9 or _",
         ));
+    }
+    Ok(())
+}
+
+/// Validate a five-field cron schedule using numeric/operator characters.
+pub fn validate_cron_schedule(value: &str) -> CoreResult<()> {
+    let fields: Vec<&str> = value.split_whitespace().collect();
+    if fields.len() != 5 || value.len() > 128 {
+        return Err(invalid(
+            "cron schedule must contain exactly five fields (minute hour day month weekday)",
+        ));
+    }
+    for field in fields {
+        if !field
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '*' | '/' | ',' | '-'))
+        {
+            return Err(invalid(
+                "cron schedule fields only accept digits and * / , -",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate a cron command. Commands run as the account's own Unix user.
+pub fn validate_cron_command(value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() || value.len() > 1024 {
+        return Err(invalid(
+            "cron command must be between 1 and 1024 characters",
+        ));
+    }
+    if value.chars().any(|c| matches!(c, '\n' | '\r' | '\0' | '%')) {
+        return Err(invalid(
+            "cron command cannot contain newlines, NUL or the % character",
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_cron_spec(spec: &CronSpec) -> CoreResult<()> {
+    validate_username(&spec.username)?;
+    validate_cron_schedule(&spec.schedule)?;
+    validate_cron_command(&spec.command)?;
+    if let Some(id) = &spec.id {
+        if id.len() < 8
+            || id.len() > 64
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            return Err(invalid("cron job id is invalid"));
+        }
     }
     Ok(())
 }

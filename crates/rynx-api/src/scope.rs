@@ -47,6 +47,10 @@ fn filter(response: DaemonResponse, account: &str, domains: &HashSet<String>) ->
             backups.retain(|item| item.username == account);
             DaemonResponse::Backups { backups }
         }
+        DaemonResponse::CronJobs { mut jobs } => {
+            jobs.retain(|item| item.username == account);
+            DaemonResponse::CronJobs { jobs }
+        }
         DaemonResponse::Databases { mut databases } => {
             databases.retain(|item| domains.contains(&item.domain));
             DaemonResponse::Databases { databases }

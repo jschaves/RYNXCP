@@ -589,6 +589,22 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn repair_backup_permissions(&self, _path: &Path) -> ExecResult<()> {
+        Ok(())
+    }
+
+    async fn apply_cron(&self, username: &str, content: &str) -> ExecResult<()> {
+        let dir = self.cfg.state_dir.join("sim-cron");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(username);
+        if content.trim().is_empty() {
+            let _ = std::fs::remove_file(path);
+        } else {
+            write_text(&path, content)?;
+        }
+        Ok(())
+    }
+
     async fn delete_backup_file(&self, path: &Path) -> ExecResult<()> {
         if path.exists() {
             std::fs::remove_file(path)?;

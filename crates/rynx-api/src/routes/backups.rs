@@ -1,6 +1,10 @@
+use axum::body::Body;
 use axum::extract::{Path, State};
+use axum::http::{header, HeaderMap, HeaderValue};
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use serde::Deserialize;
+use tokio_util::io::ReaderStream;
 
 use rynx_proto::{Request, Response as DaemonResponse};
 
@@ -58,6 +62,41 @@ pub async fn delete(
         .call(Request::BackupDelete { id }, &auth.user.username)
         .await?;
     Ok(Json(response))
+}
+
+pub async fn download(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    auth.require_write()?;
+    scope::ensure_backup(&state, &auth, &id).await?;
+    let response = state
+        .daemon
+        .call(Request::BackupList, &auth.user.username)
+        .await?;
+    let DaemonResponse::Backups { backups } = response else {
+        return Err(ApiError::internal("unexpected daemon response"));
+    };
+    let backup = backups
+        .into_iter()
+        .find(|backup| backup.id == id)
+        .ok_or_else(|| ApiError::NotFound("backup not found".into()))?;
+    let file = tokio::fs::File::open(&backup.path)
+        .await
+        .map_err(ApiError::internal)?;
+    let filename = format!("rynxcp-{}-{}.tar.gz", backup.username, backup.id);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/gzip"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .map_err(ApiError::internal)?,
+    );
+    Ok((headers, Body::from_stream(ReaderStream::new(file))).into_response())
 }
 
 pub async fn restore(

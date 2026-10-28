@@ -75,6 +75,7 @@ getent passwd rynxftp >/dev/null || useradd --system --no-create-home --shell /u
 if [[ -d /etc/pure-ftpd/conf ]]; then
   echo yes > /etc/pure-ftpd/conf/ChrootEveryone
   echo yes > /etc/pure-ftpd/conf/NoAnonymous
+  echo yes > /etc/pure-ftpd/conf/NoChmod
   echo /etc/pure-ftpd/pureftpd.pdb > /etc/pure-ftpd/conf/PureDB
   echo "30000 50000" > /etc/pure-ftpd/conf/PassivePortRange
   install -d -m 0755 /etc/pure-ftpd/auth

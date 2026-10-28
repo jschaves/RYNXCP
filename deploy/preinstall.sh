@@ -342,7 +342,7 @@ apt-get install -y --no-install-recommends \
   php8.5-fpm php8.5-cli php8.5-common php8.5-mysql php8.5-curl php8.5-mbstring \
   php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath \
   mariadb-server bind9 bind9-utils bind9-dnsutils \
-  pure-ftpd opendkim opendkim-tools \
+  pure-ftpd opendkim opendkim-tools cron \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
 
 # .NET is best-effort: package availability differs between releases.
@@ -412,6 +412,7 @@ systemctl enable --now named 2>/dev/null || \
   systemctl enable --now bind9 2>/dev/null || \
   warn "BIND9 could not be enabled automatically"
 systemctl enable --now pure-ftpd
+systemctl enable --now cron >/dev/null 2>&1 || warn "cron could not be enabled"
 systemctl enable --now fail2ban
 systemctl enable --now nftables >/dev/null 2>&1 || true
 
