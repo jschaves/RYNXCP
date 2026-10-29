@@ -2885,6 +2885,7 @@ async function handleAction(action, id) {
     case 'firewall-block-new':
       return openFirewallBlockModal();
     case 'firewall-unblock': {
+      if (!confirm(TF('¿Eliminar el baneo de {ip}?', { ip: id }))) return;
       await api(`/api/v1/firewall/block/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('IP desbloqueada');
       return refresh();

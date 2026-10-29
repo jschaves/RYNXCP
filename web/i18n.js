@@ -695,6 +695,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "The package limit for websites and apps has been reached ({limit}).",
     "Redirigir HTTP a HTTPS": "Redirect HTTP to HTTPS",
     "Sitio actualizado": "Website updated",
+    "¿Eliminar el baneo de {ip}?": "Remove the ban for {ip}?",
   };
 
   const PT = {
@@ -1309,6 +1310,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "O limite do pacote para sites e apps foi atingido ({limit}).",
     "Redirigir HTTP a HTTPS": "Redirecionar HTTP para HTTPS",
     "Sitio actualizado": "Site atualizado",
+    "¿Eliminar el baneo de {ip}?": "Remover o banimento de {ip}?",
   };
 
   const FR = {
@@ -1924,6 +1926,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "La limite du forfait pour les sites et applications est atteinte ({limit}).",
     "Redirigir HTTP a HTTPS": "Rediriger HTTP vers HTTPS",
     "Sitio actualizado": "Site mis à jour",
+    "¿Eliminar el baneo de {ip}?": "Supprimer le bannissement de {ip} ?",
   };
 
   const AR = {
@@ -2541,6 +2544,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "تم الوصول إلى حد الحزمة للمواقع والتطبيقات ({limit}).",
     "Redirigir HTTP a HTTPS": "إعادة توجيه HTTP إلى HTTPS",
     "Sitio actualizado": "تم تحديث الموقع",
+    "¿Eliminar el baneo de {ip}?": "إزالة الحظر عن {ip}؟",
   };
 
   const RU = {
@@ -3157,6 +3161,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "Достигнут лимит пакета для сайтов и приложений ({limit}).",
     "Redirigir HTTP a HTTPS": "Перенаправлять HTTP на HTTPS",
     "Sitio actualizado": "Сайт обновлён",
+    "¿Eliminar el baneo de {ip}?": "Снять блокировку с {ip}?",
   };
 
   const ZH = {
@@ -3770,6 +3775,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "已达到套餐的网站和应用数量上限（{limit}）。",
     "Redirigir HTTP a HTTPS": "将 HTTP 重定向到 HTTPS",
     "Sitio actualizado": "网站已更新",
+    "¿Eliminar el baneo de {ip}?": "解除对 {ip} 的封禁？",
   };
 
   const JA = {
@@ -4386,6 +4392,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "パッケージのウェブサイトとアプリの上限に達しました（{limit}）。",
     "Redirigir HTTP a HTTPS": "HTTP を HTTPS にリダイレクト",
     "Sitio actualizado": "サイトを更新しました",
+    "¿Eliminar el baneo de {ip}?": "{ip} の禁止を解除しますか？",
   };
 
   const IT = {
@@ -4996,6 +5003,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "È stato raggiunto il limite del pacchetto per siti e app ({limit}).",
     "Redirigir HTTP a HTTPS": "Reindirizza HTTP a HTTPS",
     "Sitio actualizado": "Sito aggiornato",
+    "¿Eliminar el baneo de {ip}?": "Rimuovere il blocco per {ip}?",
   };
 
   const DE = {
@@ -5606,6 +5614,7 @@
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "Das Paketlimit für Websites und Apps wurde erreicht ({limit}).",
     "Redirigir HTTP a HTTPS": "HTTP auf HTTPS umleiten",
     "Sitio actualizado": "Website aktualisiert",
+    "¿Eliminar el baneo de {ip}?": "Sperre für {ip} aufheben?",
   };
 
   const DICT = {
