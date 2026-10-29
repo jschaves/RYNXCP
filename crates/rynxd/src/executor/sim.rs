@@ -899,6 +899,14 @@ impl Executor for SimExecutor {
                 "installed",
                 "SMTP antivirus",
             ),
+            ("spamassassin", "4.0.1", "mail", "installed", "spam scoring"),
+            (
+                "spamass-milter",
+                "0.4.0",
+                "mail",
+                "installed",
+                "SMTP antispam",
+            ),
             ("rynxcp", "0.1.0", "panel", "installed", "control plane"),
         ];
         Ok(rows

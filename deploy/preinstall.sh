@@ -344,6 +344,7 @@ apt-get install -y --no-install-recommends \
   mariadb-server bind9 bind9-utils bind9-dnsutils \
   pure-ftpd opendkim opendkim-tools cron \
   clamav clamav-daemon clamav-freshclam clamav-milter \
+  spamassassin spamd spamc spamass-milter \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
 
 # .NET is best-effort: package availability differs between releases.
@@ -500,6 +501,46 @@ if command -v postfix >/dev/null 2>&1 && [[ -f /etc/clamav/clamav-milter.conf ]]
   systemctl restart clamav-milter >/dev/null 2>&1 || warn "clamav-milter could not be started"
 fi
 systemctl enable --now rynxcp-antivirus.timer >/dev/null 2>&1 || warn "the antivirus timer could not be enabled"
+
+log "Configuring SpamAssassin antispam"
+spam_defaults_seen=0
+for spam_defaults in /etc/default/spamd /etc/default/spamassassin; do
+  [[ -f "$spam_defaults" ]] || continue
+  spam_defaults_seen=1
+  if grep -q '^ENABLED=' "$spam_defaults"; then
+    sed -i 's/^ENABLED=.*/ENABLED=1/' "$spam_defaults"
+  else
+    printf '\nENABLED=1\n' >>"$spam_defaults"
+  fi
+done
+if (( spam_defaults_seen == 0 )); then
+  printf 'ENABLED=1\n' >/etc/default/spamd
+fi
+cat >/etc/default/spamass-milter <<'EOF'
+# managed-by: RYNXCP
+ENABLED=1
+SOCKET="/var/spool/postfix/spamass/spamass.sock"
+SOCKETOWNER="postfix:postfix"
+SOCKETMODE="0660"
+OPTIONS="-u spamass-milter -r 15 -m"
+EOF
+chmod 0644 /etc/default/spamass-milter
+spamd_unit=""
+if systemctl cat spamd.service >/dev/null 2>&1; then
+  spamd_unit="spamd"
+elif systemctl cat spamassassin.service >/dev/null 2>&1; then
+  spamd_unit="spamassassin"
+fi
+if [[ -n "$spamd_unit" ]]; then
+  systemctl enable --now "$spamd_unit" >/dev/null 2>&1 || warn "$spamd_unit could not be enabled"
+  systemctl restart "$spamd_unit" >/dev/null 2>&1 || warn "$spamd_unit could not be started"
+else
+  warn "SpamAssassin daemon unit was not found"
+fi
+if command -v postfix >/dev/null 2>&1; then
+  systemctl enable spamass-milter >/dev/null 2>&1 || warn "spamass-milter could not be enabled"
+  systemctl restart spamass-milter >/dev/null 2>&1 || warn "spamass-milter could not be started"
+fi
 if [[ "${RYNX_SKIP_PHPMYADMIN:-0}" != "1" ]]; then
   log "Installing phpMyAdmin behind the panel login"
   bash "$ROOT_DIR/deploy/phpmyadmin-setup.sh"
@@ -856,9 +897,9 @@ RYNXCP is ready.
 
 Installed:
   Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
-  OpenDKIM, ClamAV (system + SMTP), fail2ban, nftables, unattended-upgrades,
-  Node.js, Python, Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot,
-  Roundcube and phpMyAdmin
+  OpenDKIM, ClamAV (system + SMTP), SpamAssassin antispam, fail2ban,
+  nftables, unattended-upgrades, Node.js, Python, Ruby, Java,
+  Go${DOTNET_NOTE:-}, Postfix, Dovecot, Roundcube and phpMyAdmin
 
 Timers:
   rynxcp-cert-renew.timer  daily Let's Encrypt renewal

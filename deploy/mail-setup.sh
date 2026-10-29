@@ -69,6 +69,7 @@ apt-get install -y --no-install-recommends \
   dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved \
   opendkim opendkim-tools \
   clamav clamav-daemon clamav-freshclam clamav-milter \
+  spamassassin spamd spamc spamass-milter \
   sqlite3 curl ca-certificates openssl \
   php8.5-sqlite3
 
@@ -141,7 +142,7 @@ postconf -e "smtpd_sender_login_maps = hash:${POSTFIX_MAIL_DIR}/senders"
 postconf -e "smtpd_sender_restrictions = reject_authenticated_sender_login_mismatch, permit_mynetworks, permit_sasl_authenticated, reject_unknown_sender_domain"
 postconf -e "smtpd_helo_required = yes"
 postconf -e "disable_vrfy_command = yes"
-postconf -e "smtpd_milters = inet:127.0.0.1:7357 inet:127.0.0.1:8891"
+postconf -e "smtpd_milters = unix:/var/spool/postfix/spamass/spamass.sock inet:127.0.0.1:7357 inet:127.0.0.1:8891"
 postconf -e "non_smtpd_milters = \$smtpd_milters"
 postconf -e "milter_default_action = accept"
 postconf -e "message_size_limit = 52428800"

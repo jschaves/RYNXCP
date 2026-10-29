@@ -2077,6 +2077,18 @@ impl Executor for RealExecutor {
             "SMTP antivirus",
         );
         push(
+            "spamassassin",
+            "mail",
+            probe("spamassassin", &["--version"]).await,
+            "spam scoring",
+        );
+        push(
+            "spamass-milter",
+            "mail",
+            probe("spamass-milter", &["--version"]).await,
+            "SMTP antispam",
+        );
+        push(
             "rynxcp",
             "panel",
             Some(format!("v{}", rynx_proto::DAEMON_VERSION)),

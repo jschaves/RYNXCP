@@ -10,6 +10,8 @@ pub fn service_unit_for_program(name: &str) -> Option<String> {
         "bind9" => Some("named".into()),
         "clamav" => Some("clamav-daemon".into()),
         "clamav-milter" => Some("clamav-milter".into()),
+        "spamassassin" => Some("spamd".into()),
+        "spamass-milter" => Some("spamass-milter".into()),
         _ => php_unit(name),
     }
 }

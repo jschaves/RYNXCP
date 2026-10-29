@@ -170,6 +170,8 @@ function programUnit(program) {
   if (name === 'bind9') return 'named';
   if (name === 'clamav') return 'clamav-daemon';
   if (name === 'clamav-milter') return 'clamav-milter';
+  if (name === 'spamassassin') return 'spamd';
+  if (name === 'spamass-milter') return 'spamass-milter';
   if (name.startsWith('php')) return name.replace('php-fpm ', 'php') + '-fpm';
   return '';
 }
