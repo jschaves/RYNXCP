@@ -8,6 +8,8 @@ pub fn service_unit_for_program(name: &str) -> Option<String> {
     match name {
         "nginx" | "mariadb" | "pure-ftpd" | "opendkim" | "fail2ban" => Some(name.to_string()),
         "bind9" => Some("named".into()),
+        "clamav" => Some("clamav-daemon".into()),
+        "clamav-milter" => Some("clamav-milter".into()),
         _ => php_unit(name),
     }
 }

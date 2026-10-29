@@ -2,7 +2,7 @@
 # RYNXCP one-shot pre-installer for Debian/Ubuntu.
 #
 # Installs the full service stack (Nginx, PHP 8.5 from the security-maintained
-# repository, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban, nftables,
+# repository, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, ClamAV, fail2ban, nftables,
 # Node.js, Python, Ruby, Java, Go and .NET when available), builds RYNXCP,
 # installs the panel, asks for the panel host, admin email and password, and
 # publishes the panel behind Nginx with optional Let's Encrypt TLS. It also
@@ -343,6 +343,7 @@ apt-get install -y --no-install-recommends \
   php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath \
   mariadb-server bind9 bind9-utils bind9-dnsutils \
   pure-ftpd opendkim opendkim-tools cron \
+  clamav clamav-daemon clamav-freshclam clamav-milter \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
 
 # .NET is best-effort: package availability differs between releases.
@@ -470,6 +471,35 @@ if [[ "${RYNX_SKIP_MAIL:-0}" != "1" ]]; then
   bash "$ROOT_DIR/deploy/mail-setup.sh"
   DKIM_SELECTOR="mail"
 fi
+
+# ---------------------------------------------------------------------------
+# Antivirus: system files and SMTP messages
+# ---------------------------------------------------------------------------
+log "Configuring ClamAV antivirus"
+[[ -d /var/vmail ]] || install -d -m 0750 /var/vmail
+systemctl enable --now clamav-freshclam >/dev/null 2>&1 || warn "clamav-freshclam could not be enabled"
+freshclam_ready=0
+for _ in {1..30}; do
+  if [[ -e /var/lib/clamav/main.cvd || -e /var/lib/clamav/main.cld ]]; then
+    freshclam_ready=1
+    break
+  fi
+  sleep 2
+done
+if (( freshclam_ready == 0 )); then
+  warn "ClamAV database is not ready yet; freshclam will retry in the background"
+fi
+systemctl enable clamav-daemon >/dev/null 2>&1 || warn "clamav-daemon could not be enabled"
+systemctl restart clamav-daemon >/dev/null 2>&1 || warn "clamav-daemon could not be started"
+for _ in {1..30}; do
+  [[ -S /var/run/clamav/clamd.ctl ]] && break
+  sleep 1
+done
+if command -v postfix >/dev/null 2>&1 && [[ -f /etc/clamav/clamav-milter.conf ]]; then
+  systemctl enable clamav-milter >/dev/null 2>&1 || warn "clamav-milter could not be enabled"
+  systemctl restart clamav-milter >/dev/null 2>&1 || warn "clamav-milter could not be started"
+fi
+systemctl enable --now rynxcp-antivirus.timer >/dev/null 2>&1 || warn "the antivirus timer could not be enabled"
 if [[ "${RYNX_SKIP_PHPMYADMIN:-0}" != "1" ]]; then
   log "Installing phpMyAdmin behind the panel login"
   bash "$ROOT_DIR/deploy/phpmyadmin-setup.sh"
@@ -826,12 +856,14 @@ RYNXCP is ready.
 
 Installed:
   Nginx, PHP 8.5 (security-maintained repo), MariaDB, BIND9, Pure-FTPd,
-  OpenDKIM, fail2ban, nftables, unattended-upgrades, Node.js, Python,
-  Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot, Roundcube and phpMyAdmin
+  OpenDKIM, ClamAV (system + SMTP), fail2ban, nftables, unattended-upgrades,
+  Node.js, Python, Ruby, Java, Go${DOTNET_NOTE:-}, Postfix, Dovecot,
+  Roundcube and phpMyAdmin
 
 Timers:
   rynxcp-cert-renew.timer  daily Let's Encrypt renewal
   rynxcp-backup.timer      nightly account backups
+  rynxcp-antivirus.timer   daily filesystem antivirus scan
 
 Next steps:
   1. Point the NS records of each hosted domain to ns1.$HOST / ns2.$HOST or

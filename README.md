@@ -31,6 +31,7 @@ reconciliation engine and UI are original.
 | Monitoring | Per-service state/CPU/RAM/uptime and 7-day historical series |
 | Firewall | nftables rules, banned IPs, allowlists and automatic brute-force bans |
 | Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC |
+| Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Console | Closed-list privileged actions with output and audit trail |
 | Programs | Installed software inventory, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |

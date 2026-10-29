@@ -136,6 +136,8 @@ install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-cert-renew.service" /etc/syst
 install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-cert-renew.timer" /etc/systemd/system/rynxcp-cert-renew.timer
 install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-backup.service" /etc/systemd/system/rynxcp-backup.service
 install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-backup.timer" /etc/systemd/system/rynxcp-backup.timer
+install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-antivirus.service" /etc/systemd/system/rynxcp-antivirus.service
+install -m 0644 "${ROOT_DIR}/deploy/systemd/rynxcp-antivirus.timer" /etc/systemd/system/rynxcp-antivirus.timer
 systemctl daemon-reload
 
 echo "==> starting services"
@@ -143,6 +145,9 @@ systemctl enable --now rynxd.service
 systemctl enable --now rynx-api.service
 systemctl enable --now rynxcp-cert-renew.timer
 systemctl enable --now rynxcp-backup.timer
+if command -v clamdscan >/dev/null 2>&1; then
+  systemctl enable --now rynxcp-antivirus.timer
+fi
 
 echo
 echo "RYNXCP installed."

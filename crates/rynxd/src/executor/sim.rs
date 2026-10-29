@@ -885,6 +885,20 @@ impl Executor for SimExecutor {
                 "installed",
                 "brute-force jail",
             ),
+            (
+                "clamav",
+                "1.4.1",
+                "security",
+                "installed",
+                "antivirus engine",
+            ),
+            (
+                "clamav-milter",
+                "1.4.1",
+                "security",
+                "installed",
+                "SMTP antivirus",
+            ),
             ("rynxcp", "0.1.0", "panel", "installed", "control plane"),
         ];
         Ok(rows

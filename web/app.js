@@ -168,6 +168,8 @@ function programUnit(program) {
   const name = String(program.name || '').toLowerCase();
   if (['nginx', 'mariadb', 'pure-ftpd', 'opendkim', 'fail2ban'].includes(name)) return name;
   if (name === 'bind9') return 'named';
+  if (name === 'clamav') return 'clamav-daemon';
+  if (name === 'clamav-milter') return 'clamav-milter';
   if (name.startsWith('php')) return name.replace('php-fpm ', 'php') + '-fpm';
   return '';
 }

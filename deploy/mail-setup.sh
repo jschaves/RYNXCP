@@ -68,6 +68,7 @@ apt-get install -y --no-install-recommends \
   postfix \
   dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sieve dovecot-managesieved \
   opendkim opendkim-tools \
+  clamav clamav-daemon clamav-freshclam clamav-milter \
   sqlite3 curl ca-certificates openssl \
   php8.5-sqlite3
 
@@ -140,11 +141,25 @@ postconf -e "smtpd_sender_login_maps = hash:${POSTFIX_MAIL_DIR}/senders"
 postconf -e "smtpd_sender_restrictions = reject_authenticated_sender_login_mismatch, permit_mynetworks, permit_sasl_authenticated, reject_unknown_sender_domain"
 postconf -e "smtpd_helo_required = yes"
 postconf -e "disable_vrfy_command = yes"
-postconf -e "smtpd_milters = inet:127.0.0.1:8891"
+postconf -e "smtpd_milters = inet:127.0.0.1:7357 inet:127.0.0.1:8891"
 postconf -e "non_smtpd_milters = \$smtpd_milters"
 postconf -e "milter_default_action = accept"
 postconf -e "message_size_limit = 52428800"
 postconf -e "smtp_tls_security_level = may"
+
+log "Configuring ClamAV SMTP milter"
+install -d -m 0755 /etc/clamav
+cat >/etc/clamav/clamav-milter.conf <<'EOF'
+# managed-by: RYNXCP
+MilterSocket inet:7357@127.0.0.1
+ClamdSocket unix:/var/run/clamav/clamd.ctl
+User clamav
+OnInfected Reject
+OnClean Accept
+AddHeader Replace
+EOF
+chmod 0644 /etc/clamav/clamav-milter.conf
+
 
 if ! grep -q '^submission inet' /etc/postfix/master.cf; then
   cat >>/etc/postfix/master.cf <<'EOF'

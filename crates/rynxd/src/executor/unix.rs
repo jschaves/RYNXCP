@@ -2065,6 +2065,18 @@ impl Executor for RealExecutor {
             "brute-force jail",
         );
         push(
+            "clamav",
+            "security",
+            probe("clamscan", &["--version"]).await,
+            "antivirus engine",
+        );
+        push(
+            "clamav-milter",
+            "security",
+            probe("clamav-milter", &["--version"]).await,
+            "SMTP antivirus",
+        );
+        push(
             "rynxcp",
             "panel",
             Some(format!("v{}", rynx_proto::DAEMON_VERSION)),
