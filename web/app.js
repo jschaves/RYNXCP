@@ -163,6 +163,15 @@ function btn(label, action, id = '', cls = 'tiny ghost', title = '') {
   return `<button class="btn ${cls}" data-action="${action}" data-id="${esc(id)}" title="${esc(title)}">${label}</button>`;
 }
 
+function programUnit(program) {
+  if (program.unit) return program.unit;
+  const name = String(program.name || '').toLowerCase();
+  if (['nginx', 'mariadb', 'pure-ftpd', 'opendkim', 'fail2ban'].includes(name)) return name;
+  if (name === 'bind9') return 'named';
+  if (name.startsWith('php')) return name.replace('php-fpm ', 'php') + '-fpm';
+  return '';
+}
+
 function programButton(action, program, label, path) {
   const text = esc(T(label));
   return `<button class="btn tiny ghost" data-action="${action}" data-id="${esc(program)}" title="${text}" aria-label="${text}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="${text}"><title>${text}</title>${path}</svg></button>`;
@@ -3416,7 +3425,7 @@ async function renderPrograms() {
     td(`<span class="mono small">${esc(program.version)}</span>`),
     td(`<span class="chip">${esc(program.kind)}</span>`),
     td(program.status === 'installed' ? badge('instalado', 'ok') : badge('ausente', 'warn')),
-    td(program.unit && program.status === 'installed' ? [
+    td(programUnit(program) && program.status === 'installed' ? [
       programButton('program-restart', program.name, 'Reiniciar', '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>'),
       programButton('program-stop', program.name, 'Parar', '<rect x="6" y="6" width="12" height="12" rx="1"/>'),
     ].join(' ') : '', 'actions'),
