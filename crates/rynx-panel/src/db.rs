@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS panel_users (
     active        INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
-    account       TEXT
+    account       TEXT,
+    locale        TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -150,6 +151,8 @@ pub struct UserView {
     pub updated_at: String,
     /// Hosting account linked to this panel user, when it was auto-created.
     pub account: Option<String>,
+    /// Preferred panel/email language.
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +254,7 @@ fn map_user(row: &rusqlite::Row<'_>) -> rusqlite::Result<UserView> {
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
         account: row.get(7)?,
+        locale: row.get(8)?,
     })
 }
 
@@ -280,6 +284,14 @@ impl PanelDb {
             .any(|name| name == "account");
         if !has_account {
             conn.execute("ALTER TABLE panel_users ADD COLUMN account TEXT", [])?;
+        }
+        let has_locale: bool = conn
+            .prepare("PRAGMA table_info(panel_users)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .any(|name| name == "locale");
+        if !has_locale {
+            conn.execute("ALTER TABLE panel_users ADD COLUMN locale TEXT", [])?;
         }
         let has_ftp_limit: bool = conn
             .prepare("PRAGMA table_info(packages)")?
@@ -320,12 +332,12 @@ impl PanelDb {
     ) -> Result<Option<UserRecord>, PanelError> {
         let record = conn
             .query_row(
-                "SELECT id, username, email, role, active, created_at, updated_at, account, password_hash \
+                "SELECT id, username, email, role, active, created_at, updated_at, account, locale, password_hash \
                  FROM panel_users WHERE username = ?1",
                 params![username],
                 |row| {
                     let view = map_user(row)?;
-                    let password_hash: String = row.get(8)?;
+                    let password_hash: String = row.get(9)?;
                     Ok(UserRecord {
                         view,
                         password_hash,
@@ -421,8 +433,8 @@ impl PanelDb {
         let now = now_rfc3339();
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO panel_users (id, username, email, password_hash, role, active, created_at, updated_at, account) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7)",
+            "INSERT INTO panel_users (id, username, email, password_hash, role, active, created_at, updated_at, account, locale) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7, NULL)",
             params![id, username, email, hash, role.as_str(), now, account],
         )?;
         Ok(UserView {
@@ -434,6 +446,7 @@ impl PanelDb {
             created_at: now.clone(),
             updated_at: now,
             account: account.map(str::to_string),
+            locale: None,
         })
     }
 
@@ -468,7 +481,7 @@ impl PanelDb {
         let conn = self.conn()?;
         let record = conn
             .query_row(
-                "SELECT id, username, email, role, active, created_at, updated_at, account \
+                "SELECT id, username, email, role, active, created_at, updated_at, account, locale \
                  FROM panel_users WHERE account = ?1",
                 params![account],
                 map_user,
@@ -481,7 +494,7 @@ impl PanelDb {
         let conn = self.conn()?;
         let record = conn
             .query_row(
-                "SELECT id, username, email, role, active, created_at, updated_at, account \
+                "SELECT id, username, email, role, active, created_at, updated_at, account, locale \
                  FROM panel_users WHERE lower(email) = lower(?1)",
                 params![email],
                 map_user,
@@ -507,7 +520,7 @@ impl PanelDb {
     pub fn list_users(&self) -> Result<Vec<UserView>, PanelError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, username, email, role, active, created_at, updated_at, account \
+            "SELECT id, username, email, role, active, created_at, updated_at, account, locale \
              FROM panel_users ORDER BY username",
         )?;
         let rows = stmt.query_map([], map_user)?;
@@ -576,6 +589,15 @@ impl PanelDb {
             "DELETE FROM password_resets WHERE user_id = (SELECT id FROM panel_users WHERE username = ?1)",
             params![username],
         );
+        Ok(())
+    }
+
+    pub fn set_user_locale(&self, username: &str, locale: Option<&str>) -> Result<(), PanelError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "UPDATE panel_users SET locale = ?2, updated_at = ?3 WHERE username = ?1",
+            params![username, locale, now_rfc3339()],
+        )?;
         Ok(())
     }
 
@@ -769,7 +791,7 @@ impl PanelDb {
         let conn = self.conn()?;
         let row = conn
             .query_row(
-                "SELECT s.csrf_token, s.expires_at, s.last_seen, s.impersonated_by, u.id, u.username, u.email, u.role, u.active, u.created_at, u.updated_at, u.account \
+                "SELECT s.csrf_token, s.expires_at, s.last_seen, s.impersonated_by, u.id, u.username, u.email, u.role, u.active, u.created_at, u.updated_at, u.account, u.locale \
                  FROM sessions s JOIN panel_users u ON u.id = s.user_id WHERE s.token_hash = ?1",
                 params![token_hash],
                 |row| {
@@ -788,6 +810,7 @@ impl PanelDb {
                             created_at: row.get(9)?,
                             updated_at: row.get(10)?,
                             account: row.get(11)?,
+                            locale: row.get(12)?,
                         },
                     ))
                 },
@@ -1329,6 +1352,35 @@ mod tests {
             .authenticate("ghost", "Very-Strong-Pass1")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn stores_user_locale() {
+        let (_dir, db) = temp_db();
+        let user = db
+            .create_user(
+                "admin",
+                "admin@example.com",
+                "Very-Strong-Pass1",
+                Role::Owner,
+            )
+            .unwrap();
+        assert_eq!(user.locale, None);
+        db.set_user_locale("admin", Some("fr")).unwrap();
+        assert_eq!(
+            db.find_user("admin").unwrap().unwrap().locale.as_deref(),
+            Some("fr")
+        );
+        assert_eq!(
+            db.find_user_by_email("admin@example.com")
+                .unwrap()
+                .unwrap()
+                .locale
+                .as_deref(),
+            Some("fr")
+        );
+        db.set_user_locale("admin", None).unwrap();
+        assert_eq!(db.find_user("admin").unwrap().unwrap().locale, None);
     }
 
     #[test]

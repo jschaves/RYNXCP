@@ -112,6 +112,10 @@ async fn spawn(
     let daemon = state.daemon.clone();
     let mailer = state.mailer.clone();
     let alert_to = state.cfg.smtp_alert_to.clone();
+    let alert_locale = alert_to
+        .as_deref()
+        .and_then(|to| state.db.find_user_by_email(to).ok().flatten())
+        .and_then(|user| user.locale);
     let actor = actor.to_string();
     tokio::spawn(async move {
         let result = daemon.call(request, &actor).await;
@@ -150,14 +154,11 @@ async fn spawn(
                 "certificate job failed"
             );
             if let (Some(mailer), Some(to)) = (mailer, alert_to) {
-                let body = format!(
-                    "La emisión del certificado TLS para {domain} ha fallado.\n\n\
-                     Detalle: {message}\n\n\
-                     Revisa Certificados en el panel y los logs de rynxd.\n",
-                    domain = outcome.1,
-                    message = outcome.2,
+                let (subject, body) = crate::email::certificate_failure_text(
+                    alert_locale.as_deref(),
+                    &outcome.1,
+                    &outcome.2,
                 );
-                let subject = format!("[RYNXCP] Falló el certificado de {}", outcome.1);
                 if let Err(err) = mailer.send(&to, &subject, &body).await {
                     tracing::warn!(
                         domain = %outcome.1,

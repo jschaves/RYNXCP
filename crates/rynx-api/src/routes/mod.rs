@@ -38,6 +38,7 @@ pub fn router(state: ApiState) -> Router {
     let protected = Router::new()
         .route("/api/v1/auth/logout", post(session::logout))
         .route("/api/v1/auth/me", get(session::me))
+        .route("/api/v1/auth/locale", put(session::set_locale))
         .route(
             "/api/v1/auth/stop-impersonation",
             post(session::stop_impersonation),

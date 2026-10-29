@@ -284,18 +284,23 @@ pub fn validate_account_spec(spec: &AccountSpec) -> CoreResult<()> {
     Ok(())
 }
 
+pub const SUPPORTED_LOCALES: &[&str] =
+    &["es", "en", "pt", "fr", "ar", "ru", "zh", "ja", "it", "de"];
+
+pub fn validate_locale(locale: &str) -> CoreResult<()> {
+    if !SUPPORTED_LOCALES.contains(&locale) {
+        return Err(invalid("unsupported locale"));
+    }
+    Ok(())
+}
+
 pub fn validate_website_spec(spec: &WebsiteSpec) -> CoreResult<()> {
     validate_domain(&spec.domain)?;
     validate_username(&spec.username)?;
     validate_docroot(&spec.docroot)?;
     validate_runtime(&spec.runtime)?;
     if let Some(locale) = &spec.locale {
-        if !matches!(
-            locale.as_str(),
-            "es" | "en" | "pt" | "fr" | "ar" | "ru" | "zh" | "ja" | "it" | "de"
-        ) {
-            return Err(invalid("unsupported locale"));
-        }
+        validate_locale(locale)?;
     }
 
     if spec.aliases.len() > 20 {

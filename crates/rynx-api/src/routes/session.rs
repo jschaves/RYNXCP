@@ -183,7 +183,14 @@ async fn start_two_factor(
         }
     }
     let (challenge, code) = state.two_factor.issue(user.clone());
-    if let Err(err) = crate::email::send_login_code(state, &user.email, &user.username, &code).await
+    if let Err(err) = crate::email::send_login_code(
+        state,
+        &user.email,
+        &user.username,
+        &code,
+        user.locale.as_deref(),
+    )
+    .await
     {
         state.two_factor.cancel(&challenge);
         tracing::warn!(user = %user.username, error = %err, "two-factor email could not be sent");
@@ -316,6 +323,7 @@ pub async fn forgot_password(
                         &user.email,
                         &user.username,
                         &token,
+                        user.locale.as_deref(),
                     )
                     .await
                     {
@@ -495,6 +503,24 @@ fn finish_login(
         HeaderValue::from_str(&cookie).map_err(ApiError::internal)?,
     );
     Ok(response)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocaleRequest {
+    pub locale: String,
+}
+
+pub async fn set_locale(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+    Json(body): Json<LocaleRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let locale = body.locale.trim();
+    rynx_core::validate_locale(locale).map_err(|err| ApiError::BadRequest(err.to_string()))?;
+    state
+        .db
+        .set_user_locale(&auth.user.username, Some(locale))?;
+    Ok(Json(serde_json::json!({ "ok": true, "locale": locale })))
 }
 
 pub async fn logout(

@@ -200,24 +200,136 @@ pub fn base_url(cfg: &ApiConfig) -> String {
         .to_string()
 }
 
+fn email_locale(locale: Option<&str>) -> &'static str {
+    match locale.unwrap_or("es") {
+        "es" => "es",
+        "en" => "en",
+        "pt" => "pt",
+        "fr" => "fr",
+        "ar" => "ar",
+        "ru" => "ru",
+        "zh" => "zh",
+        "ja" => "ja",
+        "it" => "it",
+        "de" => "de",
+        _ => "en",
+    }
+}
+
 pub async fn send_credentials(
     state: &ApiState,
     to: &str,
     username: &str,
     password: &str,
+    locale: Option<&str>,
 ) -> Result<()> {
     let Some(mailer) = state.mailer.as_deref() else {
         return Ok(());
     };
-    let body = format!(
-        "Se ha creado tu acceso al panel de control RYNXCP.\n\n\
-         Panel: {url}\n\
-         Usuario: {username}\n\
-         Contraseña: {password}\n\n\
-         Cambia la contraseña después del primer inicio de sesión.\n",
-        url = base_url(&state.cfg),
-    );
-    mailer.send(to, "Tu acceso al panel RYNXCP", &body).await
+    let url = base_url(&state.cfg);
+    let (subject, body) = match email_locale(locale) {
+        "es" => (
+            "Tu acceso al panel RYNXCP".to_string(),
+            format!(
+                "Se ha creado tu acceso al panel de control RYNXCP.\n\n\
+                 Panel: {url}\n\
+                 Usuario: {username}\n\
+                 Contraseña: {password}\n\n\
+                 Cambia la contraseña después del primer inicio de sesión.\n"
+            ),
+        ),
+        "pt" => (
+            "Seu acesso ao painel RYNXCP".to_string(),
+            format!(
+                "O acesso ao painel de controle RYNXCP foi criado.\n\n\
+                 Painel: {url}\n\
+                 Usuário: {username}\n\
+                 Senha: {password}\n\n\
+                 Altere a senha após o primeiro login.\n"
+            ),
+        ),
+        "fr" => (
+            "Votre accès au panneau RYNXCP".to_string(),
+            format!(
+                "Votre accès au panneau de contrôle RYNXCP a été créé.\n\n\
+                 Panneau : {url}\n\
+                 Utilisateur : {username}\n\
+                 Mot de passe : {password}\n\n\
+                 Changez votre mot de passe après votre première connexion.\n"
+            ),
+        ),
+        "ar" => (
+            "وصولك إلى لوحة RYNXCP".to_string(),
+            format!(
+                "تم إنشاء وصولك إلى لوحة التحكم RYNXCP.\n\n\
+                 اللوحة: {url}\n\
+                 المستخدم: {username}\n\
+                 كلمة المرور: {password}\n\n\
+                 غيّر كلمة المرور بعد أول تسجيل دخول.\n"
+            ),
+        ),
+        "ru" => (
+            "Ваш доступ к панели RYNXCP".to_string(),
+            format!(
+                "Доступ к панели управления RYNXCP создан.\n\n\
+                 Панель: {url}\n\
+                 Пользователь: {username}\n\
+                 Пароль: {password}\n\n\
+                 Смените пароль после первого входа.\n"
+            ),
+        ),
+        "zh" => (
+            "您的 RYNXCP 面板访问权限".to_string(),
+            format!(
+                "您的 RYNXCP 控制面板访问权限已创建。\n\n\
+                 面板：{url}\n\
+                 用户：{username}\n\
+                 密码：{password}\n\n\
+                 首次登录后请修改密码。\n"
+            ),
+        ),
+        "ja" => (
+            "RYNXCP パネルへのアクセス".to_string(),
+            format!(
+                "RYNXCP コントロールパネルへのアクセスが作成されました。\n\n\
+                 パネル: {url}\n\
+                 ユーザー: {username}\n\
+                 パスワード: {password}\n\n\
+                 初回ログイン後にパスワードを変更してください。\n"
+            ),
+        ),
+        "it" => (
+            "Il tuo accesso al pannello RYNXCP".to_string(),
+            format!(
+                "Il tuo accesso al pannello di controllo RYNXCP è stato creato.\n\n\
+                 Pannello: {url}\n\
+                 Utente: {username}\n\
+                 Password: {password}\n\n\
+                 Cambia la password dopo il primo accesso.\n"
+            ),
+        ),
+        "de" => (
+            "Ihr Zugang zum RYNXCP-Panel".to_string(),
+            format!(
+                "Ihr Zugang zum RYNXCP-Kontrollpanel wurde erstellt.\n\n\
+                 Panel: {url}\n\
+                 Benutzer: {username}\n\
+                 Passwort: {password}\n\n\
+                 Ändern Sie Ihr Passwort nach der ersten Anmeldung.\n"
+            ),
+        ),
+        _ => (
+            "Your RYNXCP panel access".to_string(),
+            format!(
+                "Your RYNXCP control panel access has been created.\n\n\
+                 Panel: {url}\n\
+                 User: {username}\n\
+                 Password: {password}\n\n\
+                 Change your password after your first login.\n"
+            ),
+        ),
+    };
+    mailer.send(to, &subject, &body).await
 }
 
 pub async fn send_password_reset(
@@ -225,35 +337,403 @@ pub async fn send_password_reset(
     to: &str,
     username: &str,
     token: &str,
+    locale: Option<&str>,
 ) -> Result<()> {
     let Some(mailer) = state.mailer.as_deref() else {
         return Ok(());
     };
     let link = format!("{}/#reset_token={token}", base_url(&state.cfg));
-    let body = format!(
-        "Se solicitó restablecer la contraseña de la cuenta {username}.\n\n\
-         Abre este enlace para elegir una nueva contraseña:\n\n{link}\n\n\
-         El enlace caduca en 60 minutos y solo puede usarse una vez.\n\
-         Si no solicitaste el cambio, ignora este mensaje.\n",
-    );
-    mailer
-        .send(to, "Restablecer contraseña de RYNXCP", &body)
-        .await
+    let (subject, body) = match email_locale(locale) {
+        "es" => (
+            "Restablecer contraseña de RYNXCP".to_string(),
+            format!(
+                "Se solicitó restablecer la contraseña de la cuenta {username}.\n\n\
+                 Abre este enlace para elegir una nueva contraseña:\n\n{link}\n\n\
+                 El enlace caduca en 60 minutos y solo puede usarse una vez.\n\
+                 Si no solicitaste el cambio, ignora este mensaje.\n"
+            ),
+        ),
+        "pt" => (
+            "Redefinir senha do RYNXCP".to_string(),
+            format!(
+                "Foi solicitada a redefinição da senha da conta {username}.\n\n\
+                 Abra este link para escolher uma nova senha:\n\n{link}\n\n\
+                 O link expira em 60 minutos e só pode ser usado uma vez.\n\
+                 Se você não solicitou esta alteração, ignore esta mensagem.\n"
+            ),
+        ),
+        "fr" => (
+            "Réinitialiser votre mot de passe RYNXCP".to_string(),
+            format!(
+                "Une réinitialisation du mot de passe a été demandée pour le compte {username}.\n\n\
+                 Ouvrez ce lien pour choisir un nouveau mot de passe :\n\n{link}\n\n\
+                 Le lien expire dans 60 minutes et ne peut être utilisé qu’une seule fois.\n\
+                 Si vous n’êtes pas à l’origine de cette demande, ignorez ce message.\n"
+            ),
+        ),
+        "ar" => (
+            "إعادة تعيين كلمة مرور RYNXCP".to_string(),
+            format!(
+                "تم طلب إعادة تعيين كلمة المرور للحساب {username}.\n\n\
+                 افتح هذا الرابط لاختيار كلمة مرور جديدة:\n\n{link}\n\n\
+                 ينتهي صلاحية الرابط خلال 60 دقيقة ويمكن استخدامه مرة واحدة فقط.\n\
+                 إذا لم تطلب هذا التغيير، فتجاهل هذه الرسالة.\n"
+            ),
+        ),
+        "ru" => (
+            "Сброс пароля RYNXCP".to_string(),
+            format!(
+                "Запрошен сброс пароля для учётной записи {username}.\n\n\
+                 Откройте эту ссылку, чтобы выбрать новый пароль:\n\n{link}\n\n\
+                 Ссылка действует 60 минут и может быть использована только один раз.\n\
+                 Если вы не запрашивали изменение, проигнорируйте это сообщение.\n"
+            ),
+        ),
+        "zh" => (
+            "重置 RYNXCP 密码".to_string(),
+            format!(
+                "已请求重置账户 {username} 的密码。\n\n\
+                 打开此链接设置新密码：\n\n{link}\n\n\
+                 链接将在 60 分钟后过期，且只能使用一次。\n\
+                 如果您没有请求此更改，请忽略此邮件。\n"
+            ),
+        ),
+        "ja" => (
+            "RYNXCP パスワードのリセット".to_string(),
+            format!(
+                "アカウント {username} のパスワードリセットが要求されました。\n\n\
+                 新しいパスワードを設定するには、次のリンクを開いてください:\n\n{link}\n\n\
+                 リンクの有効期限は 60 分で、一度だけ使用できます。\n\
+                 この変更を要求していない場合は、このメッセージを無視してください。\n"
+            ),
+        ),
+        "it" => (
+            "Reimposta la password di RYNXCP".to_string(),
+            format!(
+                "È stata richiesta la reimpostazione della password per l'account {username}.\n\n\
+                 Apri questo link per scegliere una nuova password:\n\n{link}\n\n\
+                 Il link scade tra 60 minuti e può essere usato una sola volta.\n\
+                 Se non hai richiesto questa modifica, ignora questo messaggio.\n"
+            ),
+        ),
+        "de" => (
+            "RYNXCP-Passwort zurücksetzen".to_string(),
+            format!(
+                "Für das Konto {username} wurde das Zurücksetzen des Passworts angefordert.\n\n\
+                 Öffnen Sie diesen Link, um ein neues Passwort zu wählen:\n\n{link}\n\n\
+                 Der Link läuft nach 60 Minuten ab und kann nur einmal verwendet werden.\n\
+                 Wenn Sie diese Änderung nicht angefordert haben, ignorieren Sie diese Nachricht.\n"
+            ),
+        ),
+        _ => (
+            "Reset your RYNXCP password".to_string(),
+            format!(
+                "A password reset was requested for the account {username}.\n\n\
+                 Open this link to choose a new password:\n\n{link}\n\n\
+                 The link expires in 60 minutes and can only be used once.\n\
+                 If you did not request this change, ignore this message.\n"
+            ),
+        ),
+    };
+    mailer.send(to, &subject, &body).await
 }
 
-pub async fn send_login_code(state: &ApiState, to: &str, username: &str, code: &str) -> Result<()> {
+pub async fn send_login_code(
+    state: &ApiState,
+    to: &str,
+    username: &str,
+    code: &str,
+    locale: Option<&str>,
+) -> Result<()> {
     let mailer = state
         .mailer
         .as_deref()
         .ok_or_else(|| anyhow!("SMTP is not configured for two-factor login"))?;
-    let body = format!(
-        "Hola {username},\n\n\
-         Tu código de verificación para acceder a RYNXCP es:\n\n\
-             {code}\n\n\
-         Caduca en 10 minutos. Si no has intentado iniciar sesión, \
-         cambia tu contraseña y revisa los accesos al panel.\n",
-    );
-    mailer.send(to, "Código de acceso a RYNXCP", &body).await
+    let (subject, body) = match email_locale(locale) {
+        "es" => (
+            "Código de acceso a RYNXCP".to_string(),
+            format!(
+                "Hola {username},\n\n\
+                 Tu código de verificación para acceder a RYNXCP es:\n\n\
+                     {code}\n\n\
+                 Caduca en 10 minutos. Si no has intentado iniciar sesión, \
+                 cambia tu contraseña y revisa los accesos al panel.\n"
+            ),
+        ),
+        "pt" => (
+            "Código de acesso ao RYNXCP".to_string(),
+            format!(
+                "Olá {username},\n\n\
+                 Seu código de verificação para acessar o RYNXCP é:\n\n\
+                     {code}\n\n\
+                 Ele expira em 10 minutos. Se você não tentou entrar, \
+                 altere sua senha e revise os acessos ao painel.\n"
+            ),
+        ),
+        "fr" => (
+            "Votre code de connexion RYNXCP".to_string(),
+            format!(
+                "Bonjour {username},\n\n\
+                 Votre code de vérification pour accéder à RYNXCP est :\n\n\
+                     {code}\n\n\
+                 Il expire dans 10 minutes. Si vous n’avez pas tenté de vous connecter, \
+                 changez votre mot de passe et vérifiez les accès au panneau.\n"
+            ),
+        ),
+        "ar" => (
+            "رمز الدخول إلى RYNXCP".to_string(),
+            format!(
+                "مرحبًا {username}،\n\n\
+                 رمز التحقق الخاص بك للدخول إلى RYNXCP هو:\n\n\
+                     {code}\n\n\
+                 تنتهي صلاحيته خلال 10 دقائق. إذا لم تحاول تسجيل الدخول، \
+                 فغيّر كلمة المرور وراجع عمليات الوصول إلى اللوحة.\n"
+            ),
+        ),
+        "ru" => (
+            "Код входа в RYNXCP".to_string(),
+            format!(
+                "Здравствуйте, {username}!\n\n\
+                 Ваш код подтверждения для входа в RYNXCP:\n\n\
+                     {code}\n\n\
+                 Он действует 10 минут. Если вы не пытались войти, \
+                 смените пароль и проверьте доступ к панели.\n"
+            ),
+        ),
+        "zh" => (
+            "您的 RYNXCP 登录验证码".to_string(),
+            format!(
+                "您好 {username}：\n\n\
+                 您登录 RYNXCP 的验证码是：\n\n\
+                     {code}\n\n\
+                 验证码将在 10 分钟后过期。如果您没有尝试登录，\
+                 请修改密码并检查面板访问记录。\n"
+            ),
+        ),
+        "ja" => (
+            "RYNXCP ログインコード".to_string(),
+            format!(
+                "{username} さん\n\n\
+                 RYNXCP にアクセスするための確認コードは次のとおりです:\n\n\
+                     {code}\n\n\
+                 有効期限は 10 分です。ログインを試みていない場合は、\
+                 パスワードを変更し、パネルへのアクセスを確認してください。\n"
+            ),
+        ),
+        "it" => (
+            "Il tuo codice di accesso RYNXCP".to_string(),
+            format!(
+                "Ciao {username},\n\n\
+                 Il tuo codice di verifica per accedere a RYNXCP è:\n\n\
+                     {code}\n\n\
+                 Scade tra 10 minuti. Se non hai tentato di accedere, \
+                 cambia la password e controlla gli accessi al pannello.\n"
+            ),
+        ),
+        "de" => (
+            "Ihr RYNXCP-Anmeldecode".to_string(),
+            format!(
+                "Hallo {username},\n\n\
+                 Ihr Bestätigungscode für den Zugriff auf RYNXCP lautet:\n\n\
+                     {code}\n\n\
+                 Er läuft in 10 Minuten ab. Wenn Sie sich nicht anmelden wollten, \
+                 ändern Sie Ihr Passwort und prüfen Sie die Panel-Zugriffe.\n"
+            ),
+        ),
+        _ => (
+            "Your RYNXCP login code".to_string(),
+            format!(
+                "Hello {username},\n\n\
+                 Your verification code to access RYNXCP is:\n\n\
+                     {code}\n\n\
+                 It expires in 10 minutes. If you did not try to sign in, \
+                 change your password and review panel access.\n"
+            ),
+        ),
+    };
+    mailer.send(to, &subject, &body).await
+}
+
+pub fn test_email_text(locale: Option<&str>, host: &str, port: u16, tls: &str) -> (String, String) {
+    match email_locale(locale) {
+        "es" => (
+            "Prueba de correo de RYNXCP".into(),
+            format!(
+                "Este es un correo de prueba de RYNXCP.\n\n\
+                 Si lo has recibido, el panel puede enviar credenciales, avisos y enlaces \
+                 de restablecimiento de contraseña.\n\n\
+                 Servidor SMTP local: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        "pt" => (
+            "Teste de e-mail do RYNXCP".into(),
+            format!(
+                "Este é um e-mail de teste do RYNXCP.\n\n\
+                 Se você o recebeu, o painel pode enviar credenciais, avisos e links \
+                 de redefinição de senha.\n\n\
+                 Servidor SMTP local: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        "fr" => (
+            "Test e-mail RYNXCP".into(),
+            format!(
+                "Ceci est un e-mail de test RYNXCP.\n\n\
+                 Si vous l’avez reçu, le panneau peut envoyer des identifiants, des alertes \
+                 et des liens de réinitialisation de mot de passe.\n\n\
+                 Serveur SMTP local : {host}:{port} (TLS : {tls}).\n"
+            ),
+        ),
+        "ar" => (
+            "اختبار البريد RYNXCP".into(),
+            format!(
+                "هذه رسالة اختبار من RYNXCP.\n\n\
+                 إذا وصلتك، فإن اللوحة تستطيع إرسال بيانات الدخول والتنبيهات \
+                 وروابط إعادة تعيين كلمة المرور.\n\n\
+                 خادم SMTP المحلي: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        "ru" => (
+            "Тест почты RYNXCP".into(),
+            format!(
+                "Это тестовое письмо RYNXCP.\n\n\
+                 Если вы его получили, панель может отправлять учётные данные, уведомления \
+                 и ссылки для сброса пароля.\n\n\
+                 Локальный SMTP-сервер: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        "zh" => (
+            "RYNXCP 邮件测试".into(),
+            format!(
+                "这是一封 RYNXCP 测试邮件。\n\n\
+                 如果您收到此邮件，说明面板可以发送凭据、通知和密码重置链接。\n\n\
+                 本地 SMTP 服务器：{host}:{port}（TLS：{tls}）。\n"
+            ),
+        ),
+        "ja" => (
+            "RYNXCP メールテスト".into(),
+            format!(
+                "これは RYNXCP のテストメールです。\n\n\
+                 受信できていれば、パネルは認証情報、通知、パスワードリセットリンクを送信できます。\n\n\
+                 ローカル SMTP サーバー: {host}:{port}（TLS: {tls}）。\n"
+            ),
+        ),
+        "it" => (
+            "Test email RYNXCP".into(),
+            format!(
+                "Questa è un'email di test RYNXCP.\n\n\
+                 Se l'hai ricevuta, il pannello può inviare credenziali, avvisi e link \
+                 per reimpostare la password.\n\n\
+                 Server SMTP locale: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        "de" => (
+            "RYNXCP-E-Mail-Test".into(),
+            format!(
+                "Dies ist eine Test-E-Mail von RYNXCP.\n\n\
+                 Wenn Sie sie erhalten haben, kann das Panel Anmeldedaten, Hinweise und \
+                 Links zum Zurücksetzen des Passworts senden.\n\n\
+                 Lokaler SMTP-Server: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+        _ => (
+            "RYNXCP email test".into(),
+            format!(
+                "This is a RYNXCP test email.\n\n\
+                 If you received it, the panel can send credentials, alerts and password \
+                 reset links.\n\n\
+                 Local SMTP server: {host}:{port} (TLS: {tls}).\n"
+            ),
+        ),
+    }
+}
+
+pub fn certificate_failure_text(
+    locale: Option<&str>,
+    domain: &str,
+    message: &str,
+) -> (String, String) {
+    match email_locale(locale) {
+        "es" => (
+            format!("[RYNXCP] Falló el certificado de {domain}"),
+            format!(
+                "La emisión del certificado TLS para {domain} ha fallado.\n\n\
+                 Detalle: {message}\n\n\
+                 Revisa Certificados en el panel y los logs de rynxd.\n"
+            ),
+        ),
+        "pt" => (
+            format!("[RYNXCP] Falha no certificado de {domain}"),
+            format!(
+                "Não foi possível emitir o certificado TLS para {domain}.\n\n\
+                 Detalhe: {message}\n\n\
+                 Verifique Certificados no painel e os logs do rynxd.\n"
+            ),
+        ),
+        "fr" => (
+            format!("[RYNXCP] Échec du certificat pour {domain}"),
+            format!(
+                "L’émission du certificat TLS pour {domain} a échoué.\n\n\
+                 Détail : {message}\n\n\
+                 Vérifiez Certificats dans le panneau et les journaux de rynxd.\n"
+            ),
+        ),
+        "ar" => (
+            format!("[RYNXCP] فشل شهادة {domain}"),
+            format!(
+                "تعذّر إصدار شهادة TLS للنطاق {domain}.\n\n\
+                 التفاصيل: {message}\n\n\
+                 راجع الشهادات في اللوحة وسجلات rynxd.\n"
+            ),
+        ),
+        "ru" => (
+            format!("[RYNXCP] Ошибка сертификата для {domain}"),
+            format!(
+                "Не удалось выпустить TLS-сертификат для {domain}.\n\n\
+                 Подробности: {message}\n\n\
+                 Проверьте раздел «Сертификаты» в панели и журналы rynxd.\n"
+            ),
+        ),
+        "zh" => (
+            format!("[RYNXCP] {domain} 的证书失败"),
+            format!(
+                "无法为 {domain} 签发 TLS 证书。\n\n\
+                 详情：{message}\n\n\
+                 请检查面板中的证书和 rynxd 日志。\n"
+            ),
+        ),
+        "ja" => (
+            format!("[RYNXCP] {domain} の証明書エラー"),
+            format!(
+                "{domain} の TLS 証明書を発行できませんでした。\n\n\
+                 詳細: {message}\n\n\
+                 パネルの「証明書」と rynxd のログを確認してください。\n"
+            ),
+        ),
+        "it" => (
+            format!("[RYNXCP] Errore certificato per {domain}"),
+            format!(
+                "Impossibile emettere il certificato TLS per {domain}.\n\n\
+                 Dettaglio: {message}\n\n\
+                 Controlla Certificati nel pannello e i log di rynxd.\n"
+            ),
+        ),
+        "de" => (
+            format!("[RYNXCP] Zertifikat für {domain} fehlgeschlagen"),
+            format!(
+                "Das TLS-Zertifikat für {domain} konnte nicht ausgestellt werden.\n\n\
+                 Details: {message}\n\n\
+                 Prüfen Sie „Zertifikate“ im Panel und die rynxd-Protokolle.\n"
+            ),
+        ),
+        _ => (
+            format!("[RYNXCP] Certificate failed for {domain}"),
+            format!(
+                "The TLS certificate for {domain} could not be issued.\n\n\
+                 Detail: {message}\n\n\
+                 Check Certificates in the panel and the rynxd logs.\n"
+            ),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +767,16 @@ mod tests {
         assert!(!encoded.contains('\r'));
         assert!(!encoded.contains('\n'));
         assert!(encoded.starts_with("=?UTF-8?B?"));
+    }
+
+    #[test]
+    fn localizes_test_email() {
+        let (subject, body) = test_email_text(Some("fr"), "127.0.0.1", 25, "none");
+        assert_eq!(subject, "Test e-mail RYNXCP");
+        assert!(body.contains("Ceci est un e-mail de test RYNXCP."));
+        let (subject, body) = test_email_text(None, "127.0.0.1", 25, "none");
+        assert_eq!(subject, "Prueba de correo de RYNXCP");
+        assert!(body.contains("Este es un correo de prueba"));
     }
 
     #[test]

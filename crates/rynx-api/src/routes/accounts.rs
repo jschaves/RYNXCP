@@ -205,14 +205,26 @@ pub async fn create(
             state.db.set_active(&user.username, false)?;
             user.active = false;
         }
+        if user.locale.is_none() {
+            if let Some(locale) = auth.user.locale.clone() {
+                state.db.set_user_locale(&user.username, Some(&locale))?;
+                user.locale = Some(locale);
+            }
+        }
         panel_user = Some(user);
         panel_password = Some(password);
     }
 
     if let (Some(user), Some(password)) = (panel_user.as_ref(), panel_password.as_deref()) {
         if user.active {
-            if let Err(err) =
-                crate::email::send_credentials(&state, &user.email, &user.username, password).await
+            if let Err(err) = crate::email::send_credentials(
+                &state,
+                &user.email,
+                &user.username,
+                password,
+                auth.user.locale.as_deref(),
+            )
+            .await
             {
                 tracing::warn!(
                     user = %user.username,

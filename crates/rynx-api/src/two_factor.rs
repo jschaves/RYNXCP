@@ -115,6 +115,7 @@ mod tests {
             created_at: "now".into(),
             updated_at: "now".into(),
             account: None,
+            locale: None,
         }
     }
 

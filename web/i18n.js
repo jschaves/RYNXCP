@@ -5723,7 +5723,7 @@
     syncSelects();
   }
 
-  function setLanguage(code) {
+  function setLanguage(code, notify = true) {
     const next = SUPPORTED.has(code) ? code : 'en';
     current = next;
     try {
@@ -5732,7 +5732,7 @@
       /* ignore */
     }
     applyDocument();
-    if (typeof window.RYNX_ON_LANG_CHANGE === 'function') {
+    if (notify && typeof window.RYNX_ON_LANG_CHANGE === 'function') {
       window.RYNX_ON_LANG_CHANGE(next);
     }
   }

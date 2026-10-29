@@ -411,7 +411,26 @@ function showLogin() {
   showLoginForm(S.resetToken ? 'reset' : 'login');
 }
 
+function persistUserLocale(locale) {
+  if (!S.user || !S.csrf || !locale) return;
+  S.user.locale = locale;
+  api('/api/v1/auth/locale', { method: 'PUT', body: { locale } }).catch(() => {});
+}
+
+function applyUserLocale(user) {
+  if (!window.RYNX_I18N) return;
+  const saved = user && user.locale;
+  if (!saved) {
+    persistUserLocale(window.RYNX_I18N.getLanguage());
+    return;
+  }
+  if (window.RYNX_I18N.getLanguage() !== saved) {
+    window.RYNX_I18N.setLanguage(saved, false);
+  }
+}
+
 function enterApp() {
+  applyUserLocale(S.user);
   S.data = { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [] };
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
@@ -3481,8 +3500,9 @@ function showOutput(title, text) {
 
 /* ---------------- wiring ---------------- */
 
-window.RYNX_ON_LANG_CHANGE = () => {
+window.RYNX_ON_LANG_CHANGE = (code) => {
   if (S.user) {
+    persistUserLocale(code);
     refresh();
   } else {
     showLogin();

@@ -105,15 +105,14 @@ pub async fn email_test(
         .or_else(|| state.cfg.smtp_alert_to.clone())
         .unwrap_or_else(|| auth.user.email.clone());
     rynx_core::validate_email(&to).map_err(|err| ApiError::BadRequest(err.to_string()))?;
-    let body = format!(
-        "Este es un correo de prueba de RYNXCP.\n\n\
-         Si lo has recibido, el panel puede enviar credenciales, avisos y enlaces \
-         de restablecimiento de contraseña.\n\n\
-         Servidor SMTP local: {}:{} (TLS: {}).\n",
-        state.cfg.smtp_host, state.cfg.smtp_port, state.cfg.smtp_tls
+    let (subject, body) = crate::email::test_email_text(
+        auth.user.locale.as_deref(),
+        &state.cfg.smtp_host,
+        state.cfg.smtp_port,
+        &state.cfg.smtp_tls,
     );
     mailer
-        .send(&to, "Prueba de correo de RYNXCP", &body)
+        .send(&to, &subject, &body)
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(json!({ "ok": true, "to": to })))

@@ -104,6 +104,11 @@ try {
     $scriptJs = Invoke-WebRequest -Uri "$base/app.js" -UseBasicParsing
     if ($scriptJs.StatusCode -ne 200) { throw 'app.js was not served' }
 
+    $null = RequestJson 'PUT' '/api/v1/auth/locale' @{ locale = 'fr' }
+    if ((RequestJson 'GET' '/api/v1/auth/me').user.locale -ne 'fr') {
+        throw 'the user locale was not persisted'
+    }
+    $null = RequestJson 'PUT' '/api/v1/auth/locale' @{ locale = 'es' }
     $seedPackages = @(RequestJson 'GET' '/api/v1/packages')
     if ($seedPackages.Count -lt 1 -or -not $seedPackages[0].is_default) {
         throw 'the default package was not seeded'

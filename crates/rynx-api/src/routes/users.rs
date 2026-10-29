@@ -75,15 +75,27 @@ pub async fn create(
     }
     let policy =
         rynx_core::PasswordPolicy::new(state.cfg.password_min_len, state.cfg.password_min_classes);
-    let user = state.db.create_user_with_policy(
+    let mut user = state.db.create_user_with_policy(
         &policy,
         &body.username,
         &body.email,
         &body.password,
         role,
     )?;
-    if let Err(err) =
-        crate::email::send_credentials(&state, &user.email, &user.username, &body.password).await
+    if user.locale.is_none() {
+        if let Some(locale) = auth.user.locale.clone() {
+            state.db.set_user_locale(&user.username, Some(&locale))?;
+            user.locale = Some(locale);
+        }
+    }
+    if let Err(err) = crate::email::send_credentials(
+        &state,
+        &user.email,
+        &user.username,
+        &body.password,
+        auth.user.locale.as_deref(),
+    )
+    .await
     {
         tracing::warn!(
             user = %user.username,
