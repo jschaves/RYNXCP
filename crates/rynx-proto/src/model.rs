@@ -721,6 +721,9 @@ pub struct ProgramInfo {
     pub kind: String,
     pub status: String,
     pub detail: String,
+    /// Systemd unit used by the restart/stop controls, when the program is a service.
+    #[serde(default)]
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -866,6 +869,12 @@ pub enum ConsoleAction {
         #[serde(default = "default_log_lines")]
         lines: u32,
     },
+    ServiceRestart {
+        program: String,
+    },
+    ServiceStop {
+        program: String,
+    },
 }
 
 impl ConsoleAction {
@@ -885,6 +894,8 @@ impl ConsoleAction {
             ConsoleAction::AppLogs { username, name, .. } => {
                 format!("app_logs:{username}/{name}")
             }
+            ConsoleAction::ServiceRestart { program } => format!("service_restart:{program}"),
+            ConsoleAction::ServiceStop { program } => format!("service_stop:{program}"),
         }
     }
 }

@@ -696,6 +696,10 @@
     "Redirigir HTTP a HTTPS": "Redirect HTTP to HTTPS",
     "Sitio actualizado": "Website updated",
     "¿Eliminar el baneo de {ip}?": "Remove the ban for {ip}?",
+    "Reiniciar": "Restart",
+    "Parar": "Stop",
+    "Programa reiniciado": "Program restarted",
+    "Programa detenido": "Program stopped",
   };
 
   const PT = {
@@ -1311,6 +1315,10 @@
     "Redirigir HTTP a HTTPS": "Redirecionar HTTP para HTTPS",
     "Sitio actualizado": "Site atualizado",
     "¿Eliminar el baneo de {ip}?": "Remover o banimento de {ip}?",
+    "Reiniciar": "Reiniciar",
+    "Parar": "Parar",
+    "Programa reiniciado": "Programa reiniciado",
+    "Programa detenido": "Programa parado",
   };
 
   const FR = {
@@ -1927,6 +1935,10 @@
     "Redirigir HTTP a HTTPS": "Rediriger HTTP vers HTTPS",
     "Sitio actualizado": "Site mis à jour",
     "¿Eliminar el baneo de {ip}?": "Supprimer le bannissement de {ip} ?",
+    "Reiniciar": "Redémarrer",
+    "Parar": "Arrêter",
+    "Programa reiniciado": "Programme redémarré",
+    "Programa detenido": "Programme arrêté",
   };
 
   const AR = {
@@ -2545,6 +2557,10 @@
     "Redirigir HTTP a HTTPS": "إعادة توجيه HTTP إلى HTTPS",
     "Sitio actualizado": "تم تحديث الموقع",
     "¿Eliminar el baneo de {ip}?": "إزالة الحظر عن {ip}؟",
+    "Reiniciar": "إعادة التشغيل",
+    "Parar": "إيقاف",
+    "Programa reiniciado": "تمت إعادة تشغيل البرنامج",
+    "Programa detenido": "تم إيقاف البرنامج",
   };
 
   const RU = {
@@ -3162,6 +3178,10 @@
     "Redirigir HTTP a HTTPS": "Перенаправлять HTTP на HTTPS",
     "Sitio actualizado": "Сайт обновлён",
     "¿Eliminar el baneo de {ip}?": "Снять блокировку с {ip}?",
+    "Reiniciar": "Перезапустить",
+    "Parar": "Остановить",
+    "Programa reiniciado": "Программа перезапущена",
+    "Programa detenido": "Программа остановлена",
   };
 
   const ZH = {
@@ -3776,6 +3796,10 @@
     "Redirigir HTTP a HTTPS": "将 HTTP 重定向到 HTTPS",
     "Sitio actualizado": "网站已更新",
     "¿Eliminar el baneo de {ip}?": "解除对 {ip} 的封禁？",
+    "Reiniciar": "重启",
+    "Parar": "停止",
+    "Programa reiniciado": "程序已重启",
+    "Programa detenido": "程序已停止",
   };
 
   const JA = {
@@ -4393,6 +4417,10 @@
     "Redirigir HTTP a HTTPS": "HTTP を HTTPS にリダイレクト",
     "Sitio actualizado": "サイトを更新しました",
     "¿Eliminar el baneo de {ip}?": "{ip} の禁止を解除しますか？",
+    "Reiniciar": "再起動",
+    "Parar": "停止",
+    "Programa reiniciado": "プログラムを再起動しました",
+    "Programa detenido": "プログラムを停止しました",
   };
 
   const IT = {
@@ -5004,6 +5032,10 @@
     "Redirigir HTTP a HTTPS": "Reindirizza HTTP a HTTPS",
     "Sitio actualizado": "Sito aggiornato",
     "¿Eliminar el baneo de {ip}?": "Rimuovere il blocco per {ip}?",
+    "Reiniciar": "Riavvia",
+    "Parar": "Ferma",
+    "Programa reiniciado": "Programma riavviato",
+    "Programa detenido": "Programma fermato",
   };
 
   const DE = {
@@ -5615,6 +5647,10 @@
     "Redirigir HTTP a HTTPS": "HTTP auf HTTPS umleiten",
     "Sitio actualizado": "Website aktualisiert",
     "¿Eliminar el baneo de {ip}?": "Sperre für {ip} aufheben?",
+    "Reiniciar": "Neu starten",
+    "Parar": "Stoppen",
+    "Programa reiniciado": "Programm neu gestartet",
+    "Programa detenido": "Programm gestoppt",
   };
 
   const DICT = {

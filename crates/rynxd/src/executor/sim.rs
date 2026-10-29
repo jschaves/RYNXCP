@@ -895,6 +895,7 @@ impl Executor for SimExecutor {
                 kind: kind.into(),
                 status: status.into(),
                 detail: detail.into(),
+                unit: rynx_core::service_unit_for_program(name),
             })
             .collect())
     }

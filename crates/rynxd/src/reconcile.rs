@@ -2702,6 +2702,21 @@ impl Reconciler {
                     .await
                     .map_err(exec_error)?
             }
+            ConsoleAction::ServiceRestart { program } => {
+                let unit = rynx_core::service_unit_for_program(&program)
+                    .ok_or_else(|| WireError::unsupported("program has no systemd service"))?;
+                self.exec.restart_unit(&unit).await.map_err(exec_error)?;
+                format!("{unit} restarted")
+            }
+            ConsoleAction::ServiceStop { program } => {
+                let unit = rynx_core::service_unit_for_program(&program)
+                    .ok_or_else(|| WireError::unsupported("program has no systemd service"))?;
+                self.exec
+                    .set_unit_running(&unit, false)
+                    .await
+                    .map_err(exec_error)?;
+                format!("{unit} stopped")
+            }
         };
 
         let output = trim_console_output(output);

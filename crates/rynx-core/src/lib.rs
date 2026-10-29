@@ -6,12 +6,14 @@ pub mod config;
 pub mod crypto;
 pub mod paths;
 pub mod policy;
+pub mod programs;
 pub mod templates;
 pub mod validate;
 
 pub use config::{ApiConfig, DaemonConfig};
 pub use crypto::{constant_time_eq, random_hex, sha256_hex};
 pub use policy::PasswordPolicy;
+pub use programs::service_unit_for_program;
 pub use validate::*;
 
 use thiserror::Error;

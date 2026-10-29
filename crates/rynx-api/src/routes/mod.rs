@@ -141,6 +141,10 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/security/stats", get(security::stats))
         .route("/api/v1/console", post(console::run))
         .route("/api/v1/system/programs", get(programs::programs))
+        .route(
+            "/api/v1/system/programs/{program}/{action}",
+            post(programs::control),
+        )
         .route("/api/v1/system/updates", get(programs::updates))
         .route("/api/v1/system/updates/apply", post(programs::apply))
         .route("/api/v1/system", get(system::info))

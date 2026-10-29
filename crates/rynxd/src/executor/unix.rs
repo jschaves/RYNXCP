@@ -1967,6 +1967,7 @@ impl Executor for RealExecutor {
                 kind: kind.to_string(),
                 status: if installed { "installed" } else { "missing" }.into(),
                 detail: detail.to_string(),
+                unit: rynx_core::service_unit_for_program(name),
             });
         };
 

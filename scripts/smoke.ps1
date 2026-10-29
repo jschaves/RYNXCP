@@ -277,6 +277,13 @@ try {
     if ((RequestJson 'GET' '/api/v1/monitor/history?minutes=1440').kind -ne 'metrics_history') { throw 'metrics history missing' }
     $programs = RequestJson 'GET' '/api/v1/system/programs'
     if ($programs.kind -ne 'programs' -or $programs.programs.Count -lt 5) { throw 'programs list missing' }
+    $nginxProgram = @($programs.programs) | Where-Object { $_.name -eq 'nginx' }
+    if ($null -eq $nginxProgram -or -not $nginxProgram.unit) { throw 'program service unit missing' }
+    $programAction = RequestJson 'POST' '/api/v1/system/programs/nginx/restart'
+    if ($programAction.kind -ne 'console_output') { throw 'program restart action failed' }
+    ExpectStatus 400 {
+        RequestJson 'POST' '/api/v1/system/programs/nginx/explode'
+    }
     if ((RequestJson 'GET' '/api/v1/system/updates').kind -ne 'updates') { throw 'updates list missing' }
     $console = RequestJson 'POST' '/api/v1/console' @{ action = @{ action = 'disk_usage' } }
     if ($console.kind -ne 'console_output' -or -not $console.output) { throw 'console action failed' }
