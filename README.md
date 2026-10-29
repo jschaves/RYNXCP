@@ -363,6 +363,21 @@ fully non-interactive and generates the admin password. The panel is published
 on `https://<host>:2083` by default. See
 [docs/autoinstall.md](docs/autoinstall.md) for options and verification.
 
+### Supported distributions
+
+Use a clean, 64-bit installation:
+
+| Distribution | Support |
+| --- | --- |
+| Debian 13 (Trixie) | Recommended |
+| Ubuntu 26.04 LTS | Recommended; PHP 8.5 comes from the distribution |
+| Debian 12 (Bookworm) | Supported through the Sury PHP 8.5 repository |
+| Ubuntu 24.04 LTS | Supported through the Ondrej PHP 8.5 repository |
+
+Debian 10/11, Ubuntu 20.04/22.04 and derivatives such as Kali, Mint or similar
+are not recommended or tested. Dedicated Debian/Ubuntu repositories are used
+for PHP 8.5 when the distribution does not ship it.
+
 ## One-shot pre-installer (recommended)
 
 `deploy/preinstall.sh` prepares a fresh Debian/Ubuntu server end to end:
