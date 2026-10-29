@@ -595,6 +595,12 @@ cargo fmt --all --check
 powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1   # Windows
 ```
 
+## Contribute
+
+**Code.** Open an issue or a pull request. Keep the protocol local-first: no account server, and no post store on the relay.
+
+**Donate.** MagicRita is free software (no charge to run it). Support development on [Ko-fi](https://ko-fi.com/magicrita). For other questions, write to [magicrita.beta@gmail.com](mailto:magicrita.beta@gmail.com).
+
 ## License
 
 RYNXCP is free software: you can redistribute it and/or modify it under the terms
