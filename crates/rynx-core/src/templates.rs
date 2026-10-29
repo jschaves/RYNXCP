@@ -21,6 +21,7 @@ pub struct NginxContext<'a> {
     pub tls: &'a TlsMode,
     pub cert_dir: Option<&'a Path>,
     pub acme_root: &'a str,
+    pub force_https: bool,
 }
 
 fn server_names(ctx: &NginxContext<'_>) -> String {
@@ -134,7 +135,7 @@ pub fn nginx_site(ctx: &NginxContext<'_>) -> String {
         "    error_log /var/log/nginx/{}.error.log;",
         ctx.domain
     );
-    if tls_enabled {
+    if tls_enabled && ctx.force_https {
         let _ = writeln!(out, "    location ^~ /.well-known/acme-challenge/ {{");
         let _ = writeln!(out, "        root {};", ctx.acme_root);
         let _ = writeln!(out, "        default_type \"text/plain\";");
@@ -162,10 +163,12 @@ pub fn nginx_site(ctx: &NginxContext<'_>) -> String {
         let _ = writeln!(out, "    ssl_session_cache shared:RYNX:10m;");
         let _ = writeln!(out, "    ssl_session_timeout 1d;");
         let _ = writeln!(out, "    ssl_session_tickets off;");
-        let _ = writeln!(
-            out,
-            "    add_header Strict-Transport-Security \"max-age=31536000\" always;"
-        );
+        if ctx.force_https {
+            let _ = writeln!(
+                out,
+                "    add_header Strict-Transport-Security \"max-age=31536000\" always;"
+            );
+        }
         let _ = writeln!(
             out,
             "    access_log /var/log/nginx/{}.access.log;",
@@ -678,6 +681,7 @@ mod tests {
             tls,
             cert_dir: cert,
             acme_root: "/var/www/_acme",
+            force_https: true,
         }
     }
 
@@ -732,6 +736,19 @@ mod tests {
         assert!(conf.contains("return 301 https://$host$request_uri;"));
         assert!(conf.contains("fullchain.pem"));
         assert!(conf.contains("Strict-Transport-Security"));
+    }
+
+    #[test]
+    fn tls_site_can_serve_http_without_redirect() {
+        let tls = TlsMode::LetsEncrypt;
+        let cert = Path::new("/etc/letsencrypt/live/example.com");
+        let mut c = ctx(&tls, Some(cert));
+        c.force_https = false;
+        let conf = nginx_site(&c);
+        assert!(conf.contains("listen 443 ssl;"));
+        assert!(conf.contains("/.well-known/acme-challenge/"));
+        assert!(!conf.contains("return 301 https://$host$request_uri;"));
+        assert!(!conf.contains("Strict-Transport-Security"));
     }
 
     #[test]

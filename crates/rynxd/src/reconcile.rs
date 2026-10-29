@@ -843,6 +843,7 @@ impl Reconciler {
                 None
             },
             acme_root: &acme_root,
+            force_https: spec.force_https,
         };
         templates::nginx_site(&ctx)
     }
@@ -1141,8 +1142,14 @@ impl Reconciler {
             .await
             .map_err(exec_error)?;
 
-        // Re-render the site so Nginx starts serving TLS.
-        self.apply_website(&website.spec).await?;
+        // Re-render the site so Nginx starts serving TLS. Re-read the website
+        // because a concurrent edit may have changed TLS or redirect settings.
+        let latest = self
+            .state
+            .get_website(domain)
+            .map_err(internal)?
+            .unwrap_or(website);
+        self.apply_website(&latest.spec).await?;
         if let Err(err) = self.exec.apply_ftp_certificate(domain).await {
             tracing::warn!(domain = %domain, error = %err, "FTP certificate update failed");
         }

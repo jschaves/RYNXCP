@@ -251,6 +251,19 @@ try {
     if ($cert.kind -ne 'cert') { throw 'certificate issue failed' }
     $secureConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/secure.example.com.conf'
     if (-not (Select-String -Path $secureConf -Pattern 'listen 443 ssl' -Quiet)) { throw 'vhost was not upgraded to TLS' }
+    if (-not (Select-String -Path $secureConf -Pattern 'return 301 https://' -Quiet)) { throw 'TLS vhost does not redirect HTTP by default' }
+    $secureFalse = PostJson '/api/v1/websites' @{
+        domain = 'secure.example.com'; username = 'acme'; aliases = @('www.secure.example.com')
+        runtime = @{ engine = 'static' }; app = $null
+        docroot = 'public_html'; tls = 'lets_encrypt'; force_https = $false; enabled = $true
+    }
+    if ($secureFalse.website.spec.force_https -ne $false) { throw 'force_https=false was not persisted' }
+    $secureTrue = PostJson '/api/v1/websites' @{
+        domain = 'secure.example.com'; username = 'acme'; aliases = @('www.secure.example.com')
+        runtime = @{ engine = 'static' }; app = $null
+        docroot = 'public_html'; tls = 'lets_encrypt'; force_https = $true; enabled = $true
+    }
+    if ($secureTrue.website.spec.force_https -ne $true) { throw 'force_https=true was not persisted' }
     if ((RequestJson 'POST' '/api/v1/certs/renew').kind -ne 'ack') { throw 'certificate renew failed' }
 
     Write-Host '==> monitor, programs, console'

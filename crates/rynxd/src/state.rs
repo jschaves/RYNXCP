@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS websites (
     enabled       INTEGER NOT NULL,
     document_root TEXT NOT NULL,
     created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
+    updated_at    TEXT NOT NULL,
+    force_https   INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_websites_user ON websites(username);
 
@@ -244,6 +245,17 @@ impl StateStore {
         };
         let conn = store.conn()?;
         conn.execute_batch(SCHEMA)?;
+        let has_force_https: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('websites') WHERE name = 'force_https'",
+            [],
+            |row| row.get(0),
+        )?;
+        if has_force_https == 0 {
+            conn.execute(
+                "ALTER TABLE websites ADD COLUMN force_https INTEGER NOT NULL DEFAULT 1",
+                [],
+            )?;
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -353,7 +365,7 @@ impl StateStore {
     pub fn list_websites(&self) -> Result<Vec<WebsiteView>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at \
+            "SELECT domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at, force_https \
              FROM websites ORDER BY domain",
         )?;
         let rows = stmt.query_map([], map_website)?;
@@ -368,7 +380,7 @@ impl StateStore {
         let conn = self.conn()?;
         Ok(conn
             .query_row(
-                "SELECT domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at \
+                "SELECT domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at, force_https \
                  FROM websites WHERE domain = ?1",
                 params![domain],
                 map_website,
@@ -385,13 +397,13 @@ impl StateStore {
         };
         let conn = self.conn()?;
         conn.execute(
-            "INSERT INTO websites (domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+            "INSERT INTO websites (domain, id, username, aliases, runtime, app, docroot, tls, enabled, document_root, created_at, updated_at, force_https) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(domain) DO UPDATE SET \
                username = excluded.username, aliases = excluded.aliases, runtime = excluded.runtime, \
                app = excluded.app, docroot = excluded.docroot, tls = excluded.tls, \
                enabled = excluded.enabled, document_root = excluded.document_root, \
-               updated_at = excluded.updated_at",
+               force_https = excluded.force_https, updated_at = excluded.updated_at",
             params![
                 spec.domain,
                 id,
@@ -404,7 +416,8 @@ impl StateStore {
                 if spec.enabled { 1 } else { 0 },
                 document_root,
                 created_at,
-                now
+                now,
+                if spec.force_https { 1 } else { 0 }
             ],
         )?;
         Ok(WebsiteView {
@@ -1601,6 +1614,7 @@ fn map_website(row: &rusqlite::Row<'_>) -> rusqlite::Result<WebsiteView> {
             docroot: row.get(6)?,
             tls,
             enabled: row.get::<_, i64>(8)? != 0,
+            force_https: row.get::<_, i64>(12)? != 0,
             locale: None,
         },
         document_root: row.get(9)?,

@@ -1058,7 +1058,7 @@ async function renderWebsites() {
       td(spec.tls === 'disabled' ? badge('sin tls', 'warn') : badge(spec.tls === 'lets_encrypt' ? 'let\'s encrypt' : 'manual', 'info')),
       td(spec.enabled ? badge('activo', 'ok') : badge('deshabilitado', 'warn')),
       td(`<span class="mono small">${esc(spec.docroot)}</span>`),
-      td(writable ? btn('Eliminar', 'website-delete', spec.domain, 'tiny danger') : '', 'actions'),
+      td(writable ? [btn('Editar', 'website-edit', spec.domain), btn('Eliminar', 'website-delete', spec.domain, 'tiny danger')].join(' ') : '', 'actions'),
     ];
   });
 
@@ -1067,34 +1067,39 @@ async function renderWebsites() {
     table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aún no hay virtual hosts.');
 }
 
-function openWebsiteModal() {
+function openWebsiteModal(website = null) {
   if (!S.data.accounts.length) {
     toast('Primero crea una cuenta de hosting', 'error');
     return;
   }
+  const editing = Boolean(website);
+  const spec = website ? website.spec : null;
   const engineOptions = ['static', 'php', ...MANAGED].map((engine) => ({
     value: engine,
     label: RUNTIMES[engine].label,
   }));
   const accountItems = accountOptions(false);
+  const initialEngine = spec ? spec.runtime.engine : 'php';
+  const initialVersions = (RUNTIMES[initialEngine] && RUNTIMES[initialEngine].versions) || [];
 
   openModal({
-    title: 'Nuevo sitio web',
-    submitLabel: 'Publicar sitio',
+    title: editing ? T('Editar') + ' · ' + spec.domain : 'Nuevo sitio web',
+    submitLabel: editing ? 'Guardar cambios' : 'Publicar sitio',
     html: `<div class="form-grid">
-      ${fInput('domain', 'Dominio', { required: true, placeholder: 'example.com', help: 'se valida y normaliza en el daemon' })}
-      ${fInput('aliases', 'Alias', { placeholder: 'www.example.com, cdn.example.com', help: 'separados por coma' })}
-      ${fSelect('username', 'Cuenta', accountItems, { required: true })}
-      ${fSelect('engine', 'Runtime', engineOptions, { value: 'php' })}
-      ${fSelect('version', 'Versión', RUNTIMES.php.versions.map((v) => ({ value: v, label: v })), { value: '8.3' })}
-      ${fSelect('app', 'Aplicación', [{ value: '', label: '— selecciona —' }], { help: 'obligatoria para runtimes gestionados' })}
-      ${fInput('docroot', 'Document root', { value: 'public_html', required: true, help: 'relativo al home de la cuenta' })}
+      ${fInput('domain', 'Dominio', { value: spec ? spec.domain : '', required: true, placeholder: 'example.com', help: 'se valida y normaliza en el daemon' })}
+      ${fInput('aliases', 'Alias', { value: spec ? spec.aliases.join(', ') : '', placeholder: 'www.example.com, cdn.example.com', help: 'separados por coma' })}
+      ${fSelect('username', 'Cuenta', accountItems, { value: spec ? spec.username : undefined, required: true })}
+      ${fSelect('engine', 'Runtime', engineOptions, { value: initialEngine })}
+      ${fSelect('version', 'Versión', initialVersions.map((v) => ({ value: v, label: v })), { value: spec ? spec.runtime.version : '8.3' })}
+      ${fSelect('app', 'Aplicación', [{ value: '', label: '— selecciona —' }], { value: spec && spec.app ? spec.app : '', help: 'obligatoria para runtimes gestionados' })}
+      ${fInput('docroot', 'Document root', { value: spec ? spec.docroot : 'public_html', required: true, help: 'relativo al home de la cuenta' })}
       ${fSelect('tls', 'TLS', [
         { value: 'disabled', label: 'Sin TLS' },
         { value: 'lets_encrypt', label: "Let's Encrypt" },
         { value: 'manual', label: 'Certificado manual' },
-      ], { value: 'lets_encrypt' })}
-      <div class="full">${fCheck('enabled', 'Sitio activo', true)}</div>
+      ], { value: spec ? spec.tls : 'lets_encrypt' })}
+      <div class="full">${fCheck('force_https', 'Redirigir HTTP a HTTPS', spec ? spec.force_https : true)}</div>
+      <div class="full">${fCheck('enabled', 'Sitio activo', spec ? spec.enabled : true)}</div>
     </div>`,
     onMount: (form) => {
       const engine = form.elements.engine;
@@ -1133,7 +1138,16 @@ function openWebsiteModal() {
 
       engine.addEventListener('change', () => { syncVersions(); syncApps(); });
       username.addEventListener('change', applyAccountBackend);
-      applyAccountBackend();
+
+      if (editing) {
+        form.elements.domain.readOnly = true;
+        syncVersions();
+        syncApps();
+        version.value = spec.runtime.version || version.value;
+        app.value = spec.app || '';
+      } else {
+        applyAccountBackend();
+      }
     },
     onSubmit: async (form) => {
       const engine = val(form, 'engine');
@@ -1156,11 +1170,12 @@ function openWebsiteModal() {
           app,
           docroot: val(form, 'docroot'),
           tls: val(form, 'tls'),
+          force_https: bool(form, 'force_https'),
           enabled: bool(form, 'enabled'),
           locale: window.RYNX_I18N ? window.RYNX_I18N.getLanguage() : 'en',
         },
       });
-      toast('Sitio publicado');
+      toast(editing ? T('Sitio actualizado') : 'Sitio publicado');
       if (result.cert_job) {
         showCertJob(result.cert_job, domain, { email: S.user.email }).catch(() => {});
       }
@@ -2667,6 +2682,11 @@ async function handleAction(action, id) {
     }
     case 'website-new':
       return openWebsiteModal();
+    case 'website-edit': {
+      const site = (S.data.websites || []).find((item) => item.spec.domain === id);
+      if (site) return openWebsiteModal(site);
+      return undefined;
+    }
     case 'files-refresh':
       return navigate('files');
     case 'file-open':

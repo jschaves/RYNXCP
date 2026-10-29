@@ -693,6 +693,8 @@
     "WEB - APPS": "WEB - APPS",
     "Dominios webs - apps": "Websites - apps",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "The package limit for websites and apps has been reached ({limit}).",
+    "Redirigir HTTP a HTTPS": "Redirect HTTP to HTTPS",
+    "Sitio actualizado": "Website updated",
   };
 
   const PT = {
@@ -1305,6 +1307,8 @@
     "WEB - APPS": "WEB - APPS",
     "Dominios webs - apps": "Sites - apps",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "O limite do pacote para sites e apps foi atingido ({limit}).",
+    "Redirigir HTTP a HTTPS": "Redirecionar HTTP para HTTPS",
+    "Sitio actualizado": "Site atualizado",
   };
 
   const FR = {
@@ -1918,6 +1922,8 @@
     "WEB - APPS": "WEB - APPS",
     "Dominios webs - apps": "Sites web - applications",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "La limite du forfait pour les sites et applications est atteinte ({limit}).",
+    "Redirigir HTTP a HTTPS": "Rediriger HTTP vers HTTPS",
+    "Sitio actualizado": "Site mis à jour",
   };
 
   const AR = {
@@ -2533,6 +2539,8 @@
     "WEB - APPS": "الويب - التطبيقات",
     "Dominios webs - apps": "المواقع - التطبيقات",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "تم الوصول إلى حد الحزمة للمواقع والتطبيقات ({limit}).",
+    "Redirigir HTTP a HTTPS": "إعادة توجيه HTTP إلى HTTPS",
+    "Sitio actualizado": "تم تحديث الموقع",
   };
 
   const RU = {
@@ -3147,6 +3155,8 @@
     "WEB - APPS": "ВЕБ - ПРИЛОЖЕНИЯ",
     "Dominios webs - apps": "Сайты - приложения",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "Достигнут лимит пакета для сайтов и приложений ({limit}).",
+    "Redirigir HTTP a HTTPS": "Перенаправлять HTTP на HTTPS",
+    "Sitio actualizado": "Сайт обновлён",
   };
 
   const ZH = {
@@ -3758,6 +3768,8 @@
     "WEB - APPS": "网站 - 应用",
     "Dominios webs - apps": "网站 - 应用",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "已达到套餐的网站和应用数量上限（{limit}）。",
+    "Redirigir HTTP a HTTPS": "将 HTTP 重定向到 HTTPS",
+    "Sitio actualizado": "网站已更新",
   };
 
   const JA = {
@@ -4372,6 +4384,8 @@
     "WEB - APPS": "WEB - アプリ",
     "Dominios webs - apps": "ウェブサイト - アプリ",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "パッケージのウェブサイトとアプリの上限に達しました（{limit}）。",
+    "Redirigir HTTP a HTTPS": "HTTP を HTTPS にリダイレクト",
+    "Sitio actualizado": "サイトを更新しました",
   };
 
   const IT = {
@@ -4980,6 +4994,8 @@
     "WEB - APPS": "WEB - APP",
     "Dominios webs - apps": "Siti web - app",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "È stato raggiunto il limite del pacchetto per siti e app ({limit}).",
+    "Redirigir HTTP a HTTPS": "Reindirizza HTTP a HTTPS",
+    "Sitio actualizado": "Sito aggiornato",
   };
 
   const DE = {
@@ -5588,6 +5604,8 @@
     "WEB - APPS": "WEB - APPS",
     "Dominios webs - apps": "Websites - Apps",
     "El paquete ha alcanzado el límite de sitios y apps ({limit}).": "Das Paketlimit für Websites und Apps wurde erreicht ({limit}).",
+    "Redirigir HTTP a HTTPS": "HTTP auf HTTPS umleiten",
+    "Sitio actualizado": "Website aktualisiert",
   };
 
   const DICT = {
