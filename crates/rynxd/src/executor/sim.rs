@@ -896,6 +896,13 @@ impl Executor for SimExecutor {
                 status: status.into(),
                 detail: detail.into(),
                 unit: rynx_core::service_unit_for_program(name),
+                service_status: if status == "installed"
+                    && rynx_core::service_unit_for_program(name).is_some()
+                {
+                    Some("active".into())
+                } else {
+                    None
+                },
             })
             .collect())
     }

@@ -279,6 +279,7 @@ try {
     if ($programs.kind -ne 'programs' -or $programs.programs.Count -lt 5) { throw 'programs list missing' }
     $nginxProgram = @($programs.programs) | Where-Object { $_.name -eq 'nginx' }
     if ($null -eq $nginxProgram -or -not $nginxProgram.unit) { throw 'program service unit missing' }
+    if ($nginxProgram.service_status -ne 'active') { throw 'program service status missing' }
     $programAction = RequestJson 'POST' '/api/v1/system/programs/nginx/restart'
     if ($programAction.kind -ne 'console_output') { throw 'program restart action failed' }
     ExpectStatus 400 {

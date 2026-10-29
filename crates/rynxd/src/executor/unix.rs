@@ -1968,6 +1968,7 @@ impl Executor for RealExecutor {
                 status: if installed { "installed" } else { "missing" }.into(),
                 detail: detail.to_string(),
                 unit: rynx_core::service_unit_for_program(name),
+                service_status: None,
             });
         };
 
@@ -2069,6 +2070,15 @@ impl Executor for RealExecutor {
             Some(format!("v{}", rynx_proto::DAEMON_VERSION)),
             "control plane",
         );
+        for program in &mut out {
+            if let Some(unit) = program.unit.clone() {
+                program.service_status = probe(
+                    "systemctl",
+                    &["show", "-p", "ActiveState", "--value", unit.as_str()],
+                )
+                .await;
+            }
+        }
         Ok(out)
     }
 

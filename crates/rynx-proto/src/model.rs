@@ -724,6 +724,9 @@ pub struct ProgramInfo {
     /// Systemd unit used by the restart/stop controls, when the program is a service.
     #[serde(default)]
     pub unit: Option<String>,
+    /// Current systemd state: active, inactive, failed, ...
+    #[serde(default)]
+    pub service_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

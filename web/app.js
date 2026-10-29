@@ -172,6 +172,17 @@ function programUnit(program) {
   return '';
 }
 
+function programServiceBadge(program) {
+  const status = program.service_status;
+  if (!status) return '?';
+  if (status === 'active') return badge('arrancado', 'ok');
+  if (status === 'failed') return badge('fallido', 'bad');
+  if (status === 'activating') return badge('arrancando', 'warn');
+  if (status === 'deactivating') return badge('parando', 'warn');
+  if (status === 'inactive' || status === 'dead') return badge('parado', 'warn');
+  return badge(status, '');
+}
+
 function programButton(action, program, label, path) {
   const text = esc(T(label));
   return `<button class="btn tiny ghost" data-action="${action}" data-id="${esc(program)}" title="${text}" aria-label="${text}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="${text}"><title>${text}</title>${path}</svg></button>`;
@@ -3425,6 +3436,7 @@ async function renderPrograms() {
     td(`<span class="mono small">${esc(program.version)}</span>`),
     td(`<span class="chip">${esc(program.kind)}</span>`),
     td(program.status === 'installed' ? badge('instalado', 'ok') : badge('ausente', 'warn')),
+    td(programServiceBadge(program)),
     td(programUnit(program) && program.status === 'installed' ? [
       programButton('program-restart', program.name, 'Reiniciar', '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>'),
       programButton('program-stop', program.name, 'Parar', '<rect x="6" y="6" width="12" height="12" rx="1"/>'),

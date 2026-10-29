@@ -700,6 +700,10 @@
     "Parar": "Stop",
     "Programa reiniciado": "Program restarted",
     "Programa detenido": "Program stopped",
+    "Arrancado": "Running",
+    "Parado": "Stopped",
+    "Arrancando": "Starting",
+    "Parando": "Stopping",
   };
 
   const PT = {
@@ -1319,6 +1323,10 @@
     "Parar": "Parar",
     "Programa reiniciado": "Programa reiniciado",
     "Programa detenido": "Programa parado",
+    "Arrancado": "Em execução",
+    "Parado": "Parado",
+    "Arrancando": "Iniciando",
+    "Parando": "Parando",
   };
 
   const FR = {
@@ -1939,6 +1947,10 @@
     "Parar": "Arrêter",
     "Programa reiniciado": "Programme redémarré",
     "Programa detenido": "Programme arrêté",
+    "Arrancado": "En cours",
+    "Parado": "Arrêté",
+    "Arrancando": "Démarrage",
+    "Parando": "Arrêt en cours",
   };
 
   const AR = {
@@ -2561,6 +2573,10 @@
     "Parar": "إيقاف",
     "Programa reiniciado": "تمت إعادة تشغيل البرنامج",
     "Programa detenido": "تم إيقاف البرنامج",
+    "Arrancado": "يعمل",
+    "Parado": "متوقف",
+    "Arrancando": "يبدأ",
+    "Parando": "يتوقف",
   };
 
   const RU = {
@@ -3182,6 +3198,10 @@
     "Parar": "Остановить",
     "Programa reiniciado": "Программа перезапущена",
     "Programa detenido": "Программа остановлена",
+    "Arrancado": "Запущен",
+    "Parado": "Остановлен",
+    "Arrancando": "Запускается",
+    "Parando": "Останавливается",
   };
 
   const ZH = {
@@ -3800,6 +3820,10 @@
     "Parar": "停止",
     "Programa reiniciado": "程序已重启",
     "Programa detenido": "程序已停止",
+    "Arrancado": "运行中",
+    "Parado": "已停止",
+    "Arrancando": "正在启动",
+    "Parando": "正在停止",
   };
 
   const JA = {
@@ -4421,6 +4445,10 @@
     "Parar": "停止",
     "Programa reiniciado": "プログラムを再起動しました",
     "Programa detenido": "プログラムを停止しました",
+    "Arrancado": "実行中",
+    "Parado": "停止中",
+    "Arrancando": "起動中",
+    "Parando": "停止中",
   };
 
   const IT = {
@@ -5036,6 +5064,10 @@
     "Parar": "Ferma",
     "Programa reiniciado": "Programma riavviato",
     "Programa detenido": "Programma fermato",
+    "Arrancado": "In esecuzione",
+    "Parado": "Fermato",
+    "Arrancando": "Avvio",
+    "Parando": "Arresto",
   };
 
   const DE = {
@@ -5651,6 +5683,10 @@
     "Parar": "Stoppen",
     "Programa reiniciado": "Programm neu gestartet",
     "Programa detenido": "Programm gestoppt",
+    "Arrancado": "Läuft",
+    "Parado": "Gestoppt",
+    "Arrancando": "Startet",
+    "Parando": "Wird gestoppt",
   };
 
   const DICT = {
