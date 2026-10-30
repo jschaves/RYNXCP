@@ -449,6 +449,14 @@ The view includes a **Test provider** action with the endpoint, model and
 latency, and findings that stop appearing are marked as resolved automatically.
 An existing finding that increases its severity sends a new alert email.
 
+### Agent localization
+
+The agent renders deterministic findings and alert emails in the panel owner's
+locale (falling back to the first administrator). Spanish and English templates
+are complete and live in `crates/rynx-api/src/agent/messages.rs`; other locales
+fall back to English until their strings are added. LLM output follows the
+`locale` embedded in the redacted digest (Spanish for `es`, English otherwise).
+
 ## Databases
 
 A website can create one or more MariaDB databases. The database and its user

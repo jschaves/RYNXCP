@@ -1,16 +1,21 @@
 //! Deterministic rules. These run without an LLM and never touch the system.
 
+use serde_json::json;
+
 use rynx_core::crypto::sha256_hex;
 use rynx_panel::AgentFindingInput;
 use rynx_proto::CertificateStatus;
 
 use super::collect::Snapshot;
+use super::messages;
 
 const FILTER_PROGRAMS: [&str; 4] = ["clamav", "clamav-milter", "spamassassin", "spamass-milter"];
 
 struct RuleFinding {
     rule: &'static str,
     target: String,
+    code: &'static str,
+    params: serde_json::Value,
     severity: &'static str,
     category: &'static str,
     title: String,
@@ -20,23 +25,33 @@ struct RuleFinding {
 }
 
 impl RuleFinding {
-    fn into_input(self) -> AgentFindingInput {
+    fn into_input(self, locale: &str) -> AgentFindingInput {
+        let mut title = self.title;
+        let mut summary = self.summary;
+        let mut recommendation = self.recommendation.to_string();
+        if locale != "es" {
+            if let Some(text) = messages::english(self.code, &self.params) {
+                title = text.title;
+                summary = text.summary;
+                recommendation = text.recommendation;
+            }
+        }
         let fingerprint = sha256_hex(format!("{}:{}", self.rule, self.target));
         AgentFindingInput {
             fingerprint,
             severity: self.severity.to_string(),
             category: self.category.to_string(),
-            title: self.title,
-            summary: self.summary,
+            title,
+            summary,
             evidence: self.evidence,
-            recommendation: self.recommendation.to_string(),
+            recommendation,
             source: "rules".to_string(),
         }
     }
 }
 
-pub fn evaluate(snapshot: &Snapshot) -> Vec<AgentFindingInput> {
-    let mut out = Vec::new();
+pub fn evaluate(snapshot: &Snapshot, locale: &str) -> Vec<AgentFindingInput> {
+    let mut out: Vec<RuleFinding> = Vec::new();
     auth_rules(snapshot, &mut out);
     service_rules(snapshot, &mut out);
     filter_program_rules(snapshot, &mut out);
@@ -45,10 +60,12 @@ pub fn evaluate(snapshot: &Snapshot) -> Vec<AgentFindingInput> {
     resource_rules(snapshot, &mut out);
     certificate_rules(snapshot, &mut out);
     firewall_rules(snapshot, &mut out);
-    out
+    out.into_iter()
+        .map(|finding| finding.into_input(locale))
+        .collect()
 }
 
-fn auth_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn auth_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let stats = &snapshot.auth_stats;
     if stats.failures >= 20 {
         let severity = if stats.failures >= 100 {
@@ -56,49 +73,47 @@ fn auth_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
         } else {
             "high"
         };
-        out.push(
-            RuleFinding {
-                rule: "auth-failures",
-                target: "panel".into(),
-                severity,
-                category: "security",
-                title: "Intentos de acceso fallidos elevados".into(),
-                summary: format!(
-                    "{} fallos de autenticación en las últimas 24 horas.",
-                    stats.failures
-                ),
-                evidence: vec![
-                    format!("fallos={}", stats.failures),
-                    format!("IPs únicas={}", stats.unique_ips),
-                ],
-                recommendation:
-                    "Revisa la vista Seguridad, bloquea las IPs sospechosas y comprueba fail2ban.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "auth-failures",
+            target: "panel".into(),
+            code: "auth-failures",
+            params: json!({ "failures": stats.failures, "unique_ips": stats.unique_ips }),
+            severity,
+            category: "security",
+            title: "Intentos de acceso fallidos elevados".into(),
+            summary: format!(
+                "{} fallos de autenticación en las últimas 24 horas.",
+                stats.failures
+            ),
+            evidence: vec![
+                format!("fallos={}", stats.failures),
+                format!("IPs únicas={}", stats.unique_ips),
+            ],
+            recommendation:
+                "Revisa la vista Seguridad, bloquea las IPs sospechosas y comprueba fail2ban.",
+        });
     }
     if stats.blocked >= 10 {
-        out.push(
-            RuleFinding {
-                rule: "auth-blocked",
-                target: "panel".into(),
-                severity: "medium",
-                category: "security",
-                title: "Bloqueos de autenticación".into(),
-                summary: format!(
-                    "{} inicios de sesión bloqueados en las últimas 24 horas.",
-                    stats.blocked
-                ),
-                evidence: vec![format!("bloqueos={}", stats.blocked)],
-                recommendation:
-                    "Comprueba si los bloqueos vienen de fuerza bruta o de usuarios legítimos.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "auth-blocked",
+            target: "panel".into(),
+            code: "auth-blocked",
+            params: json!({ "blocked": stats.blocked }),
+            severity: "medium",
+            category: "security",
+            title: "Bloqueos de autenticación".into(),
+            summary: format!(
+                "{} inicios de sesión bloqueados en las últimas 24 horas.",
+                stats.blocked
+            ),
+            evidence: vec![format!("bloqueos={}", stats.blocked)],
+            recommendation:
+                "Comprueba si los bloqueos vienen de fuerza bruta o de usuarios legítimos.",
+        });
     }
 }
 
-fn service_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn service_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     for service in &snapshot.services {
         if service.status != "failed" {
             continue;
@@ -107,6 +122,8 @@ fn service_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
             RuleFinding {
                 rule: "service-failed",
                 target: service.unit.clone(),
+                code: "service-failed",
+                params: json!({ "name": service.name, "unit": service.unit }),
                 severity: "high",
                 category: "reliability",
                 title: format!("Servicio caído: {}", service.name),
@@ -121,12 +138,11 @@ fn service_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
                 ],
                 recommendation: "Revisa el estado del servicio y su journal; reinícialo desde Programas si procede.",
             }
-            .into_input(),
         );
     }
 }
 
-fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let missing: Vec<&str> = snapshot
         .programs
         .iter()
@@ -136,25 +152,24 @@ fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
         .map(|program| program.name.as_str())
         .collect();
     if !missing.is_empty() {
-        out.push(
-            RuleFinding {
-                rule: "mail-filter-missing",
-                target: "mail-filters".into(),
-                severity: "high",
-                category: "security",
-                title: "Filtros de correo incompletos".into(),
-                summary: format!(
-                    "Faltan componentes de antivirus/antispam: {}.",
-                    missing.join(", ")
-                ),
-                evidence: missing
-                    .iter()
-                    .map(|name| format!("ausente={name}"))
-                    .collect(),
-                recommendation: "Reinstala el stack de correo con el instalador o desde Programas.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "mail-filter-missing",
+            target: "mail-filters".into(),
+            code: "mail-filter-missing",
+            params: json!({ "missing": missing.join(", ") }),
+            severity: "high",
+            category: "security",
+            title: "Filtros de correo incompletos".into(),
+            summary: format!(
+                "Faltan componentes de antivirus/antispam: {}.",
+                missing.join(", ")
+            ),
+            evidence: missing
+                .iter()
+                .map(|name| format!("ausente={name}"))
+                .collect(),
+            recommendation: "Reinstala el stack de correo con el instalador o desde Programas.",
+        });
     }
 
     for program in &snapshot.programs {
@@ -167,31 +182,30 @@ fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
         if matches!(status, "active" | "activating") {
             continue;
         }
-        out.push(
-            RuleFinding {
-                rule: "mail-filter-inactive",
-                target: program.name.clone(),
-                severity: "medium",
-                category: "reliability",
-                title: format!("Filtro de correo detenido: {}", program.name),
-                summary: format!(
-                    "{} está instalado pero su unidad reporta '{}'.",
-                    program.name, status
-                ),
-                evidence: vec![
-                    format!("programa={}", program.name),
-                    format!("estado={status}"),
-                    format!("unidad={}", program.unit.clone().unwrap_or_default()),
-                ],
-                recommendation:
-                    "Reinicia el componente desde la vista Antivirus y antispam o desde Programas.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "mail-filter-inactive",
+            target: program.name.clone(),
+            code: "mail-filter-inactive",
+            params: json!({ "name": program.name, "status": status }),
+            severity: "medium",
+            category: "reliability",
+            title: format!("Filtro de correo detenido: {}", program.name),
+            summary: format!(
+                "{} está instalado pero su unidad reporta '{}'.",
+                program.name, status
+            ),
+            evidence: vec![
+                format!("programa={}", program.name),
+                format!("estado={status}"),
+                format!("unidad={}", program.unit.clone().unwrap_or_default()),
+            ],
+            recommendation:
+                "Reinicia el componente desde la vista Antivirus y antispam o desde Programas.",
+        });
     }
 }
 
-fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let mut alerts = snapshot
         .filter_events
         .iter()
@@ -201,6 +215,12 @@ fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) 
             RuleFinding {
                 rule: "antivirus-detection",
                 target: format!("{}:{}", event.service, event.message),
+                code: "antivirus-detection",
+                params: json!({
+                    "service": event.service,
+                    "message": event.message,
+                    "at": event.at
+                }),
                 severity: "high",
                 category: "security",
                 title: format!("Detección de malware en {}", event.service),
@@ -208,7 +228,6 @@ fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) 
                 evidence: vec![format!("fecha={}", event.at), format!("unidad={}", event.service)],
                 recommendation: "Aísla el fichero, revisa el buzón o cuenta afectada y ejecuta un análisis completo.",
             }
-            .into_input(),
         );
     }
 
@@ -225,6 +244,8 @@ fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) 
             RuleFinding {
                 rule: "antispam-volume",
                 target: "mail".into(),
+                code: "antispam-volume",
+                params: json!({ "spam": spam }),
                 severity,
                 category: "security",
                 title: "Volumen alto de spam reciente".into(),
@@ -232,12 +253,11 @@ fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) 
                 evidence: vec![format!("eventos={spam}")],
                 recommendation: "Revisa las reglas de SpamAssassin, el volumen de correo y si hay una campaña de spam en curso.",
             }
-            .into_input(),
         );
     }
 }
 
-fn update_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn update_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let security: Vec<_> = snapshot
         .updates
         .iter()
@@ -251,35 +271,34 @@ fn update_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
     } else {
         "medium"
     };
-    out.push(
-        RuleFinding {
-            rule: "security-updates",
-            target: "apt".into(),
-            severity,
-            category: "maintenance",
-            title: "Actualizaciones de seguridad pendientes".into(),
-            summary: format!(
-                "{} actualizaciones marcadas como de seguridad están pendientes.",
-                security.len()
-            ),
-            evidence: security
-                .iter()
-                .take(10)
-                .map(|update| {
-                    format!(
-                        "{} {} -> {}",
-                        update.package, update.current_version, update.candidate_version
-                    )
-                })
-                .collect(),
-            recommendation:
-                "Aplica las actualizaciones desde Programas durante una ventana de mantenimiento.",
-        }
-        .into_input(),
-    );
+    out.push(RuleFinding {
+        rule: "security-updates",
+        target: "apt".into(),
+        code: "security-updates",
+        params: json!({ "count": security.len() }),
+        severity,
+        category: "maintenance",
+        title: "Actualizaciones de seguridad pendientes".into(),
+        summary: format!(
+            "{} actualizaciones marcadas como de seguridad están pendientes.",
+            security.len()
+        ),
+        evidence: security
+            .iter()
+            .take(10)
+            .map(|update| {
+                format!(
+                    "{} {} -> {}",
+                    update.package, update.current_version, update.candidate_version
+                )
+            })
+            .collect(),
+        recommendation:
+            "Aplica las actualizaciones desde Programas durante una ventana de mantenimiento.",
+    });
 }
 
-fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn resource_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let Some(system) = &snapshot.system else {
         return;
     };
@@ -294,6 +313,8 @@ fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
                 RuleFinding {
                     rule: "disk-usage",
                     target: "node".into(),
+                    code: "disk-usage",
+                    params: json!({ "percent": format!("{percent:.1}") }),
                     severity,
                     category: "reliability",
                     title: "Uso de disco elevado".into(),
@@ -304,7 +325,6 @@ fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
                     ],
                     recommendation: "Revisa backups, logs y cuentas con más consumo antes de que el disco se llene.",
                 }
-                .into_input(),
             );
         }
     }
@@ -317,6 +337,8 @@ fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
                 RuleFinding {
                     rule: "memory-usage",
                     target: "node".into(),
+                    code: "memory-usage",
+                    params: json!({ "percent": format!("{percent:.1}") }),
                     severity,
                     category: "reliability",
                     title: "Memoria usada elevada".into(),
@@ -327,7 +349,6 @@ fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
                     ],
                     recommendation: "Revisa procesos, contenedores y límites de aplicaciones antes de que el OOM killer actúe.",
                 }
-                .into_input(),
             );
         }
     }
@@ -336,53 +357,53 @@ fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
     let per_cpu = load1 / cpus;
     if per_cpu >= 2.0 {
         let severity = if per_cpu >= 4.0 { "high" } else { "medium" };
-        out.push(
-            RuleFinding {
-                rule: "load-average",
-                target: "node".into(),
-                severity,
-                category: "reliability",
-                title: "Carga del sistema elevada".into(),
-                summary: format!("Load 1m por CPU: {per_cpu:.2}."),
-                evidence: vec![
-                    format!("load1={load1:.2}"),
-                    format!("cpus={}", system.cpu_count),
-                ],
-                recommendation: "Identifica los procesos que consumen CPU y revisa las aplicaciones gestionadas.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "load-average",
+            target: "node".into(),
+            code: "load-average",
+            params: json!({ "per_cpu": format!("{per_cpu:.2}") }),
+            severity,
+            category: "reliability",
+            title: "Carga del sistema elevada".into(),
+            summary: format!("Load 1m por CPU: {per_cpu:.2}."),
+            evidence: vec![
+                format!("load1={load1:.2}"),
+                format!("cpus={}", system.cpu_count),
+            ],
+            recommendation:
+                "Identifica los procesos que consumen CPU y revisa las aplicaciones gestionadas.",
+        });
     }
 }
 
-fn certificate_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn certificate_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let mut emitted = 0;
     for cert in &snapshot.certs {
-        let (severity, label) = match cert.status {
-            CertificateStatus::Expired => ("high", "vencido"),
-            CertificateStatus::Expiring => ("medium", "por vencer"),
+        let (severity, label, code) = match cert.status {
+            CertificateStatus::Expired => ("high", "vencido", "certificate-expired"),
+            CertificateStatus::Expiring => ("medium", "por vencer", "certificate-expiring"),
             _ => continue,
         };
-        out.push(
-            RuleFinding {
-                rule: "certificate",
-                target: cert.domain.clone(),
-                severity,
-                category: "security",
-                title: format!("Certificado {label}: {}", cert.domain),
-                summary: format!(
-                    "El certificado de {} está {} (vence {}).",
-                    cert.domain, label, cert.not_after
-                ),
-                evidence: vec![
-                    format!("dominio={}", cert.domain),
-                    format!("emisor={}", cert.issuer),
-                    format!("vence={}", cert.not_after),
-                ],
-                recommendation: "Renueva el certificado desde la vista Certificados o vuelve a publicar el sitio.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "certificate",
+            target: cert.domain.clone(),
+            code,
+            params: json!({ "domain": cert.domain, "not_after": cert.not_after }),
+            severity,
+            category: "security",
+            title: format!("Certificado {label}: {}", cert.domain),
+            summary: format!(
+                "El certificado de {} está {} (vence {}).",
+                cert.domain, label, cert.not_after
+            ),
+            evidence: vec![
+                format!("dominio={}", cert.domain),
+                format!("emisor={}", cert.issuer),
+                format!("vence={}", cert.not_after),
+            ],
+            recommendation:
+                "Renueva el certificado desde la vista Certificados o vuelve a publicar el sitio.",
+        });
         emitted += 1;
         if emitted >= 10 {
             break;
@@ -390,26 +411,25 @@ fn certificate_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
     }
 }
 
-fn firewall_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+fn firewall_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     let Some(firewall) = &snapshot.firewall else {
         return;
     };
     let blocked = firewall.blocked.len();
     if blocked >= 200 {
-        out.push(
-            RuleFinding {
-                rule: "firewall-blocks",
-                target: "firewall".into(),
-                severity: "medium",
-                category: "security",
-                title: "Muchas IPs bloqueadas".into(),
-                summary: format!("{blocked} direcciones IP están bloqueadas ahora mismo."),
-                evidence: vec![format!("bloqueadas={blocked}")],
-                recommendation:
-                    "Comprueba si hay un ataque distribuido y revisa las reglas de fail2ban.",
-            }
-            .into_input(),
-        );
+        out.push(RuleFinding {
+            rule: "firewall-blocks",
+            target: "firewall".into(),
+            code: "firewall-blocks",
+            params: json!({ "blocked": blocked }),
+            severity: "medium",
+            category: "security",
+            title: "Muchas IPs bloqueadas".into(),
+            summary: format!("{blocked} direcciones IP están bloqueadas ahora mismo."),
+            evidence: vec![format!("bloqueadas={blocked}")],
+            recommendation:
+                "Comprueba si hay un ataque distribuido y revisa las reglas de fail2ban.",
+        });
     }
 }
 
@@ -451,7 +471,7 @@ mod tests {
             candidate_version: "1.1".into(),
             security: true,
         });
-        let findings = evaluate(&snapshot);
+        let findings = evaluate(&snapshot, "es");
         assert!(findings
             .iter()
             .any(|finding| finding.title.contains("seguridad")));
@@ -468,7 +488,7 @@ mod tests {
             severity: "alert".into(),
             message: "Eicar FOUND".into(),
         });
-        let findings = evaluate(&snapshot);
+        let findings = evaluate(&snapshot, "es");
         assert!(findings.iter().any(|finding| {
             finding.category == "security"
                 && finding.severity == "high"
@@ -489,7 +509,7 @@ mod tests {
             unit: Some("spamass-milter".into()),
             service_status: Some("active".into()),
         });
-        let findings = evaluate(&snapshot);
+        let findings = evaluate(&snapshot, "es");
         assert!(findings
             .iter()
             .any(|finding| finding.severity == "critical"));
@@ -506,7 +526,7 @@ mod tests {
             status: CertificateStatus::Expired,
             path: "/etc/cert".into(),
         });
-        let findings = evaluate(&snapshot);
+        let findings = evaluate(&snapshot, "es");
         assert!(findings
             .iter()
             .any(|finding| finding.title.contains("Certificado")));
@@ -515,8 +535,8 @@ mod tests {
     #[test]
     fn findings_are_deterministic() {
         let snapshot = base_snapshot();
-        let first = evaluate(&snapshot);
-        let second = evaluate(&snapshot);
+        let first = evaluate(&snapshot, "es");
+        let second = evaluate(&snapshot, "es");
         assert_eq!(first.len(), second.len());
         for (left, right) in first.iter().zip(second.iter()) {
             assert_eq!(left.fingerprint, right.fingerprint);

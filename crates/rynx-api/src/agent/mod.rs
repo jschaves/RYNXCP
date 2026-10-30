@@ -6,6 +6,7 @@
 //! findings. It never executes remediation.
 
 pub mod collect;
+pub mod messages;
 pub mod provider;
 pub mod redact;
 pub mod rules;
@@ -13,9 +14,23 @@ pub mod rules;
 use std::time::Duration;
 
 use rynx_core::crypto::{now_rfc3339, now_unix, random_hex};
-use rynx_panel::{AgentFinding, AgentRun};
+use rynx_panel::{AgentFinding, AgentRun, Role};
 
 use crate::state::ApiState;
+
+/// Locale used for deterministic findings and alert emails. The owner wins,
+/// then the first administrator; Spanish is the default.
+pub(crate) fn agent_locale(state: &ApiState) -> String {
+    let Ok(users) = state.db.list_users() else {
+        return "es".to_string();
+    };
+    users
+        .iter()
+        .find(|user| user.role == Role::Owner)
+        .or_else(|| users.iter().find(|user| user.role == Role::Admin))
+        .and_then(|user| user.locale.clone())
+        .unwrap_or_else(|| "es".to_string())
+}
 
 pub struct RunSummary {
     pub run: AgentRun,
@@ -28,6 +43,7 @@ pub struct RunSummary {
 pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
     let _guard = state.agent_lock.lock().await;
     let started_at = now_rfc3339();
+    let locale = agent_locale(state);
     let snapshot = collect::collect(state, state.cfg.agent.max_events).await;
     if snapshot.system.is_none() && snapshot.services.is_empty() && snapshot.programs.is_empty() {
         let run = AgentRun {
@@ -46,8 +62,8 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
         return Err("daemon unavailable".into());
     }
 
-    let mut findings = rules::evaluate(&snapshot);
-    let enhancement = provider::enhance(state, &snapshot, &findings)
+    let mut findings = rules::evaluate(&snapshot, &locale);
+    let enhancement = provider::enhance(state, &snapshot, &findings, &locale)
         .await
         .unwrap_or_else(|err| {
             tracing::warn!(
@@ -104,7 +120,7 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
     if let Err(err) = state.db.record_agent_run(&run) {
         tracing::warn!(error = %err, "agent run could not be recorded");
     }
-    let notified = notify(state, &alerts).await;
+    let notified = notify(state, &alerts, &locale).await;
 
     Ok(RunSummary {
         run,
@@ -138,7 +154,7 @@ pub fn spawn(state: ApiState) {
     });
 }
 
-async fn notify(state: &ApiState, findings: &[AgentFinding]) -> usize {
+async fn notify(state: &ApiState, findings: &[AgentFinding], locale: &str) -> usize {
     if !state.cfg.agent.email_alerts || findings.is_empty() {
         return 0;
     }
@@ -148,17 +164,20 @@ async fn notify(state: &ApiState, findings: &[AgentFinding]) -> usize {
     let Some(mailer) = state.mailer.as_ref() else {
         return 0;
     };
-    let subject = format!("RYNXCP: {} alerta(s) del agente", findings.len());
+    let (recommendation_label, severity_label) = messages::email_labels(locale);
+    let subject = messages::email_subject(locale, findings.len());
     let body = findings
         .iter()
         .take(20)
         .map(|finding| {
             format!(
-                "[{}] {}: {}\n{}\nRecomendación: {}\n",
+                "{}: {}\n{} [{}]\n{}\n{}: {}\n",
+                severity_label,
                 finding.severity.to_uppercase(),
-                finding.category,
                 finding.title,
+                finding.category,
                 finding.summary,
+                recommendation_label,
                 finding.recommendation
             )
         })
