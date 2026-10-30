@@ -170,6 +170,23 @@ and then a valid MariaDB login.
 For TLS and mail, the domain DNS must already point at the server; that is the
 only step outside the script.
 
+### AI agent verification
+
+After an install with `--agent-llm local` or `hybrid`, the provider is already
+provisioned. These commands are diagnostics only:
+
+```bash
+systemctl status ollama
+curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+journalctl -u rynx-api -n 80 --no-pager
+```
+
+Open **Administración > Agente IA**, press **Probar proveedor** and then
+**Analizar ahora**. For `--agent-llm api`, verify that
+`/etc/rynxcp/agent.env` exists with mode `0600` and that `rynx-api.service`
+loads it; the provider test shows the endpoint, model and latency. No manual
+model download, service or configuration edit is required.
+
 ## Security notes
 
 - Both installers must run as root on a fresh server.
