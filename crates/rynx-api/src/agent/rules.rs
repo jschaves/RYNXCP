@@ -30,7 +30,7 @@ impl RuleFinding {
         let mut summary = self.summary;
         let mut recommendation = self.recommendation.to_string();
         if locale != "es" {
-            if let Some(text) = messages::english(self.code, &self.params) {
+            if let Some(text) = messages::localized(locale, self.code, &self.params) {
                 title = text.title;
                 summary = text.summary;
                 recommendation = text.recommendation;

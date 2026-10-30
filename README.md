@@ -452,10 +452,11 @@ An existing finding that increases its severity sends a new alert email.
 ### Agent localization
 
 The agent renders deterministic findings and alert emails in the panel owner's
-locale (falling back to the first administrator). Spanish and English templates
-are complete and live in `crates/rynx-api/src/agent/messages.rs`; other locales
-fall back to English until their strings are added. LLM output follows the
-`locale` embedded in the redacted digest (Spanish for `es`, English otherwise).
+locale (falling back to the first administrator). All ten panel languages are
+available in `crates/rynx-api/src/agent/messages.rs` (es, en, pt, fr, it, de,
+ar, ru, zh, ja); unknown locales fall back to English. LLM output follows the
+`locale` embedded in the redacted digest (local language for the supported
+locales, English otherwise).
 
 ## Databases
 
