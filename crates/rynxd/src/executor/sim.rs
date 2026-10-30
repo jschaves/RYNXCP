@@ -845,6 +845,14 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn fail2ban_bans(&self) -> ExecResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
+
+    async fn fail2ban_unban(&self, _ip: &str) -> ExecResult<()> {
+        Ok(())
+    }
+
     async fn installed_programs(&self) -> ExecResult<Vec<ProgramInfo>> {
         let rows = [
             ("nginx", "1.26.3", "web", "installed", "reverse proxy"),

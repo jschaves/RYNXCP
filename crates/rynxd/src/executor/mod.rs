@@ -267,6 +267,8 @@ pub trait Executor: Send + Sync {
     async fn reload_unit(&self, unit: &str) -> ExecResult<()>;
     async fn set_unit_running(&self, unit: &str, running: bool) -> ExecResult<()>;
     async fn journal_unit(&self, unit: &str, lines: u32) -> ExecResult<String>;
+    async fn fail2ban_bans(&self) -> ExecResult<Vec<(String, String)>>;
+    async fn fail2ban_unban(&self, ip: &str) -> ExecResult<()>;
     async fn disk_usage(&self) -> ExecResult<String>;
     async fn nginx_test_text(&self) -> ExecResult<String>;
 

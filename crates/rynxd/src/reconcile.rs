@@ -16,7 +16,7 @@ use rynx_core::validate::{
 };
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AccountView, AppSpec, AppView, AuditEntry, BackupView, CertView,
+    AccountSpec, AccountView, AppSpec, AppView, AuditEntry, BackupView, BlockedIpView, CertView,
     CertificateStatus, ConsoleAction, CronJobView, CronSpec, DatabaseView, DnsRecordSpec,
     DnsRecordView, DnsZoneView, FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView,
     MailAccountSpec, MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec, PhpPoolView,
@@ -2872,7 +2872,21 @@ impl Reconciler {
     }
 
     async fn firewall_state(&self) -> Result<Response, WireError> {
-        let state = self.firewall_view()?;
+        let mut state = self.firewall_view()?;
+        if let Ok(bans) = self.exec.fail2ban_bans().await {
+            for (jail, ip) in bans {
+                if state.blocked.iter().any(|entry| entry.ip == ip) {
+                    continue;
+                }
+                state.blocked.push(BlockedIpView {
+                    ip,
+                    reason: format!("fail2ban:{jail}"),
+                    source: "fail2ban".into(),
+                    expires_at: None,
+                    created_at: now_rfc3339(),
+                });
+            }
+        }
         Ok(Response::Firewall { state })
     }
 
@@ -2949,6 +2963,9 @@ impl Reconciler {
     async fn firewall_unblock(&self, ip: &str, actor: &str) -> Result<Response, WireError> {
         validate_ip_or_cidr(ip).map_err(invalid)?;
         self.state.unblock_ip(ip).map_err(internal)?;
+        if let Err(err) = self.exec.fail2ban_unban(ip).await {
+            tracing::warn!(ip, error = %err, "fail2ban unban failed");
+        }
         self.firewall_apply().await?;
         self.log(actor, "firewall.unblock", ip, "")?;
         self.firewall_state().await
@@ -2958,6 +2975,9 @@ impl Reconciler {
         validate_ip_or_cidr(ip).map_err(invalid)?;
         self.state.add_whitelist(ip).map_err(internal)?;
         let _ = self.state.unblock_ip(ip);
+        if let Err(err) = self.exec.fail2ban_unban(ip).await {
+            tracing::warn!(ip, error = %err, "fail2ban unban failed after whitelist update");
+        }
         self.firewall_apply().await?;
         self.log(actor, "firewall.whitelist.add", ip, "")?;
         self.firewall_state().await

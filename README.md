@@ -55,7 +55,7 @@ reconciliation engine and UI are original.
 | Backups | Home + managed configuration, retention, restore and daily timer |
 | Certificates | Let's Encrypt with SANs, bulk renewal and daily timer |
 | Monitoring | Per-service state/CPU/RAM/uptime and 7-day historical series |
-| Firewall | nftables rules, banned IPs, allowlists and automatic brute-force bans |
+| Firewall | nftables rules, manual/brute-force/fail2ban banned IPs, allowlists and automatic brute-force bans |
 | Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC and email two-factor authentication |
 | Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Antispam | SpamAssassin with Postfix milter integration and spam tagging |
@@ -311,6 +311,8 @@ Compromising the web API does not grant direct write access to hosting state.
 - **Brute-force protection**: sliding window + lockout per account+IP and per IP,
   failure delay, persistent events and a structured fail2ban log.
 - **IP allowlists** take precedence over firewall bans.
+- **Firewall view**: lists manual and brute-force bans from the panel plus active
+  fail2ban jail bans, and removing a ban clears it from both sources.
 - **Firewall defaults**: nftables uses a default-drop input policy. SSH, HTTP,
   HTTPS, DNS (53/tcp+udp) and FTPS (21 plus passive 30000-50000) are always
   allowed; SSH cannot be denied from the panel to prevent lockouts.

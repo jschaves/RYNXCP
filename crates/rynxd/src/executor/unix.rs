@@ -1933,6 +1933,65 @@ impl Executor for RealExecutor {
         run(&self.cfg.nft_bin, &["-f", &path_s]).await.map(|_| ())
     }
 
+    async fn fail2ban_jails(&self) -> ExecResult<Vec<String>> {
+        let output = match run("fail2ban-client", &["status"]).await {
+            Ok(output) => output,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let Some((_, list)) = output
+            .lines()
+            .find_map(|line| line.split_once("Jail list:"))
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(list
+            .split(',')
+            .map(str::trim)
+            .filter(|jail| !jail.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
+    async fn fail2ban_bans(&self) -> ExecResult<Vec<(String, String)>> {
+        let mut bans = Vec::new();
+        for jail in self.fail2ban_jails().await? {
+            let output = match run("fail2ban-client", &["status", jail.as_str()]).await {
+                Ok(output) => output,
+                Err(_) => continue,
+            };
+            for line in output.lines() {
+                let Some((_, list)) = line.split_once("Banned IP list:") else {
+                    continue;
+                };
+                for ip in list.split_whitespace() {
+                    if rynx_core::validate_ip_or_cidr(ip).is_ok() {
+                        bans.push((jail.clone(), ip.to_string()));
+                    }
+                }
+            }
+        }
+        Ok(bans)
+    }
+
+    async fn fail2ban_unban(&self, ip: &str) -> ExecResult<()> {
+        rynx_core::validate_ip_or_cidr(ip)
+            .map_err(|err| ExecError::InvalidInput(format!("invalid IP address: {err}")))?;
+        for jail in self.fail2ban_jails().await? {
+            let output = match run("fail2ban-client", &["status", jail.as_str()]).await {
+                Ok(output) => output,
+                Err(_) => continue,
+            };
+            let banned = output.lines().any(|line| {
+                line.split_once("Banned IP list:")
+                    .is_some_and(|(_, list)| list.split_whitespace().any(|value| value == ip))
+            });
+            if banned {
+                let _ = run("fail2ban-client", &["set", jail.as_str(), "unbanip", ip]).await;
+            }
+        }
+        Ok(())
+    }
+
     async fn resolve_user_ids(&self, username: &str) -> ExecResult<Option<(u32, u32)>> {
         match User::from_name(username) {
             Ok(Some(user)) => Ok(Some((user.uid.as_raw(), user.gid.as_raw()))),

@@ -830,7 +830,7 @@ pub struct FirewallRuleView {
 pub struct BlockedIpView {
     pub ip: String,
     pub reason: String,
-    /// `manual` or `brute-force`.
+    /// `manual`, `brute-force` or `fail2ban`.
     pub source: String,
     pub expires_at: Option<String>,
     pub created_at: String,

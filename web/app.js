@@ -3334,8 +3334,8 @@ async function renderFirewall() {
   const blockedRows = fw.blocked.map((entry) => [
     td(`<span class="mono">${esc(entry.ip)}</span>`),
     td(esc(entry.reason)),
-    td(badge(entry.source, entry.source === 'brute-force' ? 'warn' : '')),
-    td(esc(entry.expires_at ? fmtDate(entry.expires_at) : 'permanente')),
+    td(badge(entry.source, entry.source === 'brute-force' ? 'warn' : entry.source === 'fail2ban' ? 'info' : '')),
+    td(entry.source === 'fail2ban' ? '—' : esc(entry.expires_at ? fmtDate(entry.expires_at) : 'permanente')),
     td(btn('Quitar', 'firewall-unblock', entry.ip, 'tiny ghost'), 'actions'),
   ]);
   const whiteRows = fw.whitelist.map((ip) => [
