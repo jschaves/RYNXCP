@@ -8,6 +8,7 @@ use tower_http::trace::TraceLayer;
 use crate::state::ApiState;
 
 pub mod accounts;
+pub mod agent;
 pub mod apps;
 pub mod audit_route;
 pub mod backups;
@@ -139,6 +140,12 @@ pub fn router(state: ApiState) -> Router {
         )
         .route("/api/v1/monitor/services", get(monitor::services))
         .route("/api/v1/monitor/history", get(monitor::history))
+        .route("/api/v1/agent/findings", get(agent::findings))
+        .route(
+            "/api/v1/agent/findings/{id}/status",
+            post(agent::set_status),
+        )
+        .route("/api/v1/agent/run", post(agent::run))
         .route("/api/v1/security/auth-events", get(security::events))
         .route("/api/v1/security/stats", get(security::stats))
         .route("/api/v1/console", post(console::run))

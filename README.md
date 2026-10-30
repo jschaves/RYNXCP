@@ -59,6 +59,7 @@ reconciliation engine and UI are original.
 | Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC and email two-factor authentication |
 | Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Antispam | SpamAssassin with Postfix milter integration and spam tagging |
+| AI agent | Deterministic system analysis with threat/error findings and admin-only alerting; local LLM providers are planned |
 | Console | Closed-list privileged actions with output and audit trail |
 | Programs | Installed software, live service state, restart/stop controls, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
@@ -387,6 +388,33 @@ The installers provision both filters for the local mail stack:
 
 The ClamAV signature database is refreshed by `clamav-freshclam`. SpamAssassin
 rules are updated by the distribution's normal `sa-update` maintenance.
+
+## AI agent
+
+The **AI agent** view runs a deterministic analyzer over the node state: failed
+services, security updates, disk/memory/load pressure, expiring certificates,
+firewall activity, authentication failures and the ClamAV/SpamAssassin journal.
+It stores deduplicated findings in `panel.db` and emails new high/critical
+findings to `smtp_alert_to` when `smtp_enabled` is configured.
+
+The agent is read-only: it never executes remediation or sends shell commands.
+Its settings live under `[agent]` in `api.toml`:
+
+```toml
+[agent]
+enabled = true
+interval_secs = 900
+max_events = 200
+email_alerts = true
+mode = "rules"              # rules today; local/hybrid reserve the LLM phase
+local_base_url = "http://127.0.0.1:11434/v1"
+local_model = "qwen3:8b"
+external_enabled = false    # external providers require an explicit opt-in
+```
+
+The optional local LLM and external provider are disabled by default. When
+enabled, external providers only receive summarized, redacted telemetry and are
+never allowed to execute actions.
 
 ## Databases
 

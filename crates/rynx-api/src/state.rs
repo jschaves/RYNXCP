@@ -19,4 +19,5 @@ pub struct ApiState {
     pub cert_jobs: CertJobs,
     pub mailer: Option<Arc<Mailer>>,
     pub two_factor: Arc<TwoFactor>,
+    pub agent_lock: Arc<tokio::sync::Mutex<()>>,
 }

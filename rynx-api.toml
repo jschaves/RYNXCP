@@ -8,3 +8,11 @@ daemon_token_file = "data/daemon.token"
 secure_cookies = false
 session_ttl_secs = 28800
 log_level = "info,tower_http=info"
+
+[agent]
+enabled = true
+interval_secs = 900
+max_events = 200
+email_alerts = true
+mode = "rules"
+external_enabled = false

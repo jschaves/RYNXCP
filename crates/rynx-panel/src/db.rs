@@ -116,6 +116,37 @@ CREATE TABLE IF NOT EXISTS account_packages (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_account_packages_package ON account_packages(package_id);
+
+CREATE TABLE IF NOT EXISTS agent_findings (
+    id             TEXT PRIMARY KEY,
+    fingerprint    TEXT NOT NULL UNIQUE,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    first_seen     INTEGER NOT NULL,
+    last_seen      INTEGER NOT NULL,
+    occurrences    INTEGER NOT NULL DEFAULT 1,
+    severity       TEXT NOT NULL,
+    category       TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    summary        TEXT NOT NULL,
+    evidence       TEXT NOT NULL DEFAULT '[]',
+    recommendation TEXT NOT NULL DEFAULT '',
+    source         TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'open'
+);
+CREATE INDEX IF NOT EXISTS idx_agent_findings_status ON agent_findings(status, last_seen);
+CREATE INDEX IF NOT EXISTS idx_agent_findings_severity ON agent_findings(severity, last_seen);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id         TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    findings   INTEGER NOT NULL DEFAULT 0,
+    error      TEXT NOT NULL DEFAULT '',
+    model      TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at);
 "#;
 
 #[derive(Debug, thiserror::Error)]
@@ -182,13 +213,67 @@ pub struct AuthEventView {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AuthStats {
     pub window_secs: i64,
     pub successes: i64,
     pub failures: i64,
     pub blocked: i64,
     pub unique_ips: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFinding {
+    pub id: String,
+    pub fingerprint: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub first_seen: i64,
+    pub last_seen: i64,
+    pub occurrences: i64,
+    pub severity: String,
+    pub category: String,
+    pub title: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub recommendation: String,
+    pub source: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentFindingInput {
+    pub fingerprint: String,
+    pub severity: String,
+    pub category: String,
+    pub title: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub recommendation: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRun {
+    pub id: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub status: String,
+    pub findings: i64,
+    pub error: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentStats {
+    pub critical: i64,
+    pub high: i64,
+    pub medium: i64,
+    pub low: i64,
+    pub info: i64,
+    pub open: i64,
+    pub acknowledged: i64,
+    pub ignored: i64,
 }
 
 struct UserRecord {
@@ -1260,6 +1345,233 @@ impl PanelDb {
         )?;
         Ok(count > 0)
     }
+
+    /// Inserts a new finding or refreshes the existing one with the same
+    /// fingerprint. Returns the stored finding and whether it is new.
+    pub fn upsert_agent_finding(
+        &self,
+        input: &AgentFindingInput,
+    ) -> Result<(AgentFinding, bool), PanelError> {
+        let conn = self.conn()?;
+        let now = now_rfc3339();
+        let now_unix = now_unix();
+        let evidence = serde_json::to_string(&input.evidence)
+            .map_err(|e| PanelError::Validation(e.to_string()))?;
+        let existing: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT id, occurrences FROM agent_findings WHERE fingerprint = ?1",
+                params![input.fingerprint],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, occurrences)) = existing {
+            conn.execute(
+                "UPDATE agent_findings SET updated_at = ?1, last_seen = ?2, \
+                 occurrences = ?3, severity = ?4, category = ?5, title = ?6, \
+                 summary = ?7, evidence = ?8, recommendation = ?9, source = ?10 \
+                 WHERE id = ?11",
+                params![
+                    now,
+                    now_unix,
+                    occurrences + 1,
+                    input.severity,
+                    input.category,
+                    input.title,
+                    input.summary,
+                    evidence,
+                    input.recommendation,
+                    input.source,
+                    id
+                ],
+            )?;
+            let finding = self
+                .get_agent_finding(&id)?
+                .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
+            return Ok((finding, false));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO agent_findings \
+             (id, fingerprint, created_at, updated_at, first_seen, last_seen, \
+              occurrences, severity, category, title, summary, evidence, \
+              recommendation, source, status) \
+             VALUES (?1, ?2, ?3, ?3, ?4, ?4, 1, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'open')",
+            params![
+                id,
+                input.fingerprint,
+                now,
+                now_unix,
+                input.severity,
+                input.category,
+                input.title,
+                input.summary,
+                evidence,
+                input.recommendation,
+                input.source
+            ],
+        )?;
+        let finding = self
+            .get_agent_finding(&id)?
+            .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
+        Ok((finding, true))
+    }
+
+    fn get_agent_finding(&self, id: &str) -> Result<Option<AgentFinding>, PanelError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, fingerprint, created_at, updated_at, first_seen, \
+                 last_seen, occurrences, severity, category, title, summary, \
+                 evidence, recommendation, source, status \
+                 FROM agent_findings WHERE id = ?1",
+                params![id],
+                map_agent_finding,
+            )
+            .optional()?)
+    }
+
+    pub fn list_agent_findings(
+        &self,
+        limit: u32,
+        status: Option<&str>,
+    ) -> Result<Vec<AgentFinding>, PanelError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, fingerprint, created_at, updated_at, first_seen, \
+             last_seen, occurrences, severity, category, title, summary, \
+             evidence, recommendation, source, status \
+             FROM agent_findings \
+             WHERE (?1 IS NULL OR status = ?1) \
+             ORDER BY CASE severity \
+                 WHEN 'critical' THEN 0 WHEN 'high' THEN 1 \
+                 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END, \
+             last_seen DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![status, limit.clamp(1, 1000) as i64],
+            map_agent_finding,
+        )?;
+        let mut findings = Vec::new();
+        for row in rows {
+            findings.push(row?);
+        }
+        Ok(findings)
+    }
+
+    pub fn set_agent_finding_status(&self, id: &str, status: &str) -> Result<(), PanelError> {
+        if !matches!(status, "open" | "acknowledged" | "ignored") {
+            return Err(PanelError::Validation(format!(
+                "invalid finding status: {status}"
+            )));
+        }
+        let conn = self.conn()?;
+        let changed = conn.execute(
+            "UPDATE agent_findings SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            params![status, now_rfc3339(), id],
+        )?;
+        if changed == 0 {
+            return Err(PanelError::NotFound(format!("finding '{id}' not found")));
+        }
+        Ok(())
+    }
+
+    pub fn agent_stats(&self) -> Result<AgentStats, PanelError> {
+        let conn = self.conn()?;
+        let mut stats = AgentStats::default();
+        let mut stmt = conn.prepare(
+            "SELECT severity, status, COUNT(*) FROM agent_findings GROUP BY severity, status",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (severity, status, count) = row?;
+            match severity.as_str() {
+                "critical" => stats.critical += count,
+                "high" => stats.high += count,
+                "medium" => stats.medium += count,
+                "low" => stats.low += count,
+                _ => stats.info += count,
+            }
+            match status.as_str() {
+                "acknowledged" => stats.acknowledged += count,
+                "ignored" => stats.ignored += count,
+                _ => stats.open += count,
+            }
+        }
+        Ok(stats)
+    }
+
+    pub fn record_agent_run(&self, run: &AgentRun) -> Result<(), PanelError> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO agent_runs \
+             (id, started_at, finished_at, status, findings, error, model) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                run.id,
+                run.started_at,
+                run.finished_at,
+                run.status,
+                run.findings,
+                run.error,
+                run.model
+            ],
+        )?;
+        conn.execute(
+            "DELETE FROM agent_runs WHERE id NOT IN \
+             (SELECT id FROM agent_runs ORDER BY started_at DESC LIMIT 200)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub fn latest_agent_run(&self) -> Result<Option<AgentRun>, PanelError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, started_at, finished_at, status, findings, error, model \
+                 FROM agent_runs ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok(AgentRun {
+                        id: row.get(0)?,
+                        started_at: row.get(1)?,
+                        finished_at: row.get(2)?,
+                        status: row.get(3)?,
+                        findings: row.get(4)?,
+                        error: row.get(5)?,
+                        model: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+}
+
+fn map_agent_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentFinding> {
+    let evidence: String = row.get(11)?;
+    Ok(AgentFinding {
+        id: row.get(0)?,
+        fingerprint: row.get(1)?,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+        first_seen: row.get(4)?,
+        last_seen: row.get(5)?,
+        occurrences: row.get(6)?,
+        severity: row.get(7)?,
+        category: row.get(8)?,
+        title: row.get(9)?,
+        summary: row.get(10)?,
+        evidence: serde_json::from_str(&evidence).unwrap_or_default(),
+        recommendation: row.get(12)?,
+        source: row.get(13)?,
+        status: row.get(14)?,
+    })
 }
 
 fn map_account_package(row: &rusqlite::Row<'_>) -> rusqlite::Result<AccountPackageView> {
@@ -1625,5 +1937,60 @@ mod tests {
         ));
         db.delete_account_package("acme").unwrap();
         assert!(db.delete_package(&custom.id).is_ok());
+    }
+
+    #[test]
+    fn agent_findings_dedupe_and_track_status() {
+        let (_dir, db) = temp_db();
+        let input = AgentFindingInput {
+            fingerprint: "rule:target".into(),
+            severity: "high".into(),
+            category: "security".into(),
+            title: "Test finding".into(),
+            summary: "first summary".into(),
+            evidence: vec!["evidence one".into()],
+            recommendation: "do something".into(),
+            source: "rules".into(),
+        };
+        let (first, is_new) = db.upsert_agent_finding(&input).unwrap();
+        assert!(is_new);
+        assert_eq!(first.occurrences, 1);
+        assert_eq!(first.status, "open");
+
+        let mut updated = input.clone();
+        updated.summary = "second summary".into();
+        updated.severity = "critical".into();
+        let (second, is_new) = db.upsert_agent_finding(&updated).unwrap();
+        assert!(!is_new);
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.occurrences, 2);
+        assert_eq!(second.summary, "second summary");
+        assert_eq!(second.severity, "critical");
+        assert_eq!(db.agent_stats().unwrap().critical, 1);
+
+        db.set_agent_finding_status(&first.id, "acknowledged")
+            .unwrap();
+        let (third, _) = db.upsert_agent_finding(&input).unwrap();
+        assert_eq!(third.status, "acknowledged");
+
+        let stats = db.agent_stats().unwrap();
+        assert_eq!(stats.high, 1);
+        assert_eq!(stats.acknowledged, 1);
+        assert!(matches!(
+            db.set_agent_finding_status(&first.id, "unknown"),
+            Err(PanelError::Validation(_))
+        ));
+
+        let run = AgentRun {
+            id: "run-1".into(),
+            started_at: now_rfc3339(),
+            finished_at: now_rfc3339(),
+            status: "ok".into(),
+            findings: 1,
+            error: String::new(),
+            model: "rules".into(),
+        };
+        db.record_agent_run(&run).unwrap();
+        assert_eq!(db.latest_agent_run().unwrap().unwrap().id, "run-1");
     }
 }

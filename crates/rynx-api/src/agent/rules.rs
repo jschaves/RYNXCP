@@ -1,0 +1,525 @@
+//! Deterministic rules. These run without an LLM and never touch the system.
+
+use rynx_core::crypto::sha256_hex;
+use rynx_panel::AgentFindingInput;
+use rynx_proto::CertificateStatus;
+
+use super::collect::Snapshot;
+
+const FILTER_PROGRAMS: [&str; 4] = ["clamav", "clamav-milter", "spamassassin", "spamass-milter"];
+
+struct RuleFinding {
+    rule: &'static str,
+    target: String,
+    severity: &'static str,
+    category: &'static str,
+    title: String,
+    summary: String,
+    evidence: Vec<String>,
+    recommendation: &'static str,
+}
+
+impl RuleFinding {
+    fn into_input(self) -> AgentFindingInput {
+        let fingerprint = sha256_hex(format!("{}:{}", self.rule, self.target));
+        AgentFindingInput {
+            fingerprint,
+            severity: self.severity.to_string(),
+            category: self.category.to_string(),
+            title: self.title,
+            summary: self.summary,
+            evidence: self.evidence,
+            recommendation: self.recommendation.to_string(),
+            source: "rules".to_string(),
+        }
+    }
+}
+
+pub fn evaluate(snapshot: &Snapshot) -> Vec<AgentFindingInput> {
+    let mut out = Vec::new();
+    auth_rules(snapshot, &mut out);
+    service_rules(snapshot, &mut out);
+    filter_program_rules(snapshot, &mut out);
+    filter_activity_rules(snapshot, &mut out);
+    update_rules(snapshot, &mut out);
+    resource_rules(snapshot, &mut out);
+    certificate_rules(snapshot, &mut out);
+    firewall_rules(snapshot, &mut out);
+    out
+}
+
+fn auth_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let stats = &snapshot.auth_stats;
+    if stats.failures >= 20 {
+        let severity = if stats.failures >= 100 {
+            "critical"
+        } else {
+            "high"
+        };
+        out.push(
+            RuleFinding {
+                rule: "auth-failures",
+                target: "panel".into(),
+                severity,
+                category: "security",
+                title: "Intentos de acceso fallidos elevados".into(),
+                summary: format!(
+                    "{} fallos de autenticación en las últimas 24 horas.",
+                    stats.failures
+                ),
+                evidence: vec![
+                    format!("fallos={}", stats.failures),
+                    format!("IPs únicas={}", stats.unique_ips),
+                ],
+                recommendation:
+                    "Revisa la vista Seguridad, bloquea las IPs sospechosas y comprueba fail2ban.",
+            }
+            .into_input(),
+        );
+    }
+    if stats.blocked >= 10 {
+        out.push(
+            RuleFinding {
+                rule: "auth-blocked",
+                target: "panel".into(),
+                severity: "medium",
+                category: "security",
+                title: "Bloqueos de autenticación".into(),
+                summary: format!(
+                    "{} inicios de sesión bloqueados en las últimas 24 horas.",
+                    stats.blocked
+                ),
+                evidence: vec![format!("bloqueos={}", stats.blocked)],
+                recommendation:
+                    "Comprueba si los bloqueos vienen de fuerza bruta o de usuarios legítimos.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+fn service_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    for service in &snapshot.services {
+        if service.status != "failed" {
+            continue;
+        }
+        out.push(
+            RuleFinding {
+                rule: "service-failed",
+                target: service.unit.clone(),
+                severity: "high",
+                category: "reliability",
+                title: format!("Servicio caído: {}", service.name),
+                summary: format!(
+                    "La unidad {} está en estado failed y puede afectar al hosting.",
+                    service.unit
+                ),
+                evidence: vec![
+                    format!("servicio={}", service.name),
+                    format!("unidad={}", service.unit),
+                    format!("estado={}", service.status),
+                ],
+                recommendation: "Revisa el estado del servicio y su journal; reinícialo desde Programas si procede.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let missing: Vec<&str> = snapshot
+        .programs
+        .iter()
+        .filter(|program| {
+            FILTER_PROGRAMS.contains(&program.name.as_str()) && program.status != "installed"
+        })
+        .map(|program| program.name.as_str())
+        .collect();
+    if !missing.is_empty() {
+        out.push(
+            RuleFinding {
+                rule: "mail-filter-missing",
+                target: "mail-filters".into(),
+                severity: "high",
+                category: "security",
+                title: "Filtros de correo incompletos".into(),
+                summary: format!(
+                    "Faltan componentes de antivirus/antispam: {}.",
+                    missing.join(", ")
+                ),
+                evidence: missing
+                    .iter()
+                    .map(|name| format!("ausente={name}"))
+                    .collect(),
+                recommendation: "Reinstala el stack de correo con el instalador o desde Programas.",
+            }
+            .into_input(),
+        );
+    }
+
+    for program in &snapshot.programs {
+        if program.status != "installed" || !FILTER_PROGRAMS.contains(&program.name.as_str()) {
+            continue;
+        }
+        let Some(status) = program.service_status.as_deref() else {
+            continue;
+        };
+        if matches!(status, "active" | "activating") {
+            continue;
+        }
+        out.push(
+            RuleFinding {
+                rule: "mail-filter-inactive",
+                target: program.name.clone(),
+                severity: "medium",
+                category: "reliability",
+                title: format!("Filtro de correo detenido: {}", program.name),
+                summary: format!(
+                    "{} está instalado pero su unidad reporta '{}'.",
+                    program.name, status
+                ),
+                evidence: vec![
+                    format!("programa={}", program.name),
+                    format!("estado={status}"),
+                    format!("unidad={}", program.unit.clone().unwrap_or_default()),
+                ],
+                recommendation:
+                    "Reinicia el componente desde la vista Antivirus y antispam o desde Programas.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+fn filter_activity_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let mut alerts = snapshot
+        .filter_events
+        .iter()
+        .filter(|event| event.kind == "antivirus" && event.severity == "alert");
+    for event in alerts.by_ref().take(10) {
+        out.push(
+            RuleFinding {
+                rule: "antivirus-detection",
+                target: format!("{}:{}", event.service, event.message),
+                severity: "high",
+                category: "security",
+                title: format!("Detección de malware en {}", event.service),
+                summary: event.message.clone(),
+                evidence: vec![format!("fecha={}", event.at), format!("unidad={}", event.service)],
+                recommendation: "Aísla el fichero, revisa el buzón o cuenta afectada y ejecuta un análisis completo.",
+            }
+            .into_input(),
+        );
+    }
+
+    let spam = snapshot
+        .filter_events
+        .iter()
+        .filter(|event| {
+            event.kind == "antispam" && matches!(event.severity.as_str(), "warn" | "alert")
+        })
+        .count();
+    if spam >= 50 {
+        let severity = if spam >= 200 { "high" } else { "medium" };
+        out.push(
+            RuleFinding {
+                rule: "antispam-volume",
+                target: "mail".into(),
+                severity,
+                category: "security",
+                title: "Volumen alto de spam reciente".into(),
+                summary: format!("{spam} mensajes marcados o rechazados por SpamAssassin en el journal reciente."),
+                evidence: vec![format!("eventos={spam}")],
+                recommendation: "Revisa las reglas de SpamAssassin, el volumen de correo y si hay una campaña de spam en curso.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+fn update_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let security: Vec<_> = snapshot
+        .updates
+        .iter()
+        .filter(|update| update.security)
+        .collect();
+    if security.is_empty() {
+        return;
+    }
+    let severity = if security.len() >= 10 {
+        "high"
+    } else {
+        "medium"
+    };
+    out.push(
+        RuleFinding {
+            rule: "security-updates",
+            target: "apt".into(),
+            severity,
+            category: "maintenance",
+            title: "Actualizaciones de seguridad pendientes".into(),
+            summary: format!(
+                "{} actualizaciones marcadas como de seguridad están pendientes.",
+                security.len()
+            ),
+            evidence: security
+                .iter()
+                .take(10)
+                .map(|update| {
+                    format!(
+                        "{} {} -> {}",
+                        update.package, update.current_version, update.candidate_version
+                    )
+                })
+                .collect(),
+            recommendation:
+                "Aplica las actualizaciones desde Programas durante una ventana de mantenimiento.",
+        }
+        .into_input(),
+    );
+}
+
+fn resource_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let Some(system) = &snapshot.system else {
+        return;
+    };
+    if system.disk_total_kb > 0 {
+        let used = system
+            .disk_total_kb
+            .saturating_sub(system.disk_available_kb);
+        let percent = used as f64 / system.disk_total_kb as f64 * 100.0;
+        if percent >= 80.0 {
+            let severity = if percent >= 90.0 { "high" } else { "medium" };
+            out.push(
+                RuleFinding {
+                    rule: "disk-usage",
+                    target: "node".into(),
+                    severity,
+                    category: "reliability",
+                    title: "Uso de disco elevado".into(),
+                    summary: format!("El disco está al {percent:.1}% y puede llenarse."),
+                    evidence: vec![
+                        format!("total_kb={}", system.disk_total_kb),
+                        format!("disponible_kb={}", system.disk_available_kb),
+                    ],
+                    recommendation: "Revisa backups, logs y cuentas con más consumo antes de que el disco se llene.",
+                }
+                .into_input(),
+            );
+        }
+    }
+    if system.mem_total_kb > 0 {
+        let used = system.mem_total_kb.saturating_sub(system.mem_available_kb);
+        let percent = used as f64 / system.mem_total_kb as f64 * 100.0;
+        if percent >= 85.0 {
+            let severity = if percent >= 95.0 { "high" } else { "medium" };
+            out.push(
+                RuleFinding {
+                    rule: "memory-usage",
+                    target: "node".into(),
+                    severity,
+                    category: "reliability",
+                    title: "Memoria usada elevada".into(),
+                    summary: format!("La memoria está al {percent:.1}% de uso."),
+                    evidence: vec![
+                        format!("total_kb={}", system.mem_total_kb),
+                        format!("disponible_kb={}", system.mem_available_kb),
+                    ],
+                    recommendation: "Revisa procesos, contenedores y límites de aplicaciones antes de que el OOM killer actúe.",
+                }
+                .into_input(),
+            );
+        }
+    }
+    let cpus = system.cpu_count.max(1) as f64;
+    let load1 = system.load.first().copied().unwrap_or(0) as f64 / 100.0;
+    let per_cpu = load1 / cpus;
+    if per_cpu >= 2.0 {
+        let severity = if per_cpu >= 4.0 { "high" } else { "medium" };
+        out.push(
+            RuleFinding {
+                rule: "load-average",
+                target: "node".into(),
+                severity,
+                category: "reliability",
+                title: "Carga del sistema elevada".into(),
+                summary: format!("Load 1m por CPU: {per_cpu:.2}."),
+                evidence: vec![
+                    format!("load1={load1:.2}"),
+                    format!("cpus={}", system.cpu_count),
+                ],
+                recommendation: "Identifica los procesos que consumen CPU y revisa las aplicaciones gestionadas.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+fn certificate_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let mut emitted = 0;
+    for cert in &snapshot.certs {
+        let (severity, label) = match cert.status {
+            CertificateStatus::Expired => ("high", "vencido"),
+            CertificateStatus::Expiring => ("medium", "por vencer"),
+            _ => continue,
+        };
+        out.push(
+            RuleFinding {
+                rule: "certificate",
+                target: cert.domain.clone(),
+                severity,
+                category: "security",
+                title: format!("Certificado {label}: {}", cert.domain),
+                summary: format!(
+                    "El certificado de {} está {} (vence {}).",
+                    cert.domain, label, cert.not_after
+                ),
+                evidence: vec![
+                    format!("dominio={}", cert.domain),
+                    format!("emisor={}", cert.issuer),
+                    format!("vence={}", cert.not_after),
+                ],
+                recommendation: "Renueva el certificado desde la vista Certificados o vuelve a publicar el sitio.",
+            }
+            .into_input(),
+        );
+        emitted += 1;
+        if emitted >= 10 {
+            break;
+        }
+    }
+}
+
+fn firewall_rules(snapshot: &Snapshot, out: &mut Vec<AgentFindingInput>) {
+    let Some(firewall) = &snapshot.firewall else {
+        return;
+    };
+    let blocked = firewall.blocked.len();
+    if blocked >= 200 {
+        out.push(
+            RuleFinding {
+                rule: "firewall-blocks",
+                target: "firewall".into(),
+                severity: "medium",
+                category: "security",
+                title: "Muchas IPs bloqueadas".into(),
+                summary: format!("{blocked} direcciones IP están bloqueadas ahora mismo."),
+                evidence: vec![format!("bloqueadas={blocked}")],
+                recommendation:
+                    "Comprueba si hay un ataque distribuido y revisa las reglas de fail2ban.",
+            }
+            .into_input(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rynx_panel::AuthStats;
+    use rynx_proto::{
+        CertView, CertificateStatus, FilterEvent, PackageUpdate, ProgramInfo, SystemInfo,
+    };
+
+    fn base_snapshot() -> Snapshot {
+        Snapshot {
+            system: Some(SystemInfo {
+                hostname: "node".into(),
+                os: "Debian".into(),
+                kernel: "6.1".into(),
+                uptime_secs: 100,
+                load: [10, 10, 10],
+                cpu_count: 4,
+                mem_total_kb: 8_000_000,
+                mem_available_kb: 6_000_000,
+                disk_total_kb: 100_000_000,
+                disk_available_kb: 70_000_000,
+                daemon_version: "0.1.0".into(),
+                mode: "simulation".into(),
+            }),
+            auth_stats: AuthStats::default(),
+            ..Snapshot::default()
+        }
+    }
+
+    #[test]
+    fn reports_security_updates() {
+        let mut snapshot = base_snapshot();
+        snapshot.updates.push(PackageUpdate {
+            package: "nginx".into(),
+            current_version: "1.0".into(),
+            candidate_version: "1.1".into(),
+            security: true,
+        });
+        let findings = evaluate(&snapshot);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.title.contains("seguridad")));
+        assert!(findings.iter().any(|finding| finding.severity == "medium"));
+    }
+
+    #[test]
+    fn reports_antivirus_alert() {
+        let mut snapshot = base_snapshot();
+        snapshot.filter_events.push(FilterEvent {
+            at: "2026-01-01T00:00:00Z".into(),
+            kind: "antivirus".into(),
+            service: "clamav-milter".into(),
+            severity: "alert".into(),
+            message: "Eicar FOUND".into(),
+        });
+        let findings = evaluate(&snapshot);
+        assert!(findings.iter().any(|finding| {
+            finding.category == "security"
+                && finding.severity == "high"
+                && finding.title.contains("malware")
+        }));
+    }
+
+    #[test]
+    fn reports_auth_failures_and_missing_filters() {
+        let mut snapshot = base_snapshot();
+        snapshot.auth_stats.failures = 120;
+        snapshot.programs.push(ProgramInfo {
+            name: "spamass-milter".into(),
+            version: "unknown".into(),
+            kind: "mail".into(),
+            status: "missing".into(),
+            detail: "SMTP antispam".into(),
+            unit: Some("spamass-milter".into()),
+            service_status: Some("active".into()),
+        });
+        let findings = evaluate(&snapshot);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.severity == "critical"));
+        assert!(findings.iter().any(|finding| finding.severity == "high"));
+    }
+
+    #[test]
+    fn reports_expired_certificate() {
+        let mut snapshot = base_snapshot();
+        snapshot.certs.push(CertView {
+            domain: "example.com".into(),
+            issuer: "test".into(),
+            not_after: "2020-01-01".into(),
+            status: CertificateStatus::Expired,
+            path: "/etc/cert".into(),
+        });
+        let findings = evaluate(&snapshot);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.title.contains("Certificado")));
+    }
+
+    #[test]
+    fn findings_are_deterministic() {
+        let snapshot = base_snapshot();
+        let first = evaluate(&snapshot);
+        let second = evaluate(&snapshot);
+        assert_eq!(first.len(), second.len());
+        for (left, right) in first.iter().zip(second.iter()) {
+            assert_eq!(left.fingerprint, right.fingerprint);
+        }
+    }
+}

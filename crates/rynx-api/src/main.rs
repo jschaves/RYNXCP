@@ -90,6 +90,7 @@ async fn main() -> Result<()> {
         cert_jobs: rynx_api::cert_jobs::new_store(),
         mailer,
         two_factor: Arc::new(Default::default()),
+        agent_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     if args.check {
@@ -109,6 +110,7 @@ async fn main() -> Result<()> {
         tracing::warn!(path = %cfg.web_root.display(), "web root does not exist");
     }
 
+    rynx_api::agent::spawn(state.clone());
     let app = routes::router(state);
     let listener = TcpListener::bind(&cfg.bind)
         .await

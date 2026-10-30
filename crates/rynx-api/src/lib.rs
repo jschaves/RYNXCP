@@ -1,5 +1,6 @@
 //! RYNXCP HTTP API and web panel.
 
+pub mod agent;
 pub mod auth;
 pub mod authlog;
 pub mod cert_jobs;

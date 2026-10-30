@@ -7,6 +7,9 @@ pub mod db;
 pub mod packages;
 pub mod role;
 
-pub use db::{NewSession, PanelDb, PanelError, SessionContext, UserView};
+pub use db::{
+    AgentFinding, AgentFindingInput, AgentRun, AgentStats, AuthStats, NewSession, PanelDb,
+    PanelError, SessionContext, UserView,
+};
 pub use packages::{AccountPackageView, PackageInput, PackageView, WEB_BACKENDS};
 pub use role::Role;

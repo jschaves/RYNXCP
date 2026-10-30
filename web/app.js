@@ -13,7 +13,7 @@ const S = {
   impersonatedBy: null,
   resetToken: null,
   twoFactorChallenge: null,
-  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], accountPackages: [], mailDomains: [], mailAccounts: [] },
+  data: { accounts: [], websites: [], apps: [], pools: [], certs: [], users: [], packages: [], accountPackages: [], mailDomains: [], mailAccounts: [], agentFindings: [] },
   files: { domain: '', path: '', entries: [] },
 };
 
@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { id: 'packages', label: 'Paquetes', group: 'Administración', admin: true },
   { id: 'security', label: 'Seguridad', group: 'Administración', admin: true },
   { id: 'filters', label: 'Antivirus y antispam', group: 'Administración', admin: true },
+  { id: 'agent', label: 'Agente IA', group: 'Administración', admin: true },
   { id: 'firewall', label: 'Cortafuegos', group: 'Administración', admin: true },
   { id: 'programs', label: 'Programas', group: 'Administración', admin: true },
   { id: 'console', label: 'Consola', group: 'Administración', admin: true },
@@ -86,6 +87,7 @@ const NAV_ICON_PATHS = {
   packages: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
   security: '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
   filters: '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><rect x="9" y="9" width="6" height="5" rx="1"/><path d="m9 10 3 2 3-2"/>',
+  agent: '<rect x="4" y="7" width="16" height="12" rx="2"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/><path d="M12 4v3"/><path d="M9 17h6"/>',
   firewall: '<path d="M12 3c3 4 6 6 6 10a6 6 0 0 1-12 0c0-2 1-3 2-5 0 2 1 3 2 3 0-3 1-5 2-8z"/>',
   programs: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h8"/>',
   console: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
@@ -107,6 +109,7 @@ const TITLES = {
   monitor: ['Monitor', 'Series históricas y estado de cada servicio'],
   security: ['Seguridad', 'Intentos de acceso, bloqueos y cadena de auditoría'],
   filters: ['Antivirus y antispam', 'ClamAV y SpamAssassin con el historial de detecciones y bloqueos'],
+  agent: ['Agente IA', 'Análisis determinista del sistema con alertas de amenazas y errores'],
   firewall: ['Cortafuegos', 'Reglas nftables, IPs baneadas y listas blancas'],
   programs: ['Programas', 'Software instalado y actualizaciones del sistema'],
   console: ['Consola admin', 'Acciones privilegiadas auditadas y sin shell libre'],
@@ -561,6 +564,7 @@ const renderers = {
   monitor: renderMonitor,
   security: renderSecurity,
   filters: renderFilters,
+  agent: renderAgent,
   firewall: renderFirewall,
   programs: renderPrograms,
   console: renderConsole,
@@ -2957,6 +2961,33 @@ async function handleAction(action, id) {
       toast(T(verb === 'restart' ? 'Programa reiniciado' : 'Programa detenido'));
       return refresh();
     }
+    case 'agent-run': {
+      const result = await api('/api/v1/agent/run', { method: 'POST' });
+      toast(TF('Análisis completado: {count} hallazgo(s)', { count: result.total_findings || 0 }));
+      return refresh();
+    }
+    case 'agent-detail': {
+      const finding = (S.data.agentFindings || []).find((item) => item.id === id);
+      if (!finding) throw new Error('Hallazgo no encontrado');
+      const evidence = (finding.evidence || []).map((line) => `· ${line}`).join('\n') || '—';
+      showOutput(
+        T('Hallazgo del agente'),
+        `${finding.title}\n\n${finding.summary}\n\n${T('Evidencia')}:\n${evidence}\n\n${T('Recomendación')}:\n${finding.recommendation || '—'}`,
+      );
+      return;
+    }
+    case 'agent-ack':
+      await api(`/api/v1/agent/findings/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: 'acknowledged' } });
+      toast('Hallazgo marcado como revisado');
+      return refresh();
+    case 'agent-ignore':
+      await api(`/api/v1/agent/findings/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: 'ignored' } });
+      toast('Hallazgo ignorado');
+      return refresh();
+    case 'agent-reopen':
+      await api(`/api/v1/agent/findings/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status: 'open' } });
+      toast('Hallazgo reabierto');
+      return refresh();
     case 'updates-apply': {
       if (!confirm('¿Actualizar todos los paquetes del sistema ahora? Puede reiniciar servicios.')) return;
       const result = await api('/api/v1/system/updates/apply', { method: 'POST' });
@@ -3401,6 +3432,83 @@ async function renderFilters() {
     ${filterActivityTable(avEvents, 'Sin actividad de antivirus.')}
     ${sectionHead('Actividad de antispam', '<span class="muted small">eventos recientes del journal</span>')}
     ${filterActivityTable(asEvents, 'Sin actividad de antispam.')}`;
+}
+
+/* ---------------- AI agent ---------------- */
+
+const AGENT_SEVERITY_LABELS = {
+  critical: 'crítica',
+  high: 'alta',
+  medium: 'media',
+  low: 'baja',
+  info: 'información',
+};
+
+const AGENT_STATUS_LABELS = {
+  open: 'abierta',
+  acknowledged: 'revisada',
+  ignored: 'ignorada',
+};
+
+const AGENT_CATEGORY_LABELS = {
+  security: 'seguridad',
+  reliability: 'fiabilidad',
+  maintenance: 'mantenimiento',
+};
+
+function agentSeverityBadge(severity) {
+  const kind = severity === 'critical' || severity === 'high' ? 'bad' : severity === 'medium' ? 'warn' : 'info';
+  return badge(AGENT_SEVERITY_LABELS[severity] || severity, kind);
+}
+
+function agentStatusBadge(status) {
+  const kind = status === 'acknowledged' ? 'ok' : status === 'ignored' ? '' : 'warn';
+  return badge(AGENT_STATUS_LABELS[status] || status, kind);
+}
+
+async function renderAgent() {
+  const data = await api('/api/v1/agent/findings?status=all&limit=200');
+  const findings = data.findings || [];
+  S.data.agentFindings = findings;
+  const stats = data.stats || {};
+  const last = data.last_run;
+  const rows = findings.map((finding) => {
+    const actions = [
+      btn('Detalle', 'agent-detail', finding.id, 'tiny ghost'),
+      finding.status === 'open'
+        ? btn('Reconocer', 'agent-ack', finding.id, 'tiny')
+        : btn('Reabrir', 'agent-reopen', finding.id, 'tiny ghost'),
+      finding.status === 'ignored' ? '' : btn('Ignorar', 'agent-ignore', finding.id, 'tiny ghost'),
+    ].filter(Boolean).join(' ');
+    return [
+      td(agentSeverityBadge(finding.severity)),
+      td(`<span class="chip">${esc(T(AGENT_CATEGORY_LABELS[finding.category] || finding.category))}</span>`),
+      td(`<div class="cell-title">${esc(finding.title)}</div><div class="cell-sub">${esc(finding.summary)}</div>`),
+      td(agentStatusBadge(finding.status)),
+      td(esc(fmtDate(finding.updated_at))),
+      td(String(finding.occurrences)),
+      td(actions, 'actions'),
+    ];
+  });
+  const lastRun = last
+    ? `${esc(fmtDate(last.finished_at))} · ${last.status === 'ok' ? badge('correcto', 'ok') : badge('error', 'bad')} · ${esc(last.findings)} hallazgos`
+    : '<span class="muted">Sin ejecuciones todavía</span>';
+
+  $('#view').innerHTML = `
+    <div class="grid cols-4">
+      <div class="card stat"><div class="label">Críticas</div><div class="value">${stats.critical || 0}</div><div class="hint">requieren atención inmediata</div></div>
+      <div class="card stat"><div class="label">Altas</div><div class="value">${stats.high || 0}</div><div class="hint">amenazas y errores graves</div></div>
+      <div class="card stat"><div class="label">Abiertas</div><div class="value">${stats.open || 0}</div><div class="hint">sin revisar</div></div>
+      <div class="card stat"><div class="label">Último análisis</div><div class="value small-value">${last ? esc(fmtDate(last.finished_at)) : '—'}</div><div class="hint">${last ? esc(last.model) : 'sin ejecuciones'}</div></div>
+    </div>
+    <div class="card"><p class="muted small" style="margin:0">
+      El agente analiza el estado del nodo, los servicios, los certificados, las actualizaciones y el journal de correo.
+      Solo detecta y recomienda; nunca ejecuta acciones. Las alertas altas y críticas se envían por email si
+      <span class="mono">smtp_alert_to</span> está configurado.
+    </p></div>
+    ${sectionHead('Hallazgos', `<button class="btn primary" data-action="agent-run">Analizar ahora</button> <button class="btn ghost" data-action="reload">Actualizar</button>`)}
+    <p class="muted small">${lastRun}</p>
+    ${table(['Severidad', 'Categoría', 'Hallazgo', 'Estado', 'Actualizado', 'Ocurrencias', 'Acciones'], rows, 'Sin hallazgos. El sistema no presenta alertas conocidas.')}`;
 }
 
 /* ---------------- security ---------------- */

@@ -302,6 +302,50 @@ impl DaemonConfig {
     }
 }
 
+/// Deterministic system analyzer with optional LLM assistance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentConfig {
+    /// Run the analyzer in the background.
+    pub enabled: bool,
+    /// Seconds between background analyses.
+    pub interval_secs: u64,
+    /// Maximum journal events inspected per run.
+    pub max_events: u32,
+    /// Email high and critical findings to `smtp_alert_to`.
+    pub email_alerts: bool,
+    /// `rules` today; `local` and `hybrid` reserve the optional LLM providers.
+    pub mode: String,
+    /// OpenAI-compatible endpoint for a local model (Ollama, llama.cpp).
+    pub local_base_url: String,
+    pub local_model: String,
+    pub local_timeout_secs: u64,
+    /// External providers stay disabled until an administrator opts in.
+    pub external_enabled: bool,
+    pub external_base_url: String,
+    pub external_model: String,
+    pub external_api_key_env: String,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 900,
+            max_events: 200,
+            email_alerts: true,
+            mode: "rules".into(),
+            local_base_url: "http://127.0.0.1:11434/v1".into(),
+            local_model: "qwen3:8b".into(),
+            local_timeout_secs: 60,
+            external_enabled: false,
+            external_base_url: String::new(),
+            external_model: String::new(),
+            external_api_key_env: "RYNXCP_AGENT_API_KEY".into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ApiConfig {
@@ -335,6 +379,7 @@ pub struct ApiConfig {
     /// future relay implementation.
     pub smtp_tls: String,
     pub log_level: String,
+    pub agent: AgentConfig,
 }
 
 impl Default for ApiConfig {
@@ -368,6 +413,7 @@ impl Default for ApiConfig {
                 smtp_alert_to: None,
                 smtp_tls: "none".into(),
                 log_level: "info,tower_http=info".into(),
+                agent: AgentConfig::default(),
             }
         } else {
             Self {
@@ -397,6 +443,7 @@ impl Default for ApiConfig {
                 smtp_alert_to: None,
                 smtp_tls: "none".into(),
                 log_level: "info,tower_http=info".into(),
+                agent: AgentConfig::default(),
             }
         }
     }

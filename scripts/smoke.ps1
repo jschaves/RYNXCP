@@ -293,6 +293,12 @@ try {
     $filters = RequestJson 'GET' '/api/v1/mail/filters'
     if (@($filters.programs).Count -lt 2) { throw 'mail filter programs missing' }
     if (@($filters.events).Count -lt 1) { throw 'mail filter activity missing' }
+    $agentRun = RequestJson 'POST' '/api/v1/agent/run'
+    if ($agentRun.run.status -ne 'ok') { throw 'agent run failed' }
+    $agentFindings = RequestJson 'GET' '/api/v1/agent/findings?status=all&limit=50'
+    if (@($agentFindings.findings).Count -lt 1) { throw 'agent findings missing' }
+    $agentId = @($agentFindings.findings)[0].id
+    $null = RequestJson 'POST' "/api/v1/agent/findings/$agentId/status" @{ status = 'acknowledged' }
     $console = RequestJson 'POST' '/api/v1/console' @{ action = @{ action = 'disk_usage' } }
     if ($console.kind -ne 'console_output' -or -not $console.output) { throw 'console action failed' }
 
@@ -470,7 +476,7 @@ try {
     $null = RequestJson 'DELETE' "/api/v1/backups/$($backup.backup.id)"
 
     Write-Host ''
-    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, files, DNS, DB, FTP, backups, TLS, monitor, mail filters, console, firewall, impersonation, panel email, audit, reconcile.'
+    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, files, DNS, DB, FTP, backups, TLS, monitor, mail filters, agent, console, firewall, impersonation, panel email, audit, reconcile.'
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }
