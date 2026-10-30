@@ -59,7 +59,7 @@ reconciliation engine and UI are original.
 | Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC and email two-factor authentication |
 | Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Antispam | SpamAssassin with Postfix milter integration and spam tagging |
-| AI agent | Deterministic system analysis with threat/error findings and admin-only alerting; local LLM providers are planned |
+| AI agent | Deterministic system analysis with optional local LLM enrichment, threat/error findings and admin-only alerting |
 | Console | Closed-list privileged actions with output and audit trail |
 | Programs | Installed software, live service state, restart/stop controls, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
@@ -406,15 +406,30 @@ enabled = true
 interval_secs = 900
 max_events = 200
 email_alerts = true
-mode = "rules"              # rules today; local/hybrid reserve the LLM phase
+mode = "rules"              # rules | local | hybrid
 local_base_url = "http://127.0.0.1:11434/v1"
 local_model = "qwen3:8b"
-external_enabled = false    # external providers require an explicit opt-in
+local_timeout_secs = 120
+external_enabled = false    # reserved until the external provider phase
 ```
 
-The optional local LLM and external provider are disabled by default. When
-enabled, external providers only receive summarized, redacted telemetry and are
-never allowed to execute actions.
+With `mode = "local"` or `"hybrid"`, the agent sends a redacted digest to an
+OpenAI-compatible endpoint (Ollama, llama.cpp). The URL must resolve to
+`localhost` or a private IP address. The model returns a JSON summary and up to
+five extra findings; invalid JSON, timeouts or an unreachable endpoint fall back
+to the deterministic rules. External providers are not wired yet and remain
+disabled even if `external_enabled` is set.
+
+No manual setup is required: the autoinstallers accept `--agent-llm local`
+(or `RYNX_AGENT_LLM=local`) and provision Ollama, a loopback-only systemd
+service, the model and the `api.toml` settings. `--agent-model` overrides the
+model; otherwise the installer picks one based on RAM. If provisioning fails,
+the installer keeps `mode = "rules"` so the panel remains healthy. The default
+is `rules`; choose `local` or `hybrid` to enable inference.
+
+The view includes a **Test provider** action with the endpoint, model and
+latency, and findings that stop appearing are marked as resolved automatically.
+An existing finding that increases its severity sends a new alert email.
 
 ## Databases
 

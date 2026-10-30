@@ -337,7 +337,7 @@ impl Default for AgentConfig {
             mode: "rules".into(),
             local_base_url: "http://127.0.0.1:11434/v1".into(),
             local_model: "qwen3:8b".into(),
-            local_timeout_secs: 60,
+            local_timeout_secs: 120,
             external_enabled: false,
             external_base_url: String::new(),
             external_model: String::new(),

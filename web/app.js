@@ -2966,6 +2966,19 @@ async function handleAction(action, id) {
       toast(TF('Análisis completado: {count} hallazgo(s)', { count: result.total_findings || 0 }));
       return refresh();
     }
+    case 'agent-test-provider': {
+      const result = await api('/api/v1/agent/provider/test', { method: 'POST' });
+      if (!result.ok) {
+        toast(result.error || T('Proveedor no disponible'), 'error');
+        return;
+      }
+      const provider = result.provider;
+      showOutput(
+        T('Prueba del proveedor'),
+        `${provider.mode}\n${provider.model}\n${provider.endpoint}\n${provider.latency_ms} ms\n\n${provider.summary || '—'}`,
+      );
+      return;
+    }
     case 'agent-detail': {
       const finding = (S.data.agentFindings || []).find((item) => item.id === id);
       if (!finding) throw new Error('Hallazgo no encontrado');
@@ -3448,6 +3461,7 @@ const AGENT_STATUS_LABELS = {
   open: 'abierta',
   acknowledged: 'revisada',
   ignored: 'ignorada',
+  resolved: 'resuelta',
 };
 
 const AGENT_CATEGORY_LABELS = {
@@ -3462,7 +3476,7 @@ function agentSeverityBadge(severity) {
 }
 
 function agentStatusBadge(status) {
-  const kind = status === 'acknowledged' ? 'ok' : status === 'ignored' ? '' : 'warn';
+  const kind = status === 'acknowledged' || status === 'resolved' ? 'ok' : status === 'ignored' ? '' : 'warn';
   return badge(AGENT_STATUS_LABELS[status] || status, kind);
 }
 
@@ -3493,6 +3507,9 @@ async function renderAgent() {
   const lastRun = last
     ? `${esc(fmtDate(last.finished_at))} · ${last.status === 'ok' ? badge('correcto', 'ok') : badge('error', 'bad')} · ${esc(last.findings)} hallazgos`
     : '<span class="muted">Sin ejecuciones todavía</span>';
+  const lastSummary = last && last.summary
+    ? `<p class="muted small">${esc(last.summary)}</p>`
+    : '';
 
   $('#view').innerHTML = `
     <div class="grid cols-4">
@@ -3506,8 +3523,9 @@ async function renderAgent() {
       Solo detecta y recomienda; nunca ejecuta acciones. Las alertas altas y críticas se envían por email si
       <span class="mono">smtp_alert_to</span> está configurado.
     </p></div>
-    ${sectionHead('Hallazgos', `<button class="btn primary" data-action="agent-run">Analizar ahora</button> <button class="btn ghost" data-action="reload">Actualizar</button>`)}
+    ${sectionHead('Hallazgos', `<button class="btn primary" data-action="agent-run">Analizar ahora</button> <button class="btn ghost" data-action="agent-test-provider">Probar proveedor</button> <button class="btn ghost" data-action="reload">Actualizar</button>`)}
     <p class="muted small">${lastRun}</p>
+    ${lastSummary}
     ${table(['Severidad', 'Categoría', 'Hallazgo', 'Estado', 'Actualizado', 'Ocurrencias', 'Acciones'], rows, 'Sin hallazgos. El sistema no presenta alertas conocidas.')}`;
 }
 

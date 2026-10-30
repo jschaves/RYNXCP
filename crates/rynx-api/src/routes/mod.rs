@@ -146,6 +146,7 @@ pub fn router(state: ApiState) -> Router {
             post(agent::set_status),
         )
         .route("/api/v1/agent/run", post(agent::run))
+        .route("/api/v1/agent/provider/test", post(agent::provider_test))
         .route("/api/v1/security/auth-events", get(security::events))
         .route("/api/v1/security/stats", get(security::stats))
         .route("/api/v1/console", post(console::run))

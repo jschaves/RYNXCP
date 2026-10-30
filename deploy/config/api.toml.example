@@ -44,3 +44,18 @@ password_min_classes = 3
 # ---- sessions ----
 session_idle_secs = 3600
 
+# ---- AI agent ----
+# Deterministic analyzer. With mode = "local" or "hybrid", the installer
+# provisions Ollama on 127.0.0.1 and the selected model; external providers
+# remain disabled unless wired in a later release.
+[agent]
+enabled = true
+interval_secs = 900
+max_events = 200
+email_alerts = true
+mode = "rules"
+local_base_url = "http://127.0.0.1:11434/v1"
+local_model = "qwen3:8b"
+local_timeout_secs = 120
+external_enabled = false
+

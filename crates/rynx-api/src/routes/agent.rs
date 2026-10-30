@@ -59,6 +59,18 @@ pub async fn set_status(
     Ok(Json(json!({ "ok": true, "status": body.status })))
 }
 
+pub async fn provider_test(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Result<Json<Value>, ApiError> {
+    auth.require_admin()?;
+    auth.require_global()?;
+    match agent::provider::test_connection(&state).await {
+        Ok(provider) => Ok(Json(json!({ "ok": true, "provider": provider }))),
+        Err(err) => Ok(Json(json!({ "ok": false, "error": err }))),
+    }
+}
+
 pub async fn run(
     State(state): State<ApiState>,
     Extension(auth): Extension<AuthUser>,

@@ -8,6 +8,7 @@ panel stack:
 - Nginx, PHP 8.5, MariaDB, BIND9, Pure-FTPd, OpenDKIM, fail2ban and nftables.
 - Postfix + Dovecot (2.3/2.4 compatible), quotas, Sieve and Roundcube.
 - ClamAV for SMTP and daily filesystem scans, plus SpamAssassin SMTP scoring.
+- Optional local AI agent with Ollama and a loopback-only inference service.
 - Hosting packages with the seeded **Por defecto** plan.
 - The per-site file manager and phpMyAdmin behind the panel login.
 - Let's Encrypt, backup and antivirus timers.
@@ -54,6 +55,8 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 | `--email <address>` | Admin email. Defaults to `admin@<host>` for domains. |
 | `--password <value>` | Admin password. Prefer `RYNX_ADMIN_PASSWORD`. |
 | `--panel-port <port>` | Public panel port (default `2083`; `80` is kept for ACME). |
+| `--agent-llm <mode>` | `rules` (default), `local` or `hybrid`. `local`/`hybrid` provision Ollama and a model automatically. |
+| `--agent-model <name>` | Ollama model for local/hybrid; defaults to a model sized for host RAM. |
 | `--no-tls` | Do not request a Let's Encrypt certificate. |
 | `--repo <url>` | RYNXCP Git repository. |
 | `--ref <ref>` | Branch/tag to install (default `main`). |
@@ -64,6 +67,24 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 Set `RYNX_SKIP_PHPMYADMIN=1` to skip phpMyAdmin and `RYNX_SKIP_MAIL=1` to skip
 the mail stack and its SMTP antivirus/antispam milters (both are installed by
 default). The system ClamAV scan timer is still installed.
+
+### Local AI agent
+
+The agent runs deterministic rules by default and can enrich them with a local
+LLM. Enable it from the installer, not with manual commands:
+
+```bash
+sudo RYNX_AGENT_LLM=local bash /root/autoinstall.sh \
+  --host panel.example.com --email admin@example.com
+
+sudo bash /root/autoinstall.sh --agent-llm hybrid --agent-model qwen2.5:3b
+```
+
+The installer downloads Ollama when missing, pins it to `127.0.0.1:11434`,
+limits it to one loaded model/worker, pulls the model and writes the `[agent]`
+section of `/etc/rynxcp/api.toml`. Re-running the installer is safe and
+self-healing. If provisioning fails, it keeps `mode = "rules"` so the panel
+still starts and the agent continues with deterministic findings.
 
 ## Panel + MagicRita: `autoinstall-panel-magicrita.sh`
 
@@ -100,6 +121,7 @@ Common options:
 | `--magicrita-admin-path <path>` | MagicRita admin path (default `topogue`). |
 | `--magicrita-port <port>` | Loopback relay port (default `8787`). |
 | `--panel-host`, `--panel-email`, `--panel-password`, `--panel-port` | Forwarded to the panel installer. |
+| `--panel-agent-llm`, `--panel-agent-model` | Forwarded to the panel installer for local LLM provisioning. |
 | `--rynxcp-ref <ref>`, `--rynxcp-dir <dir>` | RYNXCP source selection. |
 | `--repo-token <token>` | GitHub token for private repositories. |
 | `--no-tls` | Do not request Let's Encrypt certificates. |
@@ -115,6 +137,7 @@ generate the panel password itself; provide `RYNX_ADMIN_PASSWORD` or
 ```bash
 systemctl status rynxd rynx-api postfix dovecot nginx php8.5-fpm
 systemctl status clamav-daemon clamav-milter spamd spamass-milter
+systemctl status ollama   # only when --agent-llm local/hybrid was used
 systemctl list-timers 'rynxcp-*'
 sudo doveconf -n
 sudo nginx -t

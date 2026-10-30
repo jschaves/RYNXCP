@@ -41,6 +41,8 @@ HOST_ARG="${RYNX_HOST:-}"
 EMAIL_ARG="${RYNX_ADMIN_EMAIL:-}"
 PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
 PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
+AGENT_LLM="${RYNX_AGENT_LLM:-rules}"
+AGENT_MODEL="${RYNX_AGENT_MODEL:-}"
 NO_TLS=0
 
 LOG="/var/log/rynxcp/autoinstall.log"
@@ -60,6 +62,10 @@ Options:
   --email <address>     Admin email. Defaults to admin@<host> for domains.
   --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD instead.
   --panel-port <port>   Public panel port (default 2083; 80 stays for ACME).
+  --agent-llm <mode>    rules (default), local or hybrid. local/hybrid install
+                        Ollama, a loopback-only service and the selected model.
+  --agent-model <name>  Ollama model for local/hybrid. Defaults to a size based
+                        on host RAM.
   --no-tls              Do not request a Let's Encrypt certificate.
   --repo <url>          RYNXCP Git repository.
   --ref <ref>           Branch or tag to install (default main).
@@ -70,7 +76,8 @@ Options:
 
 Environment:
   RYNX_HOST, RYNX_ADMIN_EMAIL, RYNX_ADMIN_PASSWORD, RYNX_PANEL_PORT,
-  RYNXCP_REPO, RYNXCP_REF, RYNXCP_DIR, RYNX_SOURCE_DIR.
+  RYNX_AGENT_LLM, RYNX_AGENT_MODEL, RYNXCP_REPO, RYNXCP_REF, RYNXCP_DIR,
+  RYNX_SOURCE_DIR.
 EOF
 }
 
@@ -85,6 +92,8 @@ while [[ $# -gt 0 ]]; do
     --email) EMAIL_ARG="${2:-}"; shift 2 ;;
     --password) PASSWORD_ARG="${2:-}"; shift 2 ;;
     --panel-port) PANEL_PORT="${2:-}"; shift 2 ;;
+    --agent-llm) AGENT_LLM="${2:-}"; shift 2 ;;
+    --agent-model) AGENT_MODEL="${2:-}"; shift 2 ;;
     --no-tls) NO_TLS=1; shift ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --ref) REF="${2:-}"; shift 2 ;;
@@ -97,6 +106,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "${EUID}" -eq 0 ]] || die "run this script as root (sudo bash autoinstall.sh)"
+
+case "$AGENT_LLM" in
+  rules|local|hybrid) ;;
+  *) die "--agent-llm must be rules, local or hybrid" ;;
+esac
+if [[ -n "$AGENT_MODEL" ]]; then
+  [[ "$AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-model contains invalid characters"
+  [[ "$AGENT_MODEL" != -* ]] || die "--agent-model must not start with '-'"
+fi
 
 [[ -r /etc/os-release ]] || die "/etc/os-release not found; Debian or Ubuntu required"
 # shellcheck disable=SC1091
@@ -313,6 +331,8 @@ apply_linux_metadata_fix
 # Run the upstream one-shot installer
 # ---------------------------------------------------------------------------
 preinstall_args=(--host "$HOST" --email "$EMAIL" --panel-port "$PANEL_PORT" --yes)
+preinstall_args+=(--agent-llm "$AGENT_LLM")
+[[ -z "$AGENT_MODEL" ]] || preinstall_args+=(--agent-model "$AGENT_MODEL")
 (( NO_TLS )) && preinstall_args+=(--no-tls)
 
 log "Installing RYNXCP and the full service stack (this takes a while)"
@@ -346,6 +366,13 @@ if systemctl is-active --quiet named 2>/dev/null || systemctl is-active --quiet 
   log "BIND: active"
 else
   warn "BIND is not active"
+fi
+if [[ "$AGENT_LLM" != "rules" ]]; then
+  if systemctl is-active --quiet ollama 2>/dev/null; then
+    log "ollama: active"
+  else
+    warn "ollama is not active; the AI agent will keep using deterministic rules"
+  fi
 fi
 if command -v doveconf >/dev/null 2>&1; then
   if doveconf -n >/dev/null 2>&1; then

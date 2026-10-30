@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     status     TEXT NOT NULL,
     findings   INTEGER NOT NULL DEFAULT 0,
     error      TEXT NOT NULL DEFAULT '',
-    model      TEXT NOT NULL DEFAULT ''
+    model      TEXT NOT NULL DEFAULT '',
+    summary    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_started ON agent_runs(started_at);
 "#;
@@ -262,6 +263,7 @@ pub struct AgentRun {
     pub findings: i64,
     pub error: String,
     pub model: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -274,6 +276,7 @@ pub struct AgentStats {
     pub open: i64,
     pub acknowledged: i64,
     pub ignored: i64,
+    pub resolved: i64,
 }
 
 struct UserRecord {
@@ -386,6 +389,17 @@ impl PanelDb {
         if !has_ftp_limit {
             conn.execute(
                 "ALTER TABLE packages ADD COLUMN ftp_accounts INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        let has_agent_summary: bool = conn
+            .prepare("PRAGMA table_info(agent_runs)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(Result::ok)
+            .any(|name| name == "summary");
+        if !has_agent_summary {
+            conn.execute(
+                "ALTER TABLE agent_runs ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
                 [],
             )?;
         }
@@ -1348,28 +1362,37 @@ impl PanelDb {
 
     /// Inserts a new finding or refreshes the existing one with the same
     /// fingerprint. Returns the stored finding and whether it is new.
+    /// Returns the stored finding, whether it is new and whether its severity
+    /// increased since the previous run.
     pub fn upsert_agent_finding(
         &self,
         input: &AgentFindingInput,
-    ) -> Result<(AgentFinding, bool), PanelError> {
+    ) -> Result<(AgentFinding, bool, bool), PanelError> {
         let conn = self.conn()?;
         let now = now_rfc3339();
         let now_unix = now_unix();
         let evidence = serde_json::to_string(&input.evidence)
             .map_err(|e| PanelError::Validation(e.to_string()))?;
-        let existing: Option<(String, i64)> = conn
+        let existing: Option<(String, i64, String, String)> = conn
             .query_row(
-                "SELECT id, occurrences FROM agent_findings WHERE fingerprint = ?1",
+                "SELECT id, occurrences, severity, status \
+                 FROM agent_findings WHERE fingerprint = ?1",
                 params![input.fingerprint],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()?;
-        if let Some((id, occurrences)) = existing {
+        if let Some((id, occurrences, old_severity, old_status)) = existing {
+            let escalated = severity_rank(&input.severity) > severity_rank(&old_severity);
+            let status = if old_status == "resolved" {
+                "open"
+            } else {
+                old_status.as_str()
+            };
             conn.execute(
                 "UPDATE agent_findings SET updated_at = ?1, last_seen = ?2, \
                  occurrences = ?3, severity = ?4, category = ?5, title = ?6, \
-                 summary = ?7, evidence = ?8, recommendation = ?9, source = ?10 \
-                 WHERE id = ?11",
+                 summary = ?7, evidence = ?8, recommendation = ?9, source = ?10, \
+                 status = ?11 WHERE id = ?12",
                 params![
                     now,
                     now_unix,
@@ -1381,13 +1404,14 @@ impl PanelDb {
                     evidence,
                     input.recommendation,
                     input.source,
+                    status,
                     id
                 ],
             )?;
             let finding = self
                 .get_agent_finding(&id)?
                 .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
-            return Ok((finding, false));
+            return Ok((finding, false, escalated));
         }
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
@@ -1413,7 +1437,19 @@ impl PanelDb {
         let finding = self
             .get_agent_finding(&id)?
             .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
-        Ok((finding, true))
+        Ok((finding, true, false))
+    }
+
+    /// Marks findings that were not observed again as resolved. Acknowledged
+    /// findings are resolved automatically; ignored findings keep their status.
+    pub fn resolve_stale_agent_findings(&self, before_unix: i64) -> Result<usize, PanelError> {
+        let conn = self.conn()?;
+        let changed = conn.execute(
+            "UPDATE agent_findings SET status = 'resolved', updated_at = ?1 \
+             WHERE last_seen < ?2 AND status IN ('open', 'acknowledged')",
+            params![now_rfc3339(), before_unix],
+        )?;
+        Ok(changed)
     }
 
     fn get_agent_finding(&self, id: &str) -> Result<Option<AgentFinding>, PanelError> {
@@ -1500,6 +1536,7 @@ impl PanelDb {
             match status.as_str() {
                 "acknowledged" => stats.acknowledged += count,
                 "ignored" => stats.ignored += count,
+                "resolved" => stats.resolved += count,
                 _ => stats.open += count,
             }
         }
@@ -1510,8 +1547,8 @@ impl PanelDb {
         let conn = self.conn()?;
         conn.execute(
             "INSERT INTO agent_runs \
-             (id, started_at, finished_at, status, findings, error, model) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (id, started_at, finished_at, status, findings, error, model, summary) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 run.id,
                 run.started_at,
@@ -1519,7 +1556,8 @@ impl PanelDb {
                 run.status,
                 run.findings,
                 run.error,
-                run.model
+                run.model,
+                run.summary
             ],
         )?;
         conn.execute(
@@ -1534,7 +1572,7 @@ impl PanelDb {
         let conn = self.conn()?;
         Ok(conn
             .query_row(
-                "SELECT id, started_at, finished_at, status, findings, error, model \
+                "SELECT id, started_at, finished_at, status, findings, error, model, summary \
                  FROM agent_runs ORDER BY started_at DESC LIMIT 1",
                 [],
                 |row| {
@@ -1546,10 +1584,21 @@ impl PanelDb {
                         findings: row.get(4)?,
                         error: row.get(5)?,
                         model: row.get(6)?,
+                        summary: row.get(7)?,
                     })
                 },
             )
             .optional()?)
+    }
+}
+
+fn severity_rank(severity: &str) -> u8 {
+    match severity {
+        "critical" => 5,
+        "high" => 4,
+        "medium" => 3,
+        "low" => 2,
+        _ => 1,
     }
 }
 
@@ -1952,16 +2001,18 @@ mod tests {
             recommendation: "do something".into(),
             source: "rules".into(),
         };
-        let (first, is_new) = db.upsert_agent_finding(&input).unwrap();
+        let (first, is_new, escalated) = db.upsert_agent_finding(&input).unwrap();
         assert!(is_new);
+        assert!(!escalated);
         assert_eq!(first.occurrences, 1);
         assert_eq!(first.status, "open");
 
         let mut updated = input.clone();
         updated.summary = "second summary".into();
         updated.severity = "critical".into();
-        let (second, is_new) = db.upsert_agent_finding(&updated).unwrap();
+        let (second, is_new, escalated) = db.upsert_agent_finding(&updated).unwrap();
         assert!(!is_new);
+        assert!(escalated);
         assert_eq!(second.id, first.id);
         assert_eq!(second.occurrences, 2);
         assert_eq!(second.summary, "second summary");
@@ -1970,12 +2021,22 @@ mod tests {
 
         db.set_agent_finding_status(&first.id, "acknowledged")
             .unwrap();
-        let (third, _) = db.upsert_agent_finding(&input).unwrap();
+        let (third, _, _) = db.upsert_agent_finding(&input).unwrap();
         assert_eq!(third.status, "acknowledged");
 
+        let resolved = db
+            .resolve_stale_agent_findings(now_unix().saturating_add(1))
+            .unwrap();
+        assert_eq!(resolved, 1);
         let stats = db.agent_stats().unwrap();
         assert_eq!(stats.high, 1);
-        assert_eq!(stats.acknowledged, 1);
+        assert_eq!(stats.resolved, 1);
+        assert_eq!(stats.open, 0);
+
+        let (reopened, is_new, escalated) = db.upsert_agent_finding(&input).unwrap();
+        assert!(!is_new);
+        assert!(!escalated);
+        assert_eq!(reopened.status, "open");
         assert!(matches!(
             db.set_agent_finding_status(&first.id, "unknown"),
             Err(PanelError::Validation(_))
@@ -1989,6 +2050,7 @@ mod tests {
             findings: 1,
             error: String::new(),
             model: "rules".into(),
+            summary: "everything is fine".into(),
         };
         db.record_agent_run(&run).unwrap();
         assert_eq!(db.latest_agent_run().unwrap().unwrap().id, "run-1");

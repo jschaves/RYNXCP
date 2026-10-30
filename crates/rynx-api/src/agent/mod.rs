@@ -1,16 +1,19 @@
 //! Deterministic system analyzer.
 //!
 //! The agent only reads state through the daemon and the panel database. It
-//! stores findings, deduplicates them by fingerprint and optionally emails new
-//! high/critical findings. It never executes remediation or calls an LLM yet;
-//! the local/external providers are reserved for the next phase.
+//! stores findings, deduplicates them by fingerprint, optionally enriches them
+//! with a local LLM and emails new or escalating high/critical findings. It
+//! never executes remediation; the external provider is reserved for a later
+//! phase.
 
 pub mod collect;
+pub mod provider;
+pub mod redact;
 pub mod rules;
 
 use std::time::Duration;
 
-use rynx_core::crypto::{now_rfc3339, random_hex};
+use rynx_core::crypto::{now_rfc3339, now_unix, random_hex};
 use rynx_panel::{AgentFinding, AgentRun};
 
 use crate::state::ApiState;
@@ -36,6 +39,7 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
             findings: 0,
             error: "daemon unavailable".into(),
             model: "rules".into(),
+            summary: String::new(),
         };
         if let Err(err) = state.db.record_agent_run(&run) {
             tracing::warn!(error = %err, "agent run could not be recorded");
@@ -43,21 +47,49 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
         return Err("daemon unavailable".into());
     }
 
-    let findings = rules::evaluate(&snapshot);
+    let mut findings = rules::evaluate(&snapshot);
+    let enhancement = provider::enhance(state, &snapshot, &findings)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(
+                error = %err,
+                "local agent provider unavailable; continuing with rules"
+            );
+            provider::Enhancement::default()
+        });
+    findings.extend(enhancement.findings);
+    let model = if enhancement.model.is_empty() {
+        "rules".to_string()
+    } else {
+        enhancement.model
+    };
+    let summary = enhancement.summary;
+    let run_started_unix = now_unix();
     let mut new_findings = 0usize;
     let mut alerts: Vec<AgentFinding> = Vec::new();
     for finding in &findings {
         match state.db.upsert_agent_finding(finding) {
-            Ok((stored, is_new)) => {
+            Ok((stored, is_new, escalated)) => {
                 if is_new {
                     new_findings += 1;
-                    if matches!(stored.severity.as_str(), "critical" | "high") {
-                        alerts.push(stored);
-                    }
+                }
+                if (is_new || escalated) && matches!(stored.severity.as_str(), "critical" | "high")
+                {
+                    alerts.push(stored);
                 }
             }
             Err(err) => tracing::warn!(error = %err, "agent finding could not be stored"),
         }
+    }
+    match state.db.resolve_stale_agent_findings(run_started_unix) {
+        Ok(resolved) if resolved > 0 => {
+            tracing::info!(
+                resolved,
+                "agent resolved findings that are no longer present"
+            )
+        }
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "stale agent findings could not be resolved"),
     }
 
     let run = AgentRun {
@@ -67,7 +99,8 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
         status: "ok".into(),
         findings: findings.len() as i64,
         error: String::new(),
-        model: "rules".into(),
+        model,
+        summary,
     };
     if let Err(err) = state.db.record_agent_run(&run) {
         tracing::warn!(error = %err, "agent run could not be recorded");

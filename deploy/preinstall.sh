@@ -21,6 +21,8 @@ HOST_ARG=""
 EMAIL_ARG=""
 PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
 PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
+AGENT_LLM="${RYNX_AGENT_LLM:-rules}"
+AGENT_MODEL="${RYNX_AGENT_MODEL:-}"
 ASSUME_YES=0
 NO_TLS=0
 SSH_PORT=""
@@ -45,6 +47,10 @@ Options:
                         avoid exposing it in the process list.
   --panel-port <port>   Publish the panel on this TCP port (default 2083).
                         Port 80 is still used for the ACME challenge.
+  --agent-llm <mode>    rules (default), local or hybrid. local/hybrid install
+                        Ollama, a loopback-only service and the selected model.
+  --agent-model <name>  Ollama model for local/hybrid. Defaults to a size based
+                        on host RAM.
   --no-tls              Do not request a Let's Encrypt certificate.
   --yes                 Assume yes for confirmations (non-interactive).
   -h, --help            Show this help.
@@ -54,6 +60,8 @@ Environment:
   RYNX_HOST            Same as --host.
   RYNX_ADMIN_EMAIL     Same as --email.
   RYNX_PANEL_PORT      Same as --panel-port.
+  RYNX_AGENT_LLM       Same as --agent-llm.
+  RYNX_AGENT_MODEL     Same as --agent-model.
 EOF
 }
 
@@ -67,6 +75,8 @@ while [[ $# -gt 0 ]]; do
     --email) EMAIL_ARG="${2:-}"; shift 2 ;;
     --password) PASSWORD_ARG="${2:-}"; shift 2 ;;
     --panel-port) PANEL_PORT="${2:-}"; shift 2 ;;
+    --agent-llm) AGENT_LLM="${2:-}"; shift 2 ;;
+    --agent-model) AGENT_MODEL="${2:-}"; shift 2 ;;
     --no-tls) NO_TLS=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -83,6 +93,15 @@ trap 'code=$?; printf "\n\033[1;31mFAILED\033[0m at line %s (exit %s). Log: %s\n
 [[ "$PANEL_PORT" =~ ^[0-9]+$ ]] || die "--panel-port must be numeric"
 PANEL_PORT=$((10#$PANEL_PORT))
 (( PANEL_PORT >= 1 && PANEL_PORT <= 65535 )) || die "--panel-port must be between 1 and 65535"
+
+case "$AGENT_LLM" in
+  rules|local|hybrid) ;;
+  *) die "--agent-llm must be rules, local or hybrid" ;;
+esac
+if [[ -n "$AGENT_MODEL" ]]; then
+  [[ "$AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-model contains invalid characters"
+  [[ "$AGENT_MODEL" != -* ]] || die "--agent-model must not start with '-'"
+fi
 
 # ---------------------------------------------------------------------------
 # Distribution detection
@@ -221,6 +240,95 @@ set_toml() {
     sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file"
   else
     printf '\n%s = %s\n' "$key" "$value" >>"$file"
+  fi
+}
+
+ensure_toml_section() {
+  local file="$1" section="$2"
+  [[ -f "$file" ]] || return 0
+  grep -qE "^[[:space:]]*\[${section}\][[:space:]]*$" "$file" || \
+    printf '\n[%s]\n' "$section" >>"$file"
+}
+
+install_local_agent() {
+  local model="$1" ollama_bin installer
+  ollama_bin="$(command -v ollama || true)"
+  if [[ -z "$ollama_bin" ]]; then
+    installer="$(mktemp)"
+    if ! curl -fsSL --max-time 120 https://ollama.com/install.sh -o "$installer"; then
+      rm -f "$installer"
+      return 1
+    fi
+    if ! bash "$installer"; then
+      rm -f "$installer"
+      return 1
+    fi
+    rm -f "$installer"
+    ollama_bin="$(command -v ollama || true)"
+  fi
+  [[ -n "$ollama_bin" ]] || return 1
+
+  # Loopback-only inference, unload idle models and keep one worker to avoid
+  # competing with hosted sites on small VPS instances.
+  install -d -m 0755 /etc/systemd/system/ollama.service.d
+  cat >/etc/systemd/system/ollama.service.d/rynxcp.conf <<'EOF'
+[Service]
+Environment="OLLAMA_HOST=127.0.0.1:11434"
+Environment="OLLAMA_KEEP_ALIVE=15m"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="OLLAMA_NUM_PARALLEL=1"
+EOF
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable --now ollama >/dev/null 2>&1 || \
+    systemctl restart ollama >/dev/null 2>&1 || return 1
+
+  local attempt
+  for attempt in {1..30}; do
+    if curl -fsS --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  curl -fsS --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1 || return 1
+
+  if ! "$ollama_bin" show "$model" >/dev/null 2>&1; then
+    "$ollama_bin" pull "$model" || return 1
+  fi
+  "$ollama_bin" show "$model" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+configure_agent() {
+  local mode="$1" model="$2" mem_kb
+  ensure_toml_section "$API_CONF" "agent"
+  set_toml "$API_CONF" "enabled" "true"
+  set_toml "$API_CONF" "interval_secs" "900"
+  set_toml "$API_CONF" "max_events" "200"
+  set_toml "$API_CONF" "email_alerts" "true"
+  set_toml "$API_CONF" "mode" "\"$mode\""
+  set_toml "$API_CONF" "external_enabled" "false"
+
+  [[ "$mode" != "rules" ]] || return 0
+
+  if [[ -z "$model" ]]; then
+    mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+    if (( mem_kb >= 24 * 1024 * 1024 )); then
+      model="qwen3:8b"
+    elif (( mem_kb >= 8 * 1024 * 1024 )); then
+      model="qwen2.5:3b"
+    else
+      model="qwen2.5:1.5b"
+    fi
+  fi
+
+  log "Configuring the local AI agent (Ollama, model ${model})"
+  if install_local_agent "$model"; then
+    set_toml "$API_CONF" "local_base_url" "\"http://127.0.0.1:11434/v1\""
+    set_toml "$API_CONF" "local_model" "\"$model\""
+    set_toml "$API_CONF" "local_timeout_secs" "120"
+  else
+    warn "the local AI model could not be provisioned; the agent falls back to rules"
+    set_toml "$API_CONF" "mode" "\"rules\""
   fi
 }
 
@@ -814,6 +922,8 @@ if is_domain "$HOST" && [[ -n "$DKIM_SELECTOR" ]]; then
 else
   set_toml "$API_CONF" "smtp_enabled" "false"
 fi
+
+configure_agent "$AGENT_LLM" "$AGENT_MODEL"
 
 PANEL_URL="${PANEL_SCHEME}://${HOST}"
 if { [[ "$PANEL_SCHEME" == "https" && "$PANEL_PORT" != "443" ]] || \

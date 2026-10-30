@@ -299,6 +299,8 @@ try {
     if (@($agentFindings.findings).Count -lt 1) { throw 'agent findings missing' }
     $agentId = @($agentFindings.findings)[0].id
     $null = RequestJson 'POST' "/api/v1/agent/findings/$agentId/status" @{ status = 'acknowledged' }
+    $agentProvider = RequestJson 'POST' '/api/v1/agent/provider/test'
+    if ($null -eq $agentProvider.ok) { throw 'agent provider test missing' }
     $console = RequestJson 'POST' '/api/v1/console' @{ action = @{ action = 'disk_usage' } }
     if ($console.kind -ne 'console_output' -or -not $console.output) { throw 'console action failed' }
 
