@@ -341,9 +341,9 @@ PHP version selectors are populated from the PHP-FPM versions installed on the
 host. The one-shot installer installs PHP 8.5; 8.1-8.4 only appear when those
 versions are installed separately.
 
-See [docs/python-app.md](docs/python-app.md) for a complete minimal Python
-application, the required application fields, upload path and 502
-troubleshooting.
+Minimal application examples: [Node.js](docs/node-app.md),
+[Python](docs/python-app.md), [Ruby](docs/ruby-app.md), [Java](docs/java-app.md),
+[.NET](docs/dotnet-app.md) and [Go](docs/go-app.md).
 
 ## DNS and email (SPF / DKIM / DMARC)
 
