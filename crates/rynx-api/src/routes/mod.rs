@@ -82,6 +82,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/files/mkdir", post(files::mkdir))
         .route("/api/v1/files/upload", post(files::upload))
         .route("/api/v1/files/rename", post(files::rename))
+        .route("/api/v1/php/versions", get(php::versions))
         .route("/api/v1/php-pools", get(php::list).post(php::create))
         .route("/api/v1/php-pools/{username}", delete(php::delete))
         .route("/api/v1/apps", get(apps::list).post(apps::create))

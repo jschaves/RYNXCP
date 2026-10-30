@@ -47,3 +47,14 @@ pub async fn delete(
         .await?;
     Ok(Json(response))
 }
+
+pub async fn versions(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Result<Json<DaemonResponse>, ApiError> {
+    let response = state
+        .daemon
+        .call(Request::PhpVersions, &auth.user.username)
+        .await?;
+    Ok(Json(response))
+}

@@ -337,6 +337,10 @@ Compromising the web API does not grant direct write access to hosting state.
 Each application gets a shell-less user, a validated loopback port, a hardened
 systemd unit, a `0640` environment file and a vhost with security headers.
 
+PHP version selectors are populated from the PHP-FPM versions installed on the
+host. The one-shot installer installs PHP 8.5; 8.1-8.4 only appear when those
+versions are installed separately.
+
 See [docs/python-app.md](docs/python-app.md) for a complete minimal Python
 application, the required application fields, upload path and 502
 troubleshooting.
@@ -651,6 +655,7 @@ POST   /api/v1/users/{username}/impersonate
 
 GET|POST   /api/v1/accounts          DELETE /api/v1/accounts/{username}
 GET|POST   /api/v1/websites          DELETE /api/v1/websites/{domain}
+GET        /api/v1/php/versions
 GET|POST   /api/v1/php-pools         DELETE /api/v1/php-pools/{username}
 GET|POST   /api/v1/apps              DELETE /api/v1/apps/{username}/{name}
 GET|POST   /api/v1/certs             POST   /api/v1/certs/renew

@@ -845,6 +845,10 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn php_versions(&self) -> ExecResult<Vec<String>> {
+        Ok(vec!["8.5".into(), "8.3".into()])
+    }
+
     async fn fail2ban_bans(&self) -> ExecResult<Vec<(String, String)>> {
         Ok(Vec::new())
     }

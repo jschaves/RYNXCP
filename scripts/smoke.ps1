@@ -109,6 +109,10 @@ try {
         throw 'the user locale was not persisted'
     }
     $null = RequestJson 'PUT' '/api/v1/auth/locale' @{ locale = 'es' }
+    $phpVersions = RequestJson 'GET' '/api/v1/php/versions'
+    if ($phpVersions.kind -ne 'php_versions' -or $phpVersions.versions -notcontains '8.5') {
+        throw 'installed PHP versions are missing'
+    }
     $seedPackages = @(RequestJson 'GET' '/api/v1/packages')
     if ($seedPackages.Count -lt 1 -or -not $seedPackages[0].is_default) {
         throw 'the default package was not seeded'

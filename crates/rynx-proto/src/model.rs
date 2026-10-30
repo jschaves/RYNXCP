@@ -106,6 +106,7 @@ pub enum Request {
         username: String,
     },
     PhpPoolList,
+    PhpVersions,
 
     AppUpsert(AppSpec),
     AppDelete {
@@ -260,6 +261,9 @@ pub enum Response {
     },
     PhpPools {
         pools: Vec<PhpPoolView>,
+    },
+    PhpVersions {
+        versions: Vec<String>,
     },
     App {
         app: AppView,

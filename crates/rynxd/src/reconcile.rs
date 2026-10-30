@@ -135,6 +135,10 @@ impl Reconciler {
 
             Request::PhpPoolUpsert(spec) => self.php_pool_upsert(spec, actor).await,
             Request::PhpPoolDelete { username } => self.php_pool_delete(&username, actor).await,
+            Request::PhpVersions => {
+                let versions = self.exec.php_versions().await.map_err(exec_error)?;
+                Ok(Response::PhpVersions { versions })
+            }
             Request::PhpPoolList => {
                 let pools = self.state.list_php_pools().map_err(internal)?;
                 Ok(Response::PhpPools { pools })
@@ -662,6 +666,9 @@ impl Reconciler {
 
     async fn website_upsert(&self, spec: WebsiteSpec, actor: &str) -> Result<Response, WireError> {
         validate_website_spec(&spec).map_err(invalid)?;
+        if let Runtime::Php { version } = &spec.runtime {
+            self.ensure_php_version(version).await?;
+        }
         for prefix in [
             "webmail",
             "mail",
@@ -948,8 +955,20 @@ impl Reconciler {
         self.state.upsert_php_pool(spec, &socket).map_err(internal)
     }
 
+    async fn ensure_php_version(&self, version: &str) -> Result<(), WireError> {
+        let versions = self.exec.php_versions().await.map_err(exec_error)?;
+        if versions.iter().any(|installed| installed == version) {
+            Ok(())
+        } else {
+            Err(WireError::unsupported(format!(
+                "PHP {version} is not installed on this server"
+            )))
+        }
+    }
+
     async fn php_pool_upsert(&self, spec: PhpPoolSpec, actor: &str) -> Result<Response, WireError> {
         validate_php_pool_spec(&spec).map_err(invalid)?;
+        self.ensure_php_version(&spec.version).await?;
         let view = self.apply_php_pool(&spec).await?;
         self.log(
             actor,

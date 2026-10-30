@@ -2000,6 +2000,22 @@ impl Executor for RealExecutor {
         }
     }
 
+    async fn php_versions(&self) -> ExecResult<Vec<String>> {
+        let mut versions = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&self.cfg.php_fpm_root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.chars().next().is_some_and(|ch| ch.is_ascii_digit())
+                    && name.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
+                {
+                    versions.push(name);
+                }
+            }
+        }
+        versions.sort_by(|a, b| b.cmp(a));
+        Ok(versions)
+    }
+
     async fn installed_programs(&self) -> ExecResult<Vec<ProgramInfo>> {
         async fn probe(program: &str, args: &[&str]) -> Option<String> {
             run_combined(

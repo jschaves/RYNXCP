@@ -9,6 +9,7 @@ const S = {
   navToken: 0,
   system: null,
   mode: null,
+  phpVersions: null,
   impersonatedBy: null,
   resetToken: null,
   twoFactorChallenge: null,
@@ -994,8 +995,20 @@ async function renderAccounts() {
   $('#view').innerHTML = html;
 }
 
-function openAccountModal() {
+async function loadPhpVersions() {
+  if (S.phpVersions) return S.phpVersions;
+  try {
+    const data = await api('/api/v1/php/versions');
+    S.phpVersions = Array.isArray(data.versions) ? data.versions : [];
+  } catch {
+    S.phpVersions = [];
+  }
+  return S.phpVersions;
+}
+
+async function openAccountModal() {
   const packages = S.data.packages || [];
+  const phpVersions = await loadPhpVersions();
   if (!packages.length) {
     toast('Primero crea un paquete en Administración > Paquetes', 'error');
     return;
@@ -1010,7 +1023,7 @@ function openAccountModal() {
       ${fSelect('package_id', 'Paquete', packages.map((pkg) => ({ value: pkg.id, label: pkg.name })), { value: defaultPackage.id, help: 'Los límites del paquete quedan bloqueados para esta cuenta.' })}
       ${fSelect('web_backend', 'Backend plantilla', WEB_BACKEND_OPTIONS, { value: defaultPackage.web_backend, help: 'Preseleccionado por el paquete; puedes cambiarlo.' })}
       <div class="field full"><span>Límites del paquete</span><div id="package-summary"></div></div>
-      ${fSelect('php_version', 'PHP por defecto', [{ value: '', label: '— sin pool —' }, ...RUNTIMES.php.versions.map((v) => ({ value: v, label: `PHP ${v}` }))], { value: '8.3' })}
+      ${fSelect('php_version', 'PHP por defecto', [{ value: '', label: '— sin pool —' }, ...phpVersions.map((v) => ({ value: v, label: `PHP ${v}` }))], { value: phpVersions[0] || '' })}
       <div class="full">${fCheck('enabled', 'Cuenta activa', true)}</div>
       ${fSelect('panel_access', 'Acceso al panel del cliente', [
         { value: 'viewer', label: 'Solo lectura (viewer)' },
@@ -1115,20 +1128,24 @@ async function renderWebsites() {
     table(['Dominio', 'Cuenta', 'Runtime', 'TLS', 'Estado', 'Docroot', ''], rows, 'Aún no hay virtual hosts.');
 }
 
-function openWebsiteModal(website = null) {
+async function openWebsiteModal(website = null) {
   if (!S.data.accounts.length) {
     toast('Primero crea una cuenta de hosting', 'error');
     return;
   }
   const editing = Boolean(website);
   const spec = website ? website.spec : null;
+  const phpVersions = await loadPhpVersions();
   const engineOptions = ['static', 'php', ...MANAGED].map((engine) => ({
     value: engine,
     label: RUNTIMES[engine].label,
   }));
   const accountItems = accountOptions(false);
   const initialEngine = spec ? spec.runtime.engine : 'php';
-  const initialVersions = (RUNTIMES[initialEngine] && RUNTIMES[initialEngine].versions) || [];
+  const initialVersions = initialEngine === 'php'
+    ? (spec && spec.runtime.version && !phpVersions.includes(spec.runtime.version)
+      ? [spec.runtime.version, ...phpVersions] : phpVersions)
+    : ((RUNTIMES[initialEngine] && RUNTIMES[initialEngine].versions) || []);
 
   openModal({
     title: editing ? T('Editar') + ' · ' + spec.domain : 'Nuevo sitio web',
@@ -1138,7 +1155,7 @@ function openWebsiteModal(website = null) {
       ${fInput('aliases', 'Alias', { value: spec ? spec.aliases.join(', ') : '', placeholder: 'www.example.com, cdn.example.com', help: 'separados por coma' })}
       ${fSelect('username', 'Cuenta', accountItems, { value: spec ? spec.username : undefined, required: true })}
       ${fSelect('engine', 'Runtime', engineOptions, { value: initialEngine })}
-      ${fSelect('version', 'Versión', initialVersions.map((v) => ({ value: v, label: v })), { value: spec ? spec.runtime.version : '8.3' })}
+      ${fSelect('version', 'Versión', initialVersions.map((v) => ({ value: v, label: v })), { value: spec ? spec.runtime.version : (initialVersions[0] || '') })}
       ${fSelect('app', 'Aplicación', [{ value: '', label: '— selecciona —' }], { value: spec && spec.app ? spec.app : '', help: 'obligatoria para runtimes gestionados' })}
       ${fInput('docroot', 'Document root', { value: spec ? spec.docroot : 'public_html', required: true, help: 'relativo al home de la cuenta' })}
       ${fSelect('tls', 'TLS', [
@@ -1156,7 +1173,9 @@ function openWebsiteModal(website = null) {
       const username = form.elements.username;
 
       const syncVersions = () => {
-        const versions = (RUNTIMES[engine.value] && RUNTIMES[engine.value].versions) || [];
+        const versions = engine.value === 'php'
+          ? phpVersions
+          : ((RUNTIMES[engine.value] && RUNTIMES[engine.value].versions) || []);
         version.innerHTML = versions.length
           ? versions.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('')
           : '<option value="">—</option>';
@@ -2049,17 +2068,18 @@ async function renderPhp() {
     table(['Cuenta', 'Versión', 'PM', 'Workers', 'Memoria', 'Socket', 'Estado', ''], rows, 'No hay pools; se crean automáticamente al publicar un sitio PHP.');
 }
 
-function openPhpModal() {
+async function openPhpModal() {
   if (!S.data.accounts.length) {
     toast('Primero crea una cuenta de hosting', 'error');
     return;
   }
+  const phpVersions = await loadPhpVersions();
   openModal({
     title: 'Nuevo pool PHP-FPM',
     submitLabel: 'Crear pool',
     html: `<div class="form-grid">
       ${fSelect('username', 'Cuenta', accountOptions(false), { required: true })}
-      ${fSelect('version', 'Versión PHP', RUNTIMES.php.versions.map((v) => ({ value: v, label: v })), { value: '8.3' })}
+      ${fSelect('version', 'Versión PHP', phpVersions.map((v) => ({ value: v, label: v })), { value: phpVersions[0] || '' })}
       ${fSelect('process_manager', 'Gestor de procesos', [
         { value: 'dynamic', label: 'dynamic' },
         { value: 'ondemand', label: 'ondemand' },
@@ -3475,6 +3495,7 @@ const CONSOLE_ACTIONS = [
 
 async function renderConsole() {
   await Promise.all([loadList('accounts'), loadList('apps')]);
+  const phpVersions = await loadPhpVersions();
   const appOptions = S.data.apps.map((app) => ({
     value: `${app.spec.username}/${app.spec.name}`,
     label: `${app.spec.username}/${app.spec.name}`,
@@ -3484,7 +3505,7 @@ async function renderConsole() {
       <div class="section-head"><h2>Acción</h2>${badge('sin shell libre', 'info')}</div>
       <form id="console-form" class="form-grid" style="margin-top:16px">
         ${fSelect('action', 'Comando', CONSOLE_ACTIONS.map(([value, label]) => ({ value, label })), { value: 'services', full: true })}
-        ${fSelect('php_version', 'Versión PHP (php_reload)', RUNTIMES.php.versions.map((v) => ({ value: v, label: v })), { value: '8.3' })}
+        ${fSelect('php_version', 'Versión PHP (php_reload)', phpVersions.map((v) => ({ value: v, label: v })), { value: phpVersions[0] || '' })}
         ${fSelect('app', 'Aplicación (restart / logs)', appOptions.length ? appOptions : [{ value: '', label: '— sin aplicaciones —' }])}
         ${fInput('lines', 'Líneas de log', { type: 'number', value: 100, min: 10, max: 500 })}
         <div class="full row-inline"><button class="btn primary" type="submit">Ejecutar</button><span class="muted small">Toda acción queda registrada en la auditoría encadenada.</span></div>

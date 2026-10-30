@@ -312,6 +312,7 @@ pub trait Executor: Send + Sync {
     async fn resolve_user_ids(&self, username: &str) -> ExecResult<Option<(u32, u32)>>;
 
     async fn installed_programs(&self) -> ExecResult<Vec<ProgramInfo>>;
+    async fn php_versions(&self) -> ExecResult<Vec<String>>;
     async fn available_updates(&self) -> ExecResult<Vec<PackageUpdate>>;
     async fn apply_updates(&self) -> ExecResult<String>;
 
