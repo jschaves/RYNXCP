@@ -56,7 +56,7 @@ pub fn english(code: &str, params: &Value) -> Option<FindingText> {
         ),
         "service-failed" => (
             "Service down: {name}",
-            "Unit {unit} is failed and may affect hosting.",
+            "Unit {unit} is not running correctly (status: {status}) and may affect hosting.",
             "Check the service status and journal; restart it from Programs if appropriate.",
         ),
         "mail-filter-missing" => (
@@ -158,7 +158,7 @@ fn pt(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "Serviço em baixo: {name}",
-            "A unidade {unit} está em falha e pode afetar o alojamento.",
+            "A unidade {unit} não está a funcionar corretamente (estado: {status}) e pode afetar o alojamento.",
             "Verifique o estado e o journal do serviço; reinicie-o em Programas se necessário.",
         ),
         "mail-filter-missing" => (
@@ -234,7 +234,7 @@ fn fr(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "Service arrêté : {name}",
-            "L'unité {unit} est en échec et peut affecter l'hébergement.",
+            "L'unité {unit} ne fonctionne pas correctement (état : {status}) et peut affecter l'hébergement.",
             "Vérifiez l'état et le journal du service ; redémarrez-le depuis Programmes si nécessaire.",
         ),
         "mail-filter-missing" => (
@@ -310,7 +310,7 @@ fn it(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "Servizio inattivo: {name}",
-            "L'unità {unit} è in errore e può influire sull'hosting.",
+            "L'unità {unit} non funziona correttamente (stato: {status}) e può influire sull'hosting.",
             "Controlla lo stato e il journal del servizio; riavvialo da Programmi se opportuno.",
         ),
         "mail-filter-missing" => (
@@ -386,7 +386,7 @@ fn de(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "Dienst ausgefallen: {name}",
-            "Die Unit {unit} ist fehlgeschlagen und kann das Hosting beeinträchtigen.",
+            "Die Unit {unit} läuft nicht korrekt (Status: {status}) und kann das Hosting beeinträchtigen.",
             "Prüfe Status und Journal des Dienstes; starte ihn bei Bedarf unter Programme neu.",
         ),
         "mail-filter-missing" => (
@@ -462,7 +462,7 @@ fn ar(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "الخدمة متوقفة: {name}",
-            "الوحدة {unit} في حالة فشل وقد تؤثر على الاستضافة.",
+            "الوحدة {unit} لا تعمل بشكل صحيح (الحالة: {status}) وقد تؤثر على الاستضافة.",
             "راجع حالة الخدمة وسجلها، وأعد تشغيلها من البرامج إذا لزم الأمر.",
         ),
         "mail-filter-missing" => (
@@ -538,7 +538,7 @@ fn ru(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "Служба не работает: {name}",
-            "Юнит {unit} находится в состоянии сбоя и может влиять на хостинг.",
+            "Юнит {unit} работает некорректно (состояние: {status}) и может влиять на хостинг.",
             "Проверьте состояние и журнал службы; перезапустите её из «Программ» при необходимости.",
         ),
         "mail-filter-missing" => (
@@ -614,7 +614,7 @@ fn zh(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "服务已停止：{name}",
-            "单元 {unit} 处于失败状态，可能影响主机服务。",
+            "单元 {unit} 运行不正常（状态：{status}），可能影响主机服务。",
             "请检查服务状态和日志；如需要，在“程序”中重启。",
         ),
         "mail-filter-missing" => (
@@ -690,7 +690,7 @@ fn ja(code: &str) -> Option<Triple> {
         ),
         "service-failed" => (
             "サービス停止: {name}",
-            "ユニット {unit} が失敗状態で、ホスティングに影響する可能性があります。",
+            "ユニット {unit} が正常に動作していません（状態: {status}）。ホスティングに影響する可能性があります。",
             "サービスの状態とジャーナルを確認し、必要なら「プログラム」から再起動してください。",
         ),
         "mail-filter-missing" => (
@@ -803,7 +803,7 @@ mod tests {
         let text = localized(
             "ja",
             "service-failed",
-            &json!({ "name": "nginx", "unit": "nginx" }),
+            &json!({ "name": "nginx", "unit": "nginx", "status": "inactive" }),
         )
         .expect("template");
         assert!(text.title.contains("nginx"));

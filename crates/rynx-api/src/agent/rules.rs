@@ -115,7 +115,7 @@ fn auth_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
 
 fn service_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
     for service in &snapshot.services {
-        if service.status != "failed" {
+        if !matches!(service.status.as_str(), "failed" | "inactive") {
             continue;
         }
         out.push(
@@ -123,13 +123,17 @@ fn service_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
                 rule: "service-failed",
                 target: service.unit.clone(),
                 code: "service-failed",
-                params: json!({ "name": service.name, "unit": service.unit }),
+                params: json!({
+                    "name": service.name,
+                    "unit": service.unit,
+                    "status": service.status
+                }),
                 severity: "high",
                 category: "reliability",
                 title: format!("Servicio caído: {}", service.name),
                 summary: format!(
-                    "La unidad {} está en estado failed y puede afectar al hosting.",
-                    service.unit
+                    "La unidad {} no está funcionando correctamente (estado: {}) y puede afectar al hosting.",
+                    service.unit, service.status
                 ),
                 evidence: vec![
                     format!("servicio={}", service.name),
@@ -187,7 +191,7 @@ fn filter_program_rules(snapshot: &Snapshot, out: &mut Vec<RuleFinding>) {
             target: program.name.clone(),
             code: "mail-filter-inactive",
             params: json!({ "name": program.name, "status": status }),
-            severity: "medium",
+            severity: "high",
             category: "reliability",
             title: format!("Filtro de correo detenido: {}", program.name),
             summary: format!(
@@ -438,7 +442,8 @@ mod tests {
     use super::*;
     use rynx_panel::AuthStats;
     use rynx_proto::{
-        CertView, CertificateStatus, FilterEvent, PackageUpdate, ProgramInfo, SystemInfo,
+        CertView, CertificateStatus, FilterEvent, PackageUpdate, ProgramInfo, ServiceStat,
+        SystemInfo,
     };
 
     fn base_snapshot() -> Snapshot {
@@ -494,6 +499,25 @@ mod tests {
                 && finding.severity == "high"
                 && finding.title.contains("malware")
         }));
+    }
+
+    #[test]
+    fn reports_inactive_core_service() {
+        let mut snapshot = base_snapshot();
+        snapshot.services.push(ServiceStat {
+            name: "mariadb".into(),
+            kind: "database".into(),
+            status: "inactive".into(),
+            pid: 0,
+            memory_kb: 0,
+            cpu_percent: 0.0,
+            uptime_secs: 0,
+            unit: "mariadb".into(),
+        });
+        let findings = evaluate(&snapshot, "es");
+        assert!(findings
+            .iter()
+            .any(|finding| { finding.severity == "high" && finding.title.contains("mariadb") }));
     }
 
     #[test]

@@ -2540,6 +2540,10 @@ impl Reconciler {
                     "active".to_string()
                 } else if status.state.contains("failed") {
                     "failed".to_string()
+                } else if status.state.contains("activating") {
+                    "activating".to_string()
+                } else if status.state.contains("deactivating") {
+                    "deactivating".to_string()
                 } else {
                     "inactive".to_string()
                 },
@@ -2566,6 +2570,22 @@ impl Reconciler {
         let mut services = Vec::new();
         services.push(self.stat_for("nginx", "nginx", "nginx").await);
         services.push(self.stat_for("rynxd", "daemon", "rynxd").await);
+
+        if self.cfg.db_enabled {
+            services.push(self.stat_for("mariadb", "database", "mariadb").await);
+        }
+        if self.cfg.dns_enabled {
+            services.push(self.stat_for("bind9", "dns", "named").await);
+        }
+        if self.cfg.mail_enabled {
+            services.push(self.stat_for("postfix", "mail", "postfix").await);
+            services.push(self.stat_for("dovecot", "mail", "dovecot").await);
+            services.push(self.stat_for("opendkim", "mail", "opendkim").await);
+        }
+        if self.cfg.ftp_enabled {
+            services.push(self.stat_for("pure-ftpd", "ftp", "pure-ftpd").await);
+        }
+        services.push(self.stat_for("fail2ban", "security", "fail2ban").await);
 
         let mut versions: Vec<String> = self
             .state
