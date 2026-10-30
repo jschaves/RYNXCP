@@ -58,4 +58,9 @@ local_base_url = "http://127.0.0.1:11434/v1"
 local_model = "qwen3:8b"
 local_timeout_secs = 120
 external_enabled = false
+external_base_url = ""
+external_model = ""
+external_api_key_env = "RYNXCP_AGENT_API_KEY"
+external_timeout_secs = 120
+external_max_tokens = 1200
 

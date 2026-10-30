@@ -43,6 +43,9 @@ PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
 PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
 AGENT_LLM="${RYNX_AGENT_LLM:-rules}"
 AGENT_MODEL="${RYNX_AGENT_MODEL:-}"
+AGENT_API_URL="${RYNX_AGENT_API_URL:-}"
+AGENT_API_MODEL="${RYNX_AGENT_API_MODEL:-}"
+AGENT_API_KEY_FILE="${RYNX_AGENT_API_KEY_FILE:-}"
 NO_TLS=0
 
 LOG="/var/log/rynxcp/autoinstall.log"
@@ -62,10 +65,13 @@ Options:
   --email <address>     Admin email. Defaults to admin@<host> for domains.
   --password <value>    Admin password. Prefer RYNX_ADMIN_PASSWORD instead.
   --panel-port <port>   Public panel port (default 2083; 80 stays for ACME).
-  --agent-llm <mode>    rules (default), local or hybrid. local/hybrid install
-                        Ollama, a loopback-only service and the selected model.
+  --agent-llm <mode>    rules (default), local, api or hybrid. local/hybrid
+                        install Ollama; api uses the external provider.
   --agent-model <name>  Ollama model for local/hybrid. Defaults to a size based
                         on host RAM.
+  --agent-api-url URL   External OpenAI-compatible HTTPS endpoint for api/hybrid.
+  --agent-api-model M   External model name for api/hybrid.
+  --agent-api-key-file F File containing the external API key (mode 0600).
   --no-tls              Do not request a Let's Encrypt certificate.
   --repo <url>          RYNXCP Git repository.
   --ref <ref>           Branch or tag to install (default main).
@@ -76,8 +82,8 @@ Options:
 
 Environment:
   RYNX_HOST, RYNX_ADMIN_EMAIL, RYNX_ADMIN_PASSWORD, RYNX_PANEL_PORT,
-  RYNX_AGENT_LLM, RYNX_AGENT_MODEL, RYNXCP_REPO, RYNXCP_REF, RYNXCP_DIR,
-  RYNX_SOURCE_DIR.
+  RYNX_AGENT_LLM, RYNX_AGENT_MODEL, RYNX_AGENT_API_URL, RYNX_AGENT_API_MODEL,
+  RYNX_AGENT_API_KEY_FILE, RYNXCP_REPO, RYNXCP_REF, RYNXCP_DIR, RYNX_SOURCE_DIR.
 EOF
 }
 
@@ -94,6 +100,9 @@ while [[ $# -gt 0 ]]; do
     --panel-port) PANEL_PORT="${2:-}"; shift 2 ;;
     --agent-llm) AGENT_LLM="${2:-}"; shift 2 ;;
     --agent-model) AGENT_MODEL="${2:-}"; shift 2 ;;
+    --agent-api-url) AGENT_API_URL="${2:-}"; shift 2 ;;
+    --agent-api-model) AGENT_API_MODEL="${2:-}"; shift 2 ;;
+    --agent-api-key-file) AGENT_API_KEY_FILE="${2:-}"; shift 2 ;;
     --no-tls) NO_TLS=1; shift ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --ref) REF="${2:-}"; shift 2 ;;
@@ -108,12 +117,32 @@ done
 [[ "${EUID}" -eq 0 ]] || die "run this script as root (sudo bash autoinstall.sh)"
 
 case "$AGENT_LLM" in
-  rules|local|hybrid) ;;
-  *) die "--agent-llm must be rules, local or hybrid" ;;
+  rules|local|api|hybrid) ;;
+  *) die "--agent-llm must be rules, local, api or hybrid" ;;
 esac
 if [[ -n "$AGENT_MODEL" ]]; then
   [[ "$AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-model contains invalid characters"
   [[ "$AGENT_MODEL" != -* ]] || die "--agent-model must not start with '-'"
+fi
+if [[ -n "$AGENT_API_MODEL" ]]; then
+  [[ "$AGENT_API_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-api-model contains invalid characters"
+  [[ "$AGENT_API_MODEL" != -* ]] || die "--agent-api-model must not start with '-'"
+fi
+if [[ -n "$AGENT_API_URL" && ! "$AGENT_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+  die "--agent-api-url must be an https URL"
+fi
+if [[ -n "$AGENT_API_KEY_FILE" && ( ! -r "$AGENT_API_KEY_FILE" || ! -s "$AGENT_API_KEY_FILE" ) ]]; then
+  die "--agent-api-key-file must point to a readable, non-empty file"
+fi
+external_fields=0
+[[ -z "$AGENT_API_URL" ]] || external_fields=$((external_fields + 1))
+[[ -z "$AGENT_API_MODEL" ]] || external_fields=$((external_fields + 1))
+[[ -z "$AGENT_API_KEY_FILE" ]] || external_fields=$((external_fields + 1))
+if [[ "$AGENT_LLM" == "api" ]] && (( external_fields != 3 )); then
+  die "--agent-llm api requires --agent-api-url, --agent-api-model and --agent-api-key-file"
+fi
+if [[ "$AGENT_LLM" == "hybrid" ]] && (( external_fields != 0 && external_fields != 3 )); then
+  die "--agent-llm hybrid needs all three external options or none"
 fi
 
 [[ -r /etc/os-release ]] || die "/etc/os-release not found; Debian or Ubuntu required"
@@ -333,6 +362,9 @@ apply_linux_metadata_fix
 preinstall_args=(--host "$HOST" --email "$EMAIL" --panel-port "$PANEL_PORT" --yes)
 preinstall_args+=(--agent-llm "$AGENT_LLM")
 [[ -z "$AGENT_MODEL" ]] || preinstall_args+=(--agent-model "$AGENT_MODEL")
+[[ -z "$AGENT_API_URL" ]] || preinstall_args+=(--agent-api-url "$AGENT_API_URL")
+[[ -z "$AGENT_API_MODEL" ]] || preinstall_args+=(--agent-api-model "$AGENT_API_MODEL")
+[[ -z "$AGENT_API_KEY_FILE" ]] || preinstall_args+=(--agent-api-key-file "$AGENT_API_KEY_FILE")
 (( NO_TLS )) && preinstall_args+=(--no-tls)
 
 log "Installing RYNXCP and the full service stack (this takes a while)"
@@ -367,11 +399,18 @@ if systemctl is-active --quiet named 2>/dev/null || systemctl is-active --quiet 
 else
   warn "BIND is not active"
 fi
-if [[ "$AGENT_LLM" != "rules" ]]; then
+if [[ "$AGENT_LLM" == "local" || "$AGENT_LLM" == "hybrid" ]]; then
   if systemctl is-active --quiet ollama 2>/dev/null; then
     log "ollama: active"
   else
     warn "ollama is not active; the AI agent will keep using deterministic rules"
+  fi
+fi
+if [[ "$AGENT_LLM" == "api" || "$AGENT_LLM" == "hybrid" ]]; then
+  if [[ -f /etc/rynxcp/agent.env ]]; then
+    log "external agent key: stored in /etc/rynxcp/agent.env"
+  elif [[ "$AGENT_LLM" == "api" ]]; then
+    warn "the external agent key file is missing"
   fi
 fi
 if command -v doveconf >/dev/null 2>&1; then

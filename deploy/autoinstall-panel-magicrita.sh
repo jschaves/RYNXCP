@@ -64,6 +64,9 @@ PANEL_PASSWORD="${RYNX_ADMIN_PASSWORD:-${PANEL_PASSWORD:-}}"
 PANEL_PORT="${RYNX_PANEL_PORT:-${PANEL_PORT:-2083}}"
 PANEL_AGENT_LLM="${RYNX_AGENT_LLM:-rules}"
 PANEL_AGENT_MODEL="${RYNX_AGENT_MODEL:-}"
+PANEL_AGENT_API_URL="${RYNX_AGENT_API_URL:-}"
+PANEL_AGENT_API_MODEL="${RYNX_AGENT_API_MODEL:-}"
+PANEL_AGENT_API_KEY_FILE="${RYNX_AGENT_API_KEY_FILE:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 ASSUME_YES=0
@@ -111,10 +114,13 @@ Panel RYNXCP (se reenvían a deploy/preinstall.sh):
   --panel-password PASS           Password del panel (mejor RYNX_ADMIN_PASSWORD).
   --panel-port PORT               Puerto público del panel (por defecto 2083).
                                   El 80 se mantiene para el reto ACME.
-  --panel-agent-llm MODE          rules|local|hybrid (por defecto rules).
-                                  local/hybrid instala Ollama, servicio loopback
-                                  y el modelo elegido.
+  --panel-agent-llm MODE          rules|local|api|hybrid (por defecto rules).
+                                  local/hybrid instala Ollama; api usa el
+                                  proveedor externo.
   --panel-agent-model MODEL       Modelo Ollama; por defecto según RAM.
+  --panel-agent-api-url URL       Endpoint externo HTTPS para api/hybrid.
+  --panel-agent-api-model MODEL   Modelo externo para api/hybrid.
+  --panel-agent-api-key-file FILE Fichero con la API key externa (modo 0600).
 
 MagicRita:
   --magicrita-email EMAIL         Email para Let's Encrypt (por defecto admin@DOMINIO).
@@ -138,6 +144,7 @@ Modos:
 
 Variables de entorno equivalentes: RYNX_HOST, RYNX_ADMIN_EMAIL,
 RYNX_ADMIN_PASSWORD, RYNX_PANEL_PORT, RYNX_AGENT_LLM, RYNX_AGENT_MODEL,
+RYNX_AGENT_API_URL, RYNX_AGENT_API_MODEL, RYNX_AGENT_API_KEY_FILE,
 MAGICRITA_*, GITHUB_TOKEN, RYNXCP_REF, RYNXCP_DIR.
 EOF
 }
@@ -274,6 +281,15 @@ while [[ $# -gt 0 ]]; do
     --panel-agent-model)
       [[ -n "${2:-}" ]] || die "falta valor para --panel-agent-model"
       PANEL_AGENT_MODEL="$2"; shift 2 ;;
+    --panel-agent-api-url)
+      [[ -n "${2:-}" ]] || die "falta valor para --panel-agent-api-url"
+      PANEL_AGENT_API_URL="$2"; shift 2 ;;
+    --panel-agent-api-model)
+      [[ -n "${2:-}" ]] || die "falta valor para --panel-agent-api-model"
+      PANEL_AGENT_API_MODEL="$2"; shift 2 ;;
+    --panel-agent-api-key-file)
+      [[ -n "${2:-}" ]] || die "falta valor para --panel-agent-api-key-file"
+      PANEL_AGENT_API_KEY_FILE="$2"; shift 2 ;;
     --rynxcp-ref)
       [[ -n "${2:-}" ]] || die "falta valor para --rynxcp-ref"
       RYNXCP_REF="$2"; shift 2 ;;
@@ -294,8 +310,8 @@ done
 require_root
 
 case "$PANEL_AGENT_LLM" in
-  rules|local|hybrid) ;;
-  *) die "--panel-agent-llm debe ser rules, local o hybrid" ;;
+  rules|local|api|hybrid) ;;
+  *) die "--panel-agent-llm debe ser rules, local, api o hybrid" ;;
 esac
 if [[ -n "$PANEL_AGENT_MODEL" ]]; then
   [[ "$PANEL_AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--panel-agent-model contiene caracteres no válidos"
@@ -455,6 +471,9 @@ install_rynxcp() {
   args+=(--panel-port "$PANEL_PORT")
   args+=(--agent-llm "$PANEL_AGENT_LLM")
   if [[ -n "$PANEL_AGENT_MODEL" ]]; then args+=(--agent-model "$PANEL_AGENT_MODEL"); fi
+  if [[ -n "$PANEL_AGENT_API_URL" ]]; then args+=(--agent-api-url "$PANEL_AGENT_API_URL"); fi
+  if [[ -n "$PANEL_AGENT_API_MODEL" ]]; then args+=(--agent-api-model "$PANEL_AGENT_API_MODEL"); fi
+  if [[ -n "$PANEL_AGENT_API_KEY_FILE" ]]; then args+=(--agent-api-key-file "$PANEL_AGENT_API_KEY_FILE"); fi
   if (( NO_TLS )); then args+=(--no-tls); fi
   if (( ASSUME_YES )); then args+=(--yes); fi
   if [[ -n "$PANEL_PASSWORD" ]]; then

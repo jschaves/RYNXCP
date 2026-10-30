@@ -2975,7 +2975,7 @@ async function handleAction(action, id) {
       const provider = result.provider;
       showOutput(
         T('Prueba del proveedor'),
-        `${provider.mode}\n${provider.model}\n${provider.endpoint}\n${provider.latency_ms} ms\n\n${provider.summary || '—'}`,
+        `${provider.provider} · ${provider.mode}\n${provider.model}\n${provider.endpoint}\n${provider.latency_ms} ms\n\n${provider.summary || '—'}`,
       );
       return;
     }

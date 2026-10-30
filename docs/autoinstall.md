@@ -8,7 +8,7 @@ panel stack:
 - Nginx, PHP 8.5, MariaDB, BIND9, Pure-FTPd, OpenDKIM, fail2ban and nftables.
 - Postfix + Dovecot (2.3/2.4 compatible), quotas, Sieve and Roundcube.
 - ClamAV for SMTP and daily filesystem scans, plus SpamAssassin SMTP scoring.
-- Optional local AI agent with Ollama and a loopback-only inference service.
+- Optional AI agent with local Ollama and/or an explicitly enabled external provider.
 - Hosting packages with the seeded **Por defecto** plan.
 - The per-site file manager and phpMyAdmin behind the panel login.
 - Let's Encrypt, backup and antivirus timers.
@@ -55,8 +55,11 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 | `--email <address>` | Admin email. Defaults to `admin@<host>` for domains. |
 | `--password <value>` | Admin password. Prefer `RYNX_ADMIN_PASSWORD`. |
 | `--panel-port <port>` | Public panel port (default `2083`; `80` is kept for ACME). |
-| `--agent-llm <mode>` | `rules` (default), `local` or `hybrid`. `local`/`hybrid` provision Ollama and a model automatically. |
+| `--agent-llm <mode>` | `rules` (default), `local`, `api` or `hybrid`. `local`/`hybrid` provision Ollama; `api` uses the external provider. |
 | `--agent-model <name>` | Ollama model for local/hybrid; defaults to a model sized for host RAM. |
+| `--agent-api-url <url>` | External HTTPS OpenAI-compatible endpoint for `api`/`hybrid`. |
+| `--agent-api-model <name>` | External model name for `api`/`hybrid`. |
+| `--agent-api-key-file <path>` | File containing the external API key; copied to `/etc/rynxcp/agent.env` (`0600`, group `rynx`). |
 | `--no-tls` | Do not request a Let's Encrypt certificate. |
 | `--repo <url>` | RYNXCP Git repository. |
 | `--ref <ref>` | Branch/tag to install (default `main`). |
@@ -85,6 +88,21 @@ limits it to one loaded model/worker, pulls the model and writes the `[agent]`
 section of `/etc/rynxcp/api.toml`. Re-running the installer is safe and
 self-healing. If provisioning fails, it keeps `mode = "rules"` so the panel
 still starts and the agent continues with deterministic findings.
+
+External providers are opt-in through the same installer:
+
+```bash
+sudo bash /root/autoinstall.sh --agent-llm api \
+  --agent-api-url https://provider.example/v1 \
+  --agent-api-model model-name \
+  --agent-api-key-file /root/provider.key
+```
+
+The key file is copied to `/etc/rynxcp/agent.env` with mode `0600` and group
+`rynx`; `rynx-api.service` loads it through `EnvironmentFile`. The installer
+requires HTTPS, and the daemon runtime rejects private, loopback, link-local and
+metadata addresses while pinning the resolved public IP. `--agent-llm hybrid`
+uses the local model first and the external provider as fallback.
 
 ## Panel + MagicRita: `autoinstall-panel-magicrita.sh`
 
@@ -122,6 +140,7 @@ Common options:
 | `--magicrita-port <port>` | Loopback relay port (default `8787`). |
 | `--panel-host`, `--panel-email`, `--panel-password`, `--panel-port` | Forwarded to the panel installer. |
 | `--panel-agent-llm`, `--panel-agent-model` | Forwarded to the panel installer for local LLM provisioning. |
+| `--panel-agent-api-url`, `--panel-agent-api-model`, `--panel-agent-api-key-file` | Forwarded for external provider provisioning. |
 | `--rynxcp-ref <ref>`, `--rynxcp-dir <dir>` | RYNXCP source selection. |
 | `--repo-token <token>` | GitHub token for private repositories. |
 | `--no-tls` | Do not request Let's Encrypt certificates. |

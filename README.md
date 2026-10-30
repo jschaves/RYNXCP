@@ -406,26 +406,44 @@ enabled = true
 interval_secs = 900
 max_events = 200
 email_alerts = true
-mode = "rules"              # rules | local | hybrid
+mode = "rules"              # rules | local | api | hybrid
 local_base_url = "http://127.0.0.1:11434/v1"
 local_model = "qwen3:8b"
 local_timeout_secs = 120
-external_enabled = false    # reserved until the external provider phase
+external_enabled = false    # requires an explicit administrator opt-in
+external_base_url = ""
+external_model = ""
+external_api_key_env = "RYNXCP_AGENT_API_KEY"
+external_timeout_secs = 120
+external_max_tokens = 1200
 ```
 
 With `mode = "local"` or `"hybrid"`, the agent sends a redacted digest to an
 OpenAI-compatible endpoint (Ollama, llama.cpp). The URL must resolve to
-`localhost` or a private IP address. The model returns a JSON summary and up to
-five extra findings; invalid JSON, timeouts or an unreachable endpoint fall back
-to the deterministic rules. External providers are not wired yet and remain
-disabled even if `external_enabled` is set.
+`localhost` or a private IP address. With `mode = "api"`, only the external
+provider is used; `mode = "hybrid"` tries the local model first and falls back
+to the external one when `external_enabled = true`. The model returns a JSON
+summary and up to five extra findings; invalid JSON, timeouts or an unreachable
+endpoint fall back to the deterministic rules.
+
+External providers require `external_enabled = true`, an HTTPS endpoint, a
+public resolved address (private, loopback, link-local and metadata addresses
+are rejected and the resolved IP is pinned), and the API key in the environment
+variable named by `external_api_key_env`. Keys are never written to the panel
+database or logs.
 
 No manual setup is required: the autoinstallers accept `--agent-llm local`
 (or `RYNX_AGENT_LLM=local`) and provision Ollama, a loopback-only systemd
 service, the model and the `api.toml` settings. `--agent-model` overrides the
 model; otherwise the installer picks one based on RAM. If provisioning fails,
 the installer keeps `mode = "rules"` so the panel remains healthy. The default
-is `rules`; choose `local` or `hybrid` to enable inference.
+is `rules`; choose `local`, `api` or `hybrid` to enable inference.
+
+For the external provider, pass `--agent-llm api` (or `hybrid`) with
+`--agent-api-url`, `--agent-api-model` and `--agent-api-key-file`. The installer
+copies the key to `/etc/rynxcp/agent.env` (`0600`, group `rynx`); the API loads
+it through `EnvironmentFile`. External endpoints must use HTTPS and resolve to a
+public address.
 
 The view includes a **Test provider** action with the endpoint, model and
 latency, and findings that stop appearing are marked as resolved automatically.

@@ -44,6 +44,7 @@ pub struct Enhancement {
 
 #[derive(Serialize)]
 pub struct ProviderTest {
+    pub provider: String,
     pub mode: String,
     pub model: String,
     pub endpoint: String,
@@ -112,9 +113,41 @@ pub async fn enhance(
     rules: &[AgentFindingInput],
 ) -> Result<Enhancement, String> {
     let cfg = &state.cfg.agent;
-    if !matches!(cfg.mode.as_str(), "local" | "hybrid") {
-        return Ok(Enhancement::default());
+    match cfg.mode.as_str() {
+        "local" => local_enhance(state, snapshot, rules).await,
+        "api" => external_enhance(state, snapshot, rules).await,
+        "hybrid" => match local_enhance(state, snapshot, rules).await {
+            Ok(result) if !result.model.is_empty() => Ok(result),
+            Ok(_) => {
+                if cfg.external_enabled {
+                    external_enhance(state, snapshot, rules).await
+                } else {
+                    Ok(Enhancement::default())
+                }
+            }
+            Err(local_err) => {
+                if cfg.external_enabled {
+                    match external_enhance(state, snapshot, rules).await {
+                        Ok(result) => Ok(result),
+                        Err(external_err) => Err(format!(
+                            "local agent: {local_err}; external agent: {external_err}"
+                        )),
+                    }
+                } else {
+                    Err(local_err)
+                }
+            }
+        },
+        _ => Ok(Enhancement::default()),
     }
+}
+
+async fn local_enhance(
+    state: &ApiState,
+    snapshot: &Snapshot,
+    rules: &[AgentFindingInput],
+) -> Result<Enhancement, String> {
+    let cfg = &state.cfg.agent;
     let base = cfg.local_base_url.trim();
     if base.is_empty() || cfg.local_model.trim().is_empty() {
         return Ok(Enhancement::default());
@@ -129,21 +162,82 @@ pub async fn enhance(
         cfg.local_model.trim(),
         cfg.local_timeout_secs,
         &payload,
+        None,
+        1200,
+        None,
     )
     .await?;
     Ok(Enhancement {
         summary: redact(&output.summary.unwrap_or_default(), 600),
         findings: normalize_findings(output.findings.unwrap_or_default(), rules),
-        model: cfg.local_model.clone(),
+        model: format!("local/{}", cfg.local_model.trim()),
     })
 }
 
-/// Verifies the configured local provider with a minimal prompt.
+async fn external_enhance(
+    state: &ApiState,
+    snapshot: &Snapshot,
+    rules: &[AgentFindingInput],
+) -> Result<Enhancement, String> {
+    let cfg = &state.cfg.agent;
+    if !cfg.external_enabled {
+        return Err("the external agent is disabled".into());
+    }
+    let base = cfg.external_base_url.trim();
+    if base.is_empty() || cfg.external_model.trim().is_empty() {
+        return Err("external_base_url and external_model are required".into());
+    }
+    let endpoint = endpoint_url(base).ok_or_else(|| "invalid external agent URL".to_string())?;
+    let (host, addr) = resolve_external(&endpoint).await?;
+    let key = std::env::var(&cfg.external_api_key_env)
+        .map_err(|_| format!("missing API key in {}", cfg.external_api_key_env))?;
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(format!(
+            "the API key in {} is empty",
+            cfg.external_api_key_env
+        ));
+    }
+    let payload = build_payload(snapshot, rules)?;
+    let output = call_endpoint(
+        &endpoint,
+        cfg.external_model.trim(),
+        cfg.external_timeout_secs,
+        &payload,
+        Some(key),
+        cfg.external_max_tokens,
+        Some((&host, addr)),
+    )
+    .await?;
+    Ok(Enhancement {
+        summary: redact(&output.summary.unwrap_or_default(), 600),
+        findings: normalize_findings(output.findings.unwrap_or_default(), rules),
+        model: format!("api/{}", cfg.external_model.trim()),
+    })
+}
+
+/// Verifies the configured provider with a minimal prompt.
 pub async fn test_connection(state: &ApiState) -> Result<ProviderTest, String> {
     let cfg = &state.cfg.agent;
-    if !matches!(cfg.mode.as_str(), "local" | "hybrid") {
-        return Err("the agent is in rules mode; set mode = local or hybrid".into());
+    match cfg.mode.as_str() {
+        "local" => local_test(state).await,
+        "api" => external_test(state).await,
+        "hybrid" => match local_test(state).await {
+            Ok(result) => Ok(result),
+            Err(local_err) => {
+                if cfg.external_enabled {
+                    external_test(state).await
+                } else {
+                    Err(local_err)
+                }
+            }
+        },
+        _ => Err("the agent is in rules mode; set mode = local, hybrid or api".into()),
     }
+}
+
+async fn local_test(state: &ApiState) -> Result<ProviderTest, String> {
+    let cfg = &state.cfg.agent;
     let base = cfg.local_base_url.trim();
     if base.is_empty() || cfg.local_model.trim().is_empty() {
         return Err("local_base_url and local_model are required".into());
@@ -158,11 +252,56 @@ pub async fn test_connection(state: &ApiState) -> Result<ProviderTest, String> {
         cfg.local_model.trim(),
         cfg.local_timeout_secs,
         r#"{"ping":"responde solo JSON con un summary breve y findings vacío"}"#,
+        None,
+        1200,
+        None,
     )
     .await?;
     Ok(ProviderTest {
+        provider: "local".into(),
         mode: cfg.mode.clone(),
         model: cfg.local_model.clone(),
+        endpoint: endpoint.to_string(),
+        latency_ms: started.elapsed().as_millis(),
+        summary: redact(&output.summary.unwrap_or_default(), 300),
+    })
+}
+
+async fn external_test(state: &ApiState) -> Result<ProviderTest, String> {
+    let cfg = &state.cfg.agent;
+    if !cfg.external_enabled {
+        return Err("the external agent is disabled".into());
+    }
+    let base = cfg.external_base_url.trim();
+    if base.is_empty() || cfg.external_model.trim().is_empty() {
+        return Err("external_base_url and external_model are required".into());
+    }
+    let endpoint = endpoint_url(base).ok_or_else(|| "invalid external agent URL".to_string())?;
+    let (host, addr) = resolve_external(&endpoint).await?;
+    let key = std::env::var(&cfg.external_api_key_env)
+        .map_err(|_| format!("missing API key in {}", cfg.external_api_key_env))?;
+    let key = key.trim();
+    if key.is_empty() {
+        return Err(format!(
+            "the API key in {} is empty",
+            cfg.external_api_key_env
+        ));
+    }
+    let started = std::time::Instant::now();
+    let output = call_endpoint(
+        &endpoint,
+        cfg.external_model.trim(),
+        cfg.external_timeout_secs,
+        r#"{"ping":"responde solo JSON con un summary breve y findings vacío"}"#,
+        Some(key),
+        cfg.external_max_tokens,
+        Some((&host, addr)),
+    )
+    .await?;
+    Ok(ProviderTest {
+        provider: "external".into(),
+        mode: cfg.mode.clone(),
+        model: cfg.external_model.clone(),
         endpoint: endpoint.to_string(),
         latency_ms: started.elapsed().as_millis(),
         summary: redact(&output.summary.unwrap_or_default(), 300),
@@ -174,11 +313,16 @@ async fn call_endpoint(
     model: &str,
     timeout_secs: u64,
     payload: &str,
+    api_key: Option<&str>,
+    max_tokens: u32,
+    pinned: Option<(&str, std::net::SocketAddr)>,
 ) -> Result<LlmOutput, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs.clamp(5, 300)))
-        .build()
-        .map_err(|err| err.to_string())?;
+    let mut builder =
+        reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs.clamp(5, 300)));
+    if let Some((host, addr)) = pinned {
+        builder = builder.resolve(host, addr);
+    }
+    let client = builder.build().map_err(|err| err.to_string())?;
     let request = ChatRequest {
         model: model.to_string(),
         messages: vec![
@@ -192,36 +336,118 @@ async fn call_endpoint(
             },
         ],
         temperature: 0.0,
-        max_tokens: 1200,
+        max_tokens: max_tokens.clamp(100, 8000),
         stream: false,
         response_format: json!({ "type": "json_object" }),
     };
-    let response = client
-        .post(endpoint.clone())
-        .json(&request)
+    let mut call = client.post(endpoint.clone()).json(&request);
+    if let Some(key) = api_key {
+        call = call.bearer_auth(key);
+    }
+    let response = call
         .send()
         .await
-        .map_err(|err| format!("local agent unavailable: {err}"))?;
+        .map_err(|err| format!("agent provider unavailable: {err}"))?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         return Err(format!(
-            "local agent returned HTTP {status}: {}",
+            "agent provider returned HTTP {status}: {}",
             redact(&body, 300)
         ));
     }
     let body: ChatResponse = response
         .json()
         .await
-        .map_err(|err| format!("invalid local agent response: {err}"))?;
+        .map_err(|err| format!("invalid agent response: {err}"))?;
     let content = body
         .choices
         .into_iter()
         .next()
         .and_then(|choice| choice.message.content)
-        .ok_or_else(|| "local agent returned no content".to_string())?;
+        .ok_or_else(|| "agent provider returned no content".to_string())?;
     serde_json::from_str(extract_json(&content))
-        .map_err(|err| format!("local agent returned invalid JSON: {err}"))
+        .map_err(|err| format!("agent provider returned invalid JSON: {err}"))
+}
+
+async fn resolve_external(url: &Url) -> Result<(String, std::net::SocketAddr), String> {
+    if url.scheme() != "https" {
+        return Err("external agent URL must use https".into());
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| "external agent URL has no host".to_string())?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost"
+        || lower.ends_with(".local")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".localhost")
+    {
+        return Err("external agent URL must not point to a local host".into());
+    }
+    let port = url.port_or_known_default().unwrap_or(443);
+    let mut addresses = Vec::new();
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        addresses.push(std::net::SocketAddr::new(ip, port));
+    } else {
+        let resolved = tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|err| format!("cannot resolve external agent host: {err}"))?;
+        addresses.extend(resolved);
+    }
+    if addresses.is_empty() {
+        return Err("external agent host did not resolve".into());
+    }
+    if addresses.iter().any(|addr| !is_public_ip(addr.ip())) {
+        return Err("external agent host resolves to a private or reserved address".into());
+    }
+    Ok((host.to_string(), addresses[0]))
+}
+
+fn is_public_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => is_public_v4(ip),
+        std::net::IpAddr::V6(ip) => is_public_v6(ip),
+    }
+}
+
+fn is_public_v4(ip: std::net::Ipv4Addr) -> bool {
+    if ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || ip.is_broadcast()
+    {
+        return false;
+    }
+    let octets = ip.octets();
+    !(octets[0] == 0
+        || (octets[0] == 100 && (64..=127).contains(&octets[1]))
+        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+        || (octets[0] == 192 && octets[1] == 0)
+        || (octets[0] == 192 && octets[1] == 2)
+        || (octets[0] == 192 && octets[1] == 168)
+        || (octets[0] == 198 && (18..=19).contains(&octets[1]))
+        || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+        || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+        || octets[0] >= 224)
+}
+
+fn is_public_v6(ip: std::net::Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return false;
+    }
+    let segments = ip.segments();
+    if (segments[0] & 0xfe00) == 0xfc00 {
+        return false;
+    }
+    if (segments[0] & 0xffc0) == 0xfe80 {
+        return false;
+    }
+    !(segments[0] == 0x2001 && segments[1] == 0x0db8)
 }
 
 fn endpoint_url(base: &str) -> Option<Url> {
@@ -241,6 +467,7 @@ fn is_local_url(url: &Url) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -621,7 +848,8 @@ mod tests {
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.expect("accept mock request");
             let mut buffer = vec![0u8; 8192];
-            let _ = socket.read(&mut buffer).await.expect("read mock request");
+            let read = socket.read(&mut buffer).await.expect("read mock request");
+            let request_text = String::from_utf8_lossy(&buffer[..read]).to_string();
             let body = r#"{"choices":[{"message":{"content":"{\"summary\":\"ok\",\"findings\":[{\"severity\":\"high\",\"category\":\"security\",\"title\":\"Nuevo riesgo\",\"summary\":\"detalle\",\"recommendation\":\"revisar\"}]}"}}]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -633,15 +861,60 @@ mod tests {
                 .await
                 .expect("write mock response");
             socket.flush().await.expect("flush mock response");
+            request_text
         });
 
         let endpoint = Url::parse(&format!("http://{addr}/v1/chat/completions")).expect("endpoint");
-        let output = call_endpoint(&endpoint, "test-model", 10, "{}")
-            .await
-            .expect("provider response");
+        let output = call_endpoint(
+            &endpoint,
+            "test-model",
+            10,
+            "{}",
+            Some("test-key"),
+            1200,
+            None,
+        )
+        .await
+        .expect("provider response");
         assert_eq!(output.summary.as_deref(), Some("ok"));
         assert_eq!(output.findings.expect("findings").len(), 1);
-        server.await.expect("mock server");
+        let request_text = server.await.expect("mock server");
+        assert!(request_text
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-key"));
+    }
+
+    #[tokio::test]
+    async fn external_validation_rejects_private_and_plain_http() {
+        for url in [
+            "http://8.8.8.8/v1",
+            "https://127.0.0.1/v1",
+            "https://10.0.0.1/v1",
+            "https://192.168.1.5/v1",
+            "https://169.254.169.254/v1",
+            "https://localhost/v1",
+            "https://metadata.google.internal/v1",
+        ] {
+            let parsed = Url::parse(url).expect("url");
+            assert!(resolve_external(&parsed).await.is_err(), "{url}");
+        }
+        let public = Url::parse("https://8.8.8.8/v1").expect("url");
+        let (host, addr) = resolve_external(&public).await.expect("public provider");
+        assert_eq!(host, "8.8.8.8");
+        assert_eq!(addr.port(), 443);
+    }
+
+    #[test]
+    fn classifies_public_addresses() {
+        assert!(is_public_ip("8.8.8.8".parse().unwrap()));
+        assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
+        assert!(!is_public_ip("10.0.0.1".parse().unwrap()));
+        assert!(!is_public_ip("172.16.0.1".parse().unwrap()));
+        assert!(!is_public_ip("192.168.1.1".parse().unwrap()));
+        assert!(!is_public_ip("169.254.169.254".parse().unwrap()));
+        assert!(!is_public_ip("::1".parse().unwrap()));
+        assert!(!is_public_ip("fd00::1".parse().unwrap()));
+        assert!(!is_public_ip("fe80::1".parse().unwrap()));
     }
 
     #[test]

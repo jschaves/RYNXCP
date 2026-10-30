@@ -2,9 +2,8 @@
 //!
 //! The agent only reads state through the daemon and the panel database. It
 //! stores findings, deduplicates them by fingerprint, optionally enriches them
-//! with a local LLM and emails new or escalating high/critical findings. It
-//! never executes remediation; the external provider is reserved for a later
-//! phase.
+//! with a local or external LLM and emails new or escalating high/critical
+//! findings. It never executes remediation.
 
 pub mod collect;
 pub mod provider;

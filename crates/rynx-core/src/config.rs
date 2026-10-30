@@ -325,6 +325,8 @@ pub struct AgentConfig {
     pub external_base_url: String,
     pub external_model: String,
     pub external_api_key_env: String,
+    pub external_timeout_secs: u64,
+    pub external_max_tokens: u32,
 }
 
 impl Default for AgentConfig {
@@ -342,6 +344,8 @@ impl Default for AgentConfig {
             external_base_url: String::new(),
             external_model: String::new(),
             external_api_key_env: "RYNXCP_AGENT_API_KEY".into(),
+            external_timeout_secs: 120,
+            external_max_tokens: 1200,
         }
     }
 }

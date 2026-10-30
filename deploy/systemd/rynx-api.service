@@ -10,6 +10,7 @@ Type=simple
 User=rynx
 Group=rynx
 UMask=0027
+EnvironmentFile=-/etc/rynxcp/agent.env
 ExecStart=/usr/local/bin/rynx-api --config /etc/rynxcp/api.toml
 Restart=on-failure
 RestartSec=3

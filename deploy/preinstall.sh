@@ -23,6 +23,9 @@ PASSWORD_ARG="${RYNX_ADMIN_PASSWORD:-}"
 PANEL_PORT="${RYNX_PANEL_PORT:-2083}"
 AGENT_LLM="${RYNX_AGENT_LLM:-rules}"
 AGENT_MODEL="${RYNX_AGENT_MODEL:-}"
+AGENT_API_URL="${RYNX_AGENT_API_URL:-}"
+AGENT_API_MODEL="${RYNX_AGENT_API_MODEL:-}"
+AGENT_API_KEY_FILE="${RYNX_AGENT_API_KEY_FILE:-}"
 ASSUME_YES=0
 NO_TLS=0
 SSH_PORT=""
@@ -47,10 +50,14 @@ Options:
                         avoid exposing it in the process list.
   --panel-port <port>   Publish the panel on this TCP port (default 2083).
                         Port 80 is still used for the ACME challenge.
-  --agent-llm <mode>    rules (default), local or hybrid. local/hybrid install
-                        Ollama, a loopback-only service and the selected model.
+  --agent-llm <mode>    rules (default), local, api or hybrid. local/hybrid
+                        install Ollama and a loopback-only service; api uses the
+                        external provider.
   --agent-model <name>  Ollama model for local/hybrid. Defaults to a size based
                         on host RAM.
+  --agent-api-url URL   External OpenAI-compatible HTTPS endpoint for api/hybrid.
+  --agent-api-model M   External model name for api/hybrid.
+  --agent-api-key-file F File containing the external API key (mode 0600).
   --no-tls              Do not request a Let's Encrypt certificate.
   --yes                 Assume yes for confirmations (non-interactive).
   -h, --help            Show this help.
@@ -62,6 +69,9 @@ Environment:
   RYNX_PANEL_PORT      Same as --panel-port.
   RYNX_AGENT_LLM       Same as --agent-llm.
   RYNX_AGENT_MODEL     Same as --agent-model.
+  RYNX_AGENT_API_URL   Same as --agent-api-url.
+  RYNX_AGENT_API_MODEL Same as --agent-api-model.
+  RYNX_AGENT_API_KEY_FILE Same as --agent-api-key-file.
 EOF
 }
 
@@ -77,6 +87,9 @@ while [[ $# -gt 0 ]]; do
     --panel-port) PANEL_PORT="${2:-}"; shift 2 ;;
     --agent-llm) AGENT_LLM="${2:-}"; shift 2 ;;
     --agent-model) AGENT_MODEL="${2:-}"; shift 2 ;;
+    --agent-api-url) AGENT_API_URL="${2:-}"; shift 2 ;;
+    --agent-api-model) AGENT_API_MODEL="${2:-}"; shift 2 ;;
+    --agent-api-key-file) AGENT_API_KEY_FILE="${2:-}"; shift 2 ;;
     --no-tls) NO_TLS=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -95,12 +108,37 @@ PANEL_PORT=$((10#$PANEL_PORT))
 (( PANEL_PORT >= 1 && PANEL_PORT <= 65535 )) || die "--panel-port must be between 1 and 65535"
 
 case "$AGENT_LLM" in
-  rules|local|hybrid) ;;
-  *) die "--agent-llm must be rules, local or hybrid" ;;
+  rules|local|api|hybrid) ;;
+  *) die "--agent-llm must be rules, local, api or hybrid" ;;
 esac
 if [[ -n "$AGENT_MODEL" ]]; then
   [[ "$AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-model contains invalid characters"
   [[ "$AGENT_MODEL" != -* ]] || die "--agent-model must not start with '-'"
+fi
+if [[ -n "$AGENT_API_MODEL" ]]; then
+  [[ "$AGENT_API_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || die "--agent-api-model contains invalid characters"
+  [[ "$AGENT_API_MODEL" != -* ]] || die "--agent-api-model must not start with '-'"
+fi
+if [[ -n "$AGENT_API_URL" && ! "$AGENT_API_URL" =~ ^https://[^[:space:]]+$ ]]; then
+  die "--agent-api-url must be an https URL"
+fi
+if [[ -n "$AGENT_API_KEY_FILE" && ( ! -r "$AGENT_API_KEY_FILE" || ! -s "$AGENT_API_KEY_FILE" ) ]]; then
+  die "--agent-api-key-file must point to a readable, non-empty file"
+fi
+external_fields=0
+[[ -z "$AGENT_API_URL" ]] || external_fields=$((external_fields + 1))
+[[ -z "$AGENT_API_MODEL" ]] || external_fields=$((external_fields + 1))
+[[ -z "$AGENT_API_KEY_FILE" ]] || external_fields=$((external_fields + 1))
+if [[ "$AGENT_LLM" == "api" ]] && (( external_fields != 3 )); then
+  die "--agent-llm api requires --agent-api-url, --agent-api-model and --agent-api-key-file"
+fi
+if [[ "$AGENT_LLM" == "hybrid" ]] && (( external_fields != 0 && external_fields != 3 )); then
+  die "--agent-llm hybrid needs all three external options or none"
+fi
+if [[ "$AGENT_LLM" != "api" && "$AGENT_LLM" != "hybrid" ]]; then
+  AGENT_API_URL=""
+  AGENT_API_MODEL=""
+  AGENT_API_KEY_FILE=""
 fi
 
 # ---------------------------------------------------------------------------
@@ -298,6 +336,40 @@ EOF
   return 0
 }
 
+write_agent_key() {
+  local source="$1" key tmp
+  [[ -r "$source" && -s "$source" ]] || return 1
+  key="$(tr -d '\r\n' < "$source")"
+  [[ -n "$key" ]] || return 1
+  [[ "$key" != *[[:space:]]* ]] || return 1
+  tmp="$(mktemp)"
+  printf 'RYNXCP_AGENT_API_KEY=%s\n' "$key" > "$tmp"
+  install -m 0640 -g rynx "$tmp" /etc/rynxcp/agent.env
+  rm -f "$tmp"
+}
+
+configure_external_agent() {
+  local url="$1" model="$2" keyfile="$3"
+  if [[ -z "$url" || -z "$model" || -z "$keyfile" ]]; then
+    set_toml "$API_CONF" "external_enabled" "false"
+    rm -f /etc/rynxcp/agent.env
+    return 0
+  fi
+  if ! write_agent_key "$keyfile"; then
+    warn "the external agent API key could not be stored; external provider disabled"
+    set_toml "$API_CONF" "external_enabled" "false"
+    rm -f /etc/rynxcp/agent.env
+    return 1
+  fi
+  set_toml "$API_CONF" "external_enabled" "true"
+  set_toml "$API_CONF" "external_base_url" "\"$url\""
+  set_toml "$API_CONF" "external_model" "\"$model\""
+  set_toml "$API_CONF" "external_api_key_env" "\"RYNXCP_AGENT_API_KEY\""
+  set_toml "$API_CONF" "external_timeout_secs" "120"
+  set_toml "$API_CONF" "external_max_tokens" "1200"
+  return 0
+}
+
 configure_agent() {
   local mode="$1" model="$2" mem_kb
   ensure_toml_section "$API_CONF" "agent"
@@ -307,6 +379,20 @@ configure_agent() {
   set_toml "$API_CONF" "email_alerts" "true"
   set_toml "$API_CONF" "mode" "\"$mode\""
   set_toml "$API_CONF" "external_enabled" "false"
+
+  if [[ "$mode" == "api" ]]; then
+    log "Configuring the external AI agent (${AGENT_API_MODEL})"
+    if ! configure_external_agent "$AGENT_API_URL" "$AGENT_API_MODEL" "$AGENT_API_KEY_FILE"; then
+      die "the external AI agent could not be configured"
+    fi
+    return 0
+  fi
+
+  if [[ "$mode" == "hybrid" ]]; then
+    configure_external_agent "$AGENT_API_URL" "$AGENT_API_MODEL" "$AGENT_API_KEY_FILE" || true
+  else
+    rm -f /etc/rynxcp/agent.env
+  fi
 
   [[ "$mode" != "rules" ]] || return 0
 
@@ -327,8 +413,12 @@ configure_agent() {
     set_toml "$API_CONF" "local_model" "\"$model\""
     set_toml "$API_CONF" "local_timeout_secs" "120"
   else
-    warn "the local AI model could not be provisioned; the agent falls back to rules"
-    set_toml "$API_CONF" "mode" "\"rules\""
+    if [[ "$mode" == "hybrid" && -f /etc/rynxcp/agent.env ]]; then
+      warn "the local AI model could not be provisioned; hybrid mode will use the external provider"
+    else
+      warn "the local AI model could not be provisioned; the agent falls back to rules"
+      set_toml "$API_CONF" "mode" "\"rules\""
+    fi
   fi
 }
 
