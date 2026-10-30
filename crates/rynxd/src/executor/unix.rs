@@ -2033,6 +2033,21 @@ impl Executor for RealExecutor {
             })
         }
 
+        async fn package_version(package: &str) -> Option<String> {
+            run("dpkg-query", &["-W", "-f=${Version}", package])
+                .await
+                .ok()
+                .map(|version| version.trim().to_string())
+                .filter(|version| !version.is_empty())
+        }
+
+        async fn probe_or_package(program: &str, package: &str) -> Option<String> {
+            match probe(program, &["--version"]).await {
+                Some(version) => Some(version),
+                None => package_version(package).await,
+            }
+        }
+
         let mut out = Vec::new();
         let mut push = |name: &str, kind: &str, version: Option<String>, detail: &str| {
             let installed = version.is_some();
@@ -2148,7 +2163,7 @@ impl Executor for RealExecutor {
         push(
             "clamav-milter",
             "security",
-            probe("clamav-milter", &["--version"]).await,
+            probe_or_package("clamav-milter", "clamav-milter").await,
             "SMTP antivirus",
         );
         push(
@@ -2160,7 +2175,7 @@ impl Executor for RealExecutor {
         push(
             "spamass-milter",
             "mail",
-            probe("spamass-milter", &["--version"]).await,
+            probe_or_package("spamass-milter", "spamass-milter").await,
             "SMTP antispam",
         );
         push(
