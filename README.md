@@ -445,6 +445,48 @@ copies the key to `/etc/rynxcp/agent.env` (`0600`, group `rynx`); the API loads
 it through `EnvironmentFile`. External endpoints must use HTTPS and resolve to a
 public address.
 
+Install the local agent (never install Ollama or pull models by hand):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jschaves/RYNXCP/main/deploy/autoinstall.sh \
+  -o /root/autoinstall.sh
+sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
+  bash /root/autoinstall.sh \
+  --host panel.example.com --email admin@example.com \
+  --agent-llm local --yes
+```
+
+Install the external provider:
+
+```bash
+install -m 0600 /dev/null /root/provider.key
+printf '%s\n' 'YOUR_API_KEY' > /root/provider.key
+sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
+  bash /root/autoinstall.sh \
+  --host panel.example.com --email admin@example.com \
+  --agent-llm api \
+  --agent-api-url https://provider.example/v1 \
+  --agent-api-model model-name \
+  --agent-api-key-file /root/provider.key \
+  --yes
+```
+
+Verify from the server (read-only diagnostics):
+
+```bash
+systemctl status ollama
+curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+ss -lntp | grep 11434
+grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
+systemctl show rynx-api -p EnvironmentFiles
+stat -c '%a %U %G' /etc/rynxcp/agent.env
+journalctl -u rynx-api -n 80 --no-pager
+```
+
+Then open **Administración > Agente IA**, press **Probar proveedor** and
+**Analizar ahora**. Re-running the same autoinstaller is safe and must not
+duplicate services or configuration.
+
 The view includes a **Test provider** action with the endpoint, model and
 latency, and findings that stop appearing are marked as resolved automatically.
 An existing finding that increases its severity sends a new alert email.

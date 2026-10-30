@@ -89,9 +89,25 @@ section of `/etc/rynxcp/api.toml`. Re-running the installer is safe and
 self-healing. If provisioning fails, it keeps `mode = "rules"` so the panel
 still starts and the agent continues with deterministic findings.
 
-External providers are opt-in through the same installer:
+Read-only checks:
 
 ```bash
+systemctl status ollama
+curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+ss -lntp | grep 11434
+grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
+journalctl -u rynx-api -n 80 --no-pager
+```
+
+Ollama must listen only on `127.0.0.1:11434`. Re-run the same installer command
+afterwards to confirm idempotency.
+
+External providers are opt-in through the same installer. Put the key in a
+temporary file first:
+
+```bash
+install -m 0600 /dev/null /root/provider.key
+printf '%s\n' 'YOUR_API_KEY' > /root/provider.key
 sudo bash /root/autoinstall.sh --agent-llm api \
   --agent-api-url https://provider.example/v1 \
   --agent-api-model model-name \
@@ -102,7 +118,8 @@ The key file is copied to `/etc/rynxcp/agent.env` with mode `0600` and group
 `rynx`; `rynx-api.service` loads it through `EnvironmentFile`. The installer
 requires HTTPS, and the daemon runtime rejects private, loopback, link-local and
 metadata addresses while pinning the resolved public IP. `--agent-llm hybrid`
-uses the local model first and the external provider as fallback.
+uses the local model first and the external provider as fallback. Remove the
+temporary `/root/provider.key` after the install if it is no longer needed.
 
 ## Panel + MagicRita: `autoinstall-panel-magicrita.sh`
 
@@ -178,14 +195,36 @@ provisioned. These commands are diagnostics only:
 ```bash
 systemctl status ollama
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+ss -lntp | grep 11434
+grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
 journalctl -u rynx-api -n 80 --no-pager
 ```
 
 Open **Administración > Agente IA**, press **Probar proveedor** and then
 **Analizar ahora**. For `--agent-llm api`, verify that
 `/etc/rynxcp/agent.env` exists with mode `0600` and that `rynx-api.service`
-loads it; the provider test shows the endpoint, model and latency. No manual
-model download, service or configuration edit is required.
+loads it:
+
+```bash
+systemctl show rynx-api -p EnvironmentFiles
+stat -c '%a %U %G' /etc/rynxcp/agent.env
+```
+
+The provider test shows the endpoint, model and latency. No manual model
+download, service or configuration edit is required.
+
+To validate agent email delivery on a test host, stop a monitored service,
+run **Analizar ahora** and check `smtp_alert_to`; then restore it:
+
+```bash
+systemctl stop mariadb
+# press Analizar ahora in the panel
+systemctl start mariadb
+# press Analizar ahora again so the finding becomes resolved
+```
+
+Re-run the same installer command to confirm the provisioning is idempotent.
+Keys must never appear in logs; `agent.env` stays `0640 root:rynx`.
 
 ## Security notes
 
