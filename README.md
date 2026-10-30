@@ -500,6 +500,51 @@ ar, ru, zh, ja); unknown locales fall back to English. LLM output follows the
 `locale` embedded in the redacted digest (local language for the supported
 locales, English otherwise).
 
+### Recommended server sizing
+
+The panel, mail stack and AI agent share the same host by default. AI is
+optional: `mode = "rules"` needs no model and no extra RAM. The sizes below are
+starting points for Debian/Ubuntu VPS with NVMe storage; add headroom for
+traffic, backups and mail volume.
+
+| Workload | vCPU | RAM | Disk | Model |
+| --- | --- | --- | --- | --- |
+| Panel only, rules (`RYNX_SKIP_MAIL=1`) | 2 | 4 GB | 40 GB | none |
+| Panel + mail/antivirus/antispam, rules | 2-4 | 8 GB | 60 GB | none |
+| Panel + local LLM, light use | 2-4 | 8-12 GB | 60-80 GB | `qwen2.5:1.5b` |
+| Panel + local LLM, balanced | 4-6 | 12-16 GB | 80 GB | `qwen2.5:3b` |
+| Panel + local LLM, CPU-only 8B | 8+ | 24-32 GB | 100 GB | `qwen3:8b` |
+| Panel + external API | 2-4 | 8 GB | 60 GB | none |
+
+Guidance:
+
+- **Rules-only is enough for most small VPS.** The agent still detects failed
+  services, malware events, security updates, certificates, disk and auth
+  anomalies without any model.
+- **CPU-only is supported.** Ollama prints `No NVIDIA/AMD GPU detected` and runs
+  on CPU; that warning is informational. It is the normal case for a VPS
+  without a GPU.
+- **Model footprint (Q4, approximate):** 1.5B ≈ 1.5-2.5 GB, 3B ≈ 2.5-4 GB,
+  8B ≈ 6-8 GB, plus the system, panel and mail stack. Do not size RAM only for
+  the model.
+- **CPU matters.** On CPU-only hosts, prefer `qwen2.5:3b` or `1.5b`; an 8B model
+  can take much longer to load and answer. The installer auto-selects 8B only
+  above 24 GB RAM, 3B above 8 GB, otherwise 1.5B. Force a smaller model with
+  `--agent-model` if latency matters.
+- **GPU is optional.** An NVIDIA GPU with 8 GB+ VRAM helps 8B models; 6 GB+ helps
+  3B. The panel and agent do not require GPU drivers.
+- **External API is the lightest option for a busy host.** It needs only
+  outbound HTTPS and no model disk/RAM; the trade-off is data leaving the
+  server and per-request cost.
+- **Do not run a large model on a busy small VPS.** If `free -h` shows swap use
+  or **Probar proveedor** takes too long, switch to a smaller model, `rules`, or
+  an external provider.
+- **Disk:** models are stored outside panel backups, but leave room for Ollama,
+  the model, logs, mail and backups. 40 GB is tight once mail and a model are
+  installed; 80-100 GB is a safer production baseline.
+- **Isolation:** the installer limits Ollama to one loaded model, one parallel
+  worker and a 15-minute keep-alive, and binds it to `127.0.0.1` only.
+
 ## Databases
 
 A website can create one or more MariaDB databases. The database and its user
