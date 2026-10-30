@@ -43,26 +43,27 @@ reconciliation engine and UI are original.
 | Area | What is included |
 | --- | --- |
 | Accounts | Isolated Linux users, package-assigned quota/backend, real suspension (Nginx/apps/FTP) and deletion |
-| Web | Nginx virtual hosts, aliases, TLS, PHP-FPM, reverse proxy, security headers |
+| Web | Nginx virtual hosts, aliases, TLS, optional HTTP-to-HTTPS redirect, PHP-FPM, reverse proxy, security headers |
 | Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go and static sites |
 | DNS | Authoritative BIND zones, A/AAAA/CNAME/MX/TXT/NS/SRV/CAA records |
 | Email | Postfix + Dovecot mailboxes, aliases/forwarding, quotas, DKIM/OpenDKIM, DMARC, SRV, TLS-RPT and Roundcube webmail |
-| Panel email | Local Postfix notifications for credentials, password resets, certificate alerts and delivery tests |
-| Databases | MariaDB per domain, dedicated user/password, local-only access |
+| Panel email | Localized Postfix notifications for credentials, password resets, 2FA codes, certificate alerts and delivery tests |
+| Databases | MariaDB per site, dedicated user/password, local-only access |
 | Files | Per-site document-root file manager with strict account isolation |
 | phpMyAdmin | MariaDB web UI protected by the panel login gate |
-| FTP | Pure-FTPd virtual users, chrooted to the document root, read-only or read-write |
+| FTP | Pure-FTPd virtual users, chrooted to the account home, read-only or read-write |
 | Backups | Home + managed configuration, retention, restore and daily timer |
 | Certificates | Let's Encrypt with SANs, bulk renewal and daily timer |
 | Monitoring | Per-service state/CPU/RAM/uptime and 7-day historical series |
 | Firewall | nftables rules, banned IPs, allowlists and automatic brute-force bans |
-| Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC |
+| Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC and email two-factor authentication |
 | Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Antispam | SpamAssassin with Postfix milter integration and spam tagging |
 | Console | Closed-list privileged actions with output and audit trail |
-| Programs | Installed software inventory, pending updates and upgrade button |
+| Programs | Installed software, live service state, restart/stop controls, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
-| Packages | Reusable hosting plans with resource limits, templates and a seeded editable default |
+| Packages | Reusable plans with enforced website+app, alias, mail, database, FTP and backup limits, templates and a seeded editable default |
+| Languages | Ten UI languages, per-user saved locale and localized system email |
 
 Creating a hosting account can also create a linked panel user (viewer by
 default, operator scoped to that account) with a generated password. The Accounts view exposes
@@ -76,8 +77,9 @@ and global views (users, firewall, console, system, monitor, audit) are denied.
 The web UI is available in Spanish, English (US), Portuguese, French, Arabic
 (with RTL), Russian, Chinese, Japanese, Italian and German. It defaults to the
 browser language, falls back to English (US), remembers the choice in
-localStorage, and exposes a language selector on the login screen and in the
-top bar.
+localStorage, stores it on the logged-in panel user and exposes a language
+selector on the login screen and in the top bar. System email uses the
+recipient's saved language when one is available.
 
 Domains are stored as Punycode (IDN A-labels). The web UI converts Unicode
 domains automatically (for example `laniñadelasmargaritas.es` becomes
@@ -111,15 +113,18 @@ for FQDN hosts and publishes only the outbound records: `mail.<panel-domain>` A,
 SPF, DKIM (`mail._domainkey`), `_domainkey` and DMARC. No MX is added because
 the panel only sends admin mail.
 
-Notifications cover generated panel credentials, password-reset links and
-certificate-job failures. Administrators can send a test from **Sistema >
-Correo del panel** (`GET/POST /api/v1/system/email*`). Password resets use
-single-use SHA-256-hashed tokens that expire after 60 minutes; requesting a new
-link invalidates the previous one. Because the panel domain intentionally has no
-MX, `smtp_alert_to` should be an external mailbox (the installer warns when the
+Notifications cover generated panel credentials, password-reset links,
+email two-factor codes, certificate-job failures and delivery tests. They use
+the public panel URL and are rendered in the recipient user's saved language
+when one is available. Administrators can send a test from **Sistema > Correo
+del panel** (`GET/POST /api/v1/system/email*`). Password resets use single-use
+SHA-256-hashed tokens that expire after 60 minutes; requesting a new link
+invalidates the previous one. Because the panel domain intentionally has no MX,
+`smtp_alert_to` should be an external mailbox (the installer warns when the
 admin email is on the panel domain). Delivery is best-effort: failures are
-logged and never block the operation that triggered the message. Serve the panel
-over HTTPS so credentials and reset links are not sent over plaintext HTTP.
+logged and never block the operation that triggered the message. Serve the
+panel over HTTPS so credentials and reset links are not sent over plaintext
+HTTP.
 
 Manual production configuration in `/etc/rynxcp/api.toml`:
 
@@ -155,16 +160,27 @@ Each package stores:
 | Section | Fields |
 | --- | --- |
 | General | name, account MB, bandwidth, backups (1-3) and incremental backup |
-| Web | web domain/alias limits, backend (static, PHP-FPM, Node.js, Python, Ruby, Java, .NET, Go) and Nginx proxy template (Caching, Hosting, Suspended) |
+| Web | combined website + application count (`web_domains`), alias limit, backend (static, PHP-FPM, Node.js, Python, Ruby, Java, .NET, Go) and Nginx proxy template (Caching, Hosting, Suspended) |
 | DNS | template (child-ns, no-mail, Gmail, Office 365, Zoho), calculated zone/record counters and nameserver list |
 | Email | email domain/account limits and rate limit |
 | Databases | database limit |
+| FTP | FTP account limit |
 | System | system database limit |
 
-Every numeric limit accepts 0-1000. **0 means unlimited**, and the form exposes a
+Every limit accepts 0-1000 except backups (1-3). **0 means unlimited**, and the form exposes a
 **Sin límite** button on every field where that applies. Nameservers start with
 `ns1.example.tld` and `ns2.example.tld`; the form can add more. DNS zone and
 record counters are calculated and shown read-only.
+
+The package field labelled **Dominios webs - apps** limits websites and managed
+applications together. The API enforces that combined count, web aliases, mail
+domains, mail accounts, databases, FTP accounts and backups; the Linux account
+disk quota comes from `account_mb`. Bandwidth, mail rate and system database
+counters are stored and shown but are not enforced as hard limits.
+
+Existing plans keep their stored value. Because `web_domains` now covers both
+websites and applications, raise it where a legacy plan was sized for websites
+only.
 
 Packages live in `panel.db` (`/var/lib/rynxcp/panel/panel.db`) and are seeded on
 first API start, so a clean installation already contains the editable default
@@ -240,6 +256,10 @@ job immediately. The API returns the job in `cert_job`; the panel polls
 issuance does not remove the site: it remains available over HTTP and the
 certificate page and warning banner show the problem.
 
+Website create/edit forms expose **Redirect HTTP to HTTPS**. When enabled,
+Nginx redirects HTTP and sends HSTS; when disabled, the site also serves HTTP
+and HSTS is omitted. The ACME challenge remains available in both modes.
+
 ## Architecture
 
 ```
@@ -285,6 +305,9 @@ Compromising the web API does not grant direct write access to hosting state.
   failure; zones are checked with `named-checkzone`.
 - **Sessions**: opaque tokens; only their SHA-256 is stored. Cookie is `HttpOnly`,
   `SameSite=Strict`, `Secure` in production, with absolute and idle expiry.
+- **Email two-factor authentication**: when SMTP is configured, login sends a
+  single-use six-digit code valid for 10 minutes (five attempts per challenge).
+  The code email uses the user's saved language.
 - **Brute-force protection**: sliding window + lockout per account+IP and per IP,
   failure delay, persistent events and a structured fail2ban log.
 - **IP allowlists** take precedence over firewall bans.
@@ -302,7 +325,7 @@ Compromising the web API does not grant direct write access to hosting state.
 | --- | --- | --- |
 | PHP | Per-account FPM pool, `open_basedir`, dangerous functions disabled | 8.1 - 8.5 |
 | Node.js | systemd + reverse proxy | 18, 20, 22, 24 |
-| Python | gunicorn / uvicorn under systemd | 3.10 - 3.13 |
+| Python | systemd + reverse proxy (gunicorn, uvicorn or python3) | 3.10 - 3.13 |
 | Ruby | puma / rackup under systemd | 3.2 - 3.4 |
 | Java | `java -jar` under systemd | 11, 17, 21 |
 | .NET | `dotnet App.dll` under systemd | 8, 9 |
@@ -311,6 +334,10 @@ Compromising the web API does not grant direct write access to hosting state.
 
 Each application gets a shell-less user, a validated loopback port, a hardened
 systemd unit, a `0640` environment file and a vhost with security headers.
+
+See [docs/python-app.md](docs/python-app.md) for a complete minimal Python
+application, the required application fields, upload path and 502
+troubleshooting.
 
 ## DNS and email (SPF / DKIM / DMARC)
 
@@ -332,23 +359,48 @@ The panel provisions DNS and DKIM signing material. The one-shot pre-installer
 also installs Postfix, Dovecot, OpenDKIM and Roundcube; for a manual install run
 `deploy/mail-setup.sh` before creating mail domains.
 
+## Antivirus and antispam
+
+The installers provision both filters for the local mail stack:
+
+- **ClamAV** (`clamav-daemon`, `clamav-freshclam` and `clamav-milter`) scans SMTP
+  messages on `127.0.0.1:7357` and removes infected messages. A daily
+  `rynxcp-antivirus.timer` scans `/home` and `/var/vmail` with `clamdscan`.
+- **SpamAssassin** (`spamd` and `spamass-milter`) scores messages through the
+  Postfix milter on the local Postfix socket. It adds `X-Spam-*` headers, does
+  not rewrite the subject or body, and rejects only messages with a score of 15
+  or higher.
+- Postfix runs the milters in the order **SpamAssassin → ClamAV → OpenDKIM**, so
+  DKIM signs the final headers. If a milter is unavailable, Postfix follows
+  `milter_default_action`.
+- The **Programs** view shows ClamAV, SpamAssassin and milter service state and
+  exposes the same restart/stop controls as the other services.
+
+The ClamAV signature database is refreshed by `clamav-freshclam`. SpamAssassin
+rules are updated by the distribution's normal `sa-update` maintenance.
+
 ## Databases
 
-One MariaDB database per domain (`rynx_<domain>`), `utf8mb4`, with a dedicated user
-and a random 32-character password. The user can only connect over `localhost`.
-The password is stored in `state.db` (`0600`) and shown to administrators.
+A website can create one or more MariaDB databases. The database and its user
+are named `<account>_<name>` (for example `acme_shop`), use `utf8mb4`, and get a
+random 32-character password. The user can only connect over `localhost`. The
+password is stored in `state.db` (`0600`) and shown to administrators. The
+package `databases` limit is enforced when creating a new database.
 
 ## FTP
 
-Pure-FTPd virtual users mapped to the account UID (read-write) or to the `rynxftp`
-user (read-only), chrooted to the site document root. Explicit FTPS is supported.
-A password is generated when not provided.
+Pure-FTPd virtual users are named `<account>_<ftpname>` and mapped to the account
+UID (read-write) or to the `rynxftp` user (read-only). They are chrooted to the
+account home, which includes `public_html` and `apps/`. Explicit FTPS is
+supported. A password is generated when not provided. The package
+`ftp_accounts` limit is enforced when creating an account.
 
 ## Backups
 
 Each backup includes the home directory, vhost, DNS zone, PHP pool, systemd units and
-environment files. Backups are stored in `/var/backups/rynxcp/<account>/`, the last 7
-per account are retained, and they can be restored from the UI. A systemd timer runs
+environment files. Backups are stored in `/var/backups/rynxcp/<account>/`. The
+daemon retention is 7; the package `backups` field (1-3) caps how many backups an
+account can create. Backups can be restored from the UI, and a systemd timer runs
 them daily.
 
 Restore only extracts managed paths (`home/<account>`, nginx, php, systemd, apps),
@@ -363,6 +415,11 @@ history are retained.
 The admin console **is not a shell**. It only runs closed actions (Nginx test/reload,
 app restart/logs, PHP-FPM reload, reconciliation, TLS renewal, backups, disk usage)
 and every execution is audited.
+
+The **Programs** view lists detected software with its installation state and
+live systemd service state. Service-backed entries (Nginx, PHP-FPM, MariaDB, BIND,
+Pure-FTPd, OpenDKIM, fail2ban, ClamAV and SpamAssassin) expose restart and stop
+controls; runtimes and certbot do not because they are not services.
 
 ## Fully automated installers
 
@@ -439,6 +496,8 @@ What it installs and configures:
   repository, with hardened `php.ini` defaults and OPcache.
 - Nginx, Certbot, MariaDB, BIND9, Pure-FTPd, OpenDKIM tooling, fail2ban, nftables,
   logrotate.
+- ClamAV with a daily filesystem scan timer and SMTP antivirus milter.
+- SpamAssassin with Postfix milter integration, header tagging and high-score rejection.
 - Node.js, Python 3, Ruby, Java, Go and .NET when the distribution provides it.
 - The Rust toolchain when missing, then `cargo build --release` and `deploy/install.sh`.
 - Postfix, Dovecot (IMAP/POP3/LMTP/Sieve/Managesieve), OpenDKIM and Roundcube
@@ -457,8 +516,9 @@ What it installs and configures:
   stack is installed, it also creates `mail.<panel-host>` plus outbound SPF,
   DKIM and DMARC, generates the panel DKIM key and configures OpenDKIM.
 - Panel SMTP on `127.0.0.1:25` with `noreply@<panel-host>`, used for credential
-  emails, password resets and certificate alerts. The **Sistema** view exposes a
-  delivery test.
+  emails, password resets, two-factor codes, certificate alerts and delivery
+  tests. Messages use each recipient's saved language when available. The
+  **Sistema** view exposes a delivery test.
 - The panel database is initialized on first start, including the editable
   **Por defecto** package available under **Administración > Paquetes**.
 - phpMyAdmin in `/usr/share/phpmyadmin` behind the panel login gate, with the
@@ -487,6 +547,8 @@ sudo apt install -y build-essential pkg-config nginx certbot \
   php8.5-fpm php8.5-cli php8.5-mysql \
   mariadb-server bind9 bind9-utils \
   pure-ftpd opendkim opendkim-tools fail2ban nftables \
+  clamav clamav-daemon clamav-freshclam clamav-milter \
+  spamassassin spamd spamc spamass-milter \
   nodejs python3-venv ruby-full default-jre dotnet-sdk-8.0 golang
 ```
 
@@ -514,6 +576,11 @@ sudo ln -s /etc/nginx/sites-available/rynxcp-panel /etc/nginx/sites-enabled/
 sudo certbot --nginx -d panel.example.com
 ```
 
+The one-shot pre-installer is the supported path for the complete stack: it
+also configures and starts the ClamAV/SpamAssassin service defaults and enables
+the antivirus timer. The manual apt list installs the binaries, but those
+mail-filter service defaults must be applied separately.
+
 If Nginx terminates TLS in front of the API, set `trust_proxy_headers = true` in
 `/etc/rynxcp/api.toml`.
 
@@ -521,6 +588,7 @@ Installed timers:
 
 - `rynxcp-cert-renew.timer`: renews certificates daily.
 - `rynxcp-backup.timer`: nightly backups.
+- `rynxcp-antivirus.timer`: daily ClamAV scan of `/home` and `/var/vmail`.
 
 The panel shows a warning banner when a certificate is expiring, expired,
 missing or in error, with a shortcut to the certificate page. Automatic renewal
@@ -562,15 +630,20 @@ rynxctl reconcile
 
 ## API
 
-Except for login, password reset, health and meta, every route requires a session;
-mutating methods require `x-csrf-token`.
+Except for login, two-factor verification, password reset, health and meta, every
+route requires a session; mutating methods require `x-csrf-token`.
 
 ```
+GET    /api/v1/health           GET    /api/v1/meta
+GET    /api/v1
+
 POST   /api/v1/auth/login
+POST   /api/v1/auth/verify-2fa
 POST   /api/v1/auth/forgot-password
 POST   /api/v1/auth/reset-password
 POST   /api/v1/auth/logout
 GET    /api/v1/auth/me
+PUT    /api/v1/auth/locale
 POST   /api/v1/auth/stop-impersonation
 POST   /api/v1/users/{username}/impersonate
 
@@ -604,6 +677,7 @@ POST       /api/v1/firewall/rules    DELETE /api/v1/firewall/rules/{id}
 POST       /api/v1/firewall/block    DELETE /api/v1/firewall/block/{ip}
 POST       /api/v1/firewall/whitelist DELETE /api/v1/firewall/whitelist/{ip}
 GET        /api/v1/system/programs
+POST       /api/v1/system/programs/{program}/{action}
 GET        /api/v1/system/updates    POST   /api/v1/system/updates/apply
 GET        /api/v1/system/email      POST   /api/v1/system/email/test
 POST       /api/v1/console
@@ -640,9 +714,10 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1   # Windows
 
 ## Contribute
 
-**Code.** Open an issue or a pull request. Keep the protocol local-first: no account server, and no post store on the relay.
-
-**Donate.** MagicRita is free software (no charge to run it). Support development on [Ko-fi](https://ko-fi.com/magicrita). For other questions, write to [magicrita.beta@gmail.com](mailto:magicrita.beta@gmail.com).
+**Code.** Open an issue or a pull request. Keep host provisioning reproducible:
+changes that affect deployed state must work through `deploy/preinstall.sh`,
+the mail/antivirus helpers or `rynxd` reconcile, never through manual
+post-install steps.
 
 ## License
 
@@ -664,10 +739,10 @@ Copyright (C) 2026 RYNXCP contributors.
 
 - Reverse PTR is configured at the IP provider.
 - FTP uses Pure-FTPd's global TLS certificate (explicit FTPS).
-- Package limits are stored and shown, and the account disk quota is derived
-  from the package; web/mail/database/backup counts are not enforced as hard
-  limits yet.
+- Website/application, alias, mail-domain, mail-account, database, FTP and backup
+  limits are enforced. Bandwidth, mail-rate and system-database counters are
+  stored and shown but are not enforced as hard limits.
 - The file manager is limited to a website document root and 5 MB per
   read/write/upload; symlinks are listed but cannot be edited.
 - phpMyAdmin requires both the panel session and a valid MariaDB login.
-- Multi-node, secondary DNS, remote metrics and 2FA are planned for later versions.
+- Multi-node, secondary DNS and remote metrics are planned for later versions.

@@ -7,12 +7,16 @@ panel stack:
 - RYNXCP daemon, API, CLI and web panel.
 - Nginx, PHP 8.5, MariaDB, BIND9, Pure-FTPd, OpenDKIM, fail2ban and nftables.
 - Postfix + Dovecot (2.3/2.4 compatible), quotas, Sieve and Roundcube.
+- ClamAV for SMTP and daily filesystem scans, plus SpamAssassin SMTP scoring.
 - Hosting packages with the seeded **Por defecto** plan.
 - The per-site file manager and phpMyAdmin behind the panel login.
-- Let's Encrypt and the certificate/backup timers.
+- Let's Encrypt, backup and antivirus timers.
 
-Run them on a clean Debian 13 or Ubuntu 26.04 (or newer) server as root. They
-are intended for fresh VPS installations.
+Run them on a clean, 64-bit Debian 13 (Trixie) or Ubuntu 26.04 LTS server as
+root. Debian 12 (Bookworm) and Ubuntu 24.04 LTS are supported through the
+Sury/Ondrej PHP 8.5 repositories. Debian 10/11, Ubuntu 20.04/22.04 and Linux
+derivatives are not recommended or tested. They are intended for fresh VPS
+installations.
 
 ## Panel only: `autoinstall.sh`
 
@@ -58,7 +62,8 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 | `--yes` | Accepted for compatibility; the script is non-interactive. |
 
 Set `RYNX_SKIP_PHPMYADMIN=1` to skip phpMyAdmin and `RYNX_SKIP_MAIL=1` to skip
-the mail stack (both are installed by default).
+the mail stack and its SMTP antivirus/antispam milters (both are installed by
+default). The system ClamAV scan timer is still installed.
 
 ## Panel + MagicRita: `autoinstall-panel-magicrita.sh`
 
@@ -109,6 +114,8 @@ generate the panel password itself; provide `RYNX_ADMIN_PASSWORD` or
 
 ```bash
 systemctl status rynxd rynx-api postfix dovecot nginx php8.5-fpm
+systemctl status clamav-daemon clamav-milter spamd spamass-milter
+systemctl list-timers 'rynxcp-*'
 sudo doveconf -n
 sudo nginx -t
 sudo rynxctl daemon ping
@@ -128,7 +135,8 @@ only step outside the script.
 - phpMyAdmin is gated by an Nginx `auth_request` against the panel session and
   is not reachable without logging in.
 - The file manager is scoped to each site document root and runs with the
-  account's filesystem UID/GID; symlinks and traversal are rejected.
+  account's filesystem UID/GID; symlink edits and traversal are rejected, and
+  symlinks are listed but cannot be opened for editing.
 - Admin credentials are never written to the installer logs. Remove
   `/root/rynxcp-credentials.txt` after storing the generated password.
 - Review `/var/log/rynxcp/autoinstall.log` and
