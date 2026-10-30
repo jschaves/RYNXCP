@@ -212,6 +212,10 @@ pub enum Request {
     Programs,
     Updates,
     ApplyUpdates,
+    FilterActivity {
+        #[serde(default = "default_filter_limit")]
+        limit: u32,
+    },
     MetricsHistory {
         #[serde(default = "default_metrics_minutes")]
         minutes: u32,
@@ -334,6 +338,9 @@ pub enum Response {
     UpdateResult {
         updated: u32,
         output: String,
+    },
+    FilterActivity {
+        events: Vec<FilterEvent>,
     },
     MetricsHistory {
         samples: Vec<MetricSample>,
@@ -733,6 +740,20 @@ pub struct ProgramInfo {
     pub service_status: Option<String>,
 }
 
+/// One recent antivirus or antispam event collected from the host journal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FilterEvent {
+    /// RFC 3339 timestamp.
+    pub at: String,
+    /// `antivirus` or `antispam`.
+    pub kind: String,
+    /// Systemd unit that emitted the event.
+    pub service: String,
+    /// `info`, `warn`, `error` or `alert`.
+    pub severity: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PackageUpdate {
     pub package: String,
@@ -905,6 +926,10 @@ impl ConsoleAction {
             ConsoleAction::ServiceStop { program } => format!("service_stop:{program}"),
         }
     }
+}
+
+fn default_filter_limit() -> u32 {
+    200
 }
 
 fn default_metrics_minutes() -> u32 {

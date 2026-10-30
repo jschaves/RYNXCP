@@ -132,6 +132,38 @@ pub async fn upsert_account(
     Ok(Json(response))
 }
 
+pub async fn filters(
+    State(state): State<ApiState>,
+    Extension(auth): Extension<AuthUser>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    auth.require_admin()?;
+    auth.require_global()?;
+    let response = state
+        .daemon
+        .call(Request::Programs, &auth.user.username)
+        .await?;
+    let DaemonResponse::Programs { programs } = response else {
+        return Err(ApiError::Internal(
+            "daemon returned an unexpected programs response".into(),
+        ));
+    };
+    const FILTERS: [&str; 4] = ["clamav", "clamav-milter", "spamassassin", "spamass-milter"];
+    let programs: Vec<_> = programs
+        .into_iter()
+        .filter(|program| FILTERS.contains(&program.name.as_str()))
+        .collect();
+    let response = state
+        .daemon
+        .call(Request::FilterActivity { limit: 200 }, &auth.user.username)
+        .await?;
+    let DaemonResponse::FilterActivity { events } = response else {
+        return Err(ApiError::Internal(
+            "daemon returned an unexpected filter activity response".into(),
+        ));
+    };
+    Ok(Json(json!({ "programs": programs, "events": events })))
+}
+
 pub async fn delete_account(
     State(state): State<ApiState>,
     Extension(auth): Extension<AuthUser>,

@@ -224,6 +224,15 @@ impl Reconciler {
             Request::Programs => self.programs().await,
             Request::Updates => self.updates().await,
             Request::ApplyUpdates => self.apply_updates(actor).await,
+            Request::FilterActivity { limit } => {
+                let limit = limit.clamp(1, 500);
+                let events = if self.mode() == "simulation" {
+                    crate::filters::simulated_activity()
+                } else {
+                    crate::filters::recent_activity(limit).await
+                };
+                Ok(Response::FilterActivity { events })
+            }
             Request::MetricsHistory { minutes } => {
                 let since = now_unix() - (minutes.clamp(1, 10_080) as i64 * 60);
                 let samples = self.state.list_metrics(since).map_err(internal)?;

@@ -59,6 +59,7 @@ const NAV_ITEMS = [
   { id: 'users', label: 'Usuarios', group: 'Administración', admin: true },
   { id: 'packages', label: 'Paquetes', group: 'Administración', admin: true },
   { id: 'security', label: 'Seguridad', group: 'Administración', admin: true },
+  { id: 'filters', label: 'Antivirus y antispam', group: 'Administración', admin: true },
   { id: 'firewall', label: 'Cortafuegos', group: 'Administración', admin: true },
   { id: 'programs', label: 'Programas', group: 'Administración', admin: true },
   { id: 'console', label: 'Consola', group: 'Administración', admin: true },
@@ -84,6 +85,7 @@ const NAV_ICON_PATHS = {
   users: '<circle cx="9" cy="8" r="3"/><path d="M2 20a7 7 0 0 1 14 0"/><circle cx="17" cy="9" r="2"/><path d="M16 14a5 5 0 0 1 6 4"/>',
   packages: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
   security: '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
+  filters: '<path d="M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6z"/><rect x="9" y="9" width="6" height="5" rx="1"/><path d="m9 10 3 2 3-2"/>',
   firewall: '<path d="M12 3c3 4 6 6 6 10a6 6 0 0 1-12 0c0-2 1-3 2-5 0 2 1 3 2 3 0-3 1-5 2-8z"/>',
   programs: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 13h8"/>',
   console: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/>',
@@ -104,6 +106,7 @@ const TITLES = {
   cron: ['Cron', 'Tareas programadas que se ejecutan con el usuario de la cuenta'],
   monitor: ['Monitor', 'Series históricas y estado de cada servicio'],
   security: ['Seguridad', 'Intentos de acceso, bloqueos y cadena de auditoría'],
+  filters: ['Antivirus y antispam', 'ClamAV y SpamAssassin con el historial de detecciones y bloqueos'],
   firewall: ['Cortafuegos', 'Reglas nftables, IPs baneadas y listas blancas'],
   programs: ['Programas', 'Software instalado y actualizaciones del sistema'],
   console: ['Consola admin', 'Acciones privilegiadas auditadas y sin shell libre'],
@@ -557,6 +560,7 @@ const renderers = {
   cron: renderCron,
   monitor: renderMonitor,
   security: renderSecurity,
+  filters: renderFilters,
   firewall: renderFirewall,
   programs: renderPrograms,
   console: renderConsole,
@@ -3309,6 +3313,94 @@ async function renderMonitor() {
     </div>
     ${sectionHead('Servicios', '<span class="muted small">actualizado cada 60 s</span>')}
     ${table(['Tipo', 'Servicio', 'Estado', 'CPU media', 'RAM', 'Uptime'], rows, 'No hay servicios registrados.')}`;
+}
+
+/* ---------------- antivirus and antispam ---------------- */
+
+const FILTER_SERVICE_LABELS = {
+  'clamav-daemon': 'ClamAV',
+  'clamav-milter': 'ClamAV milter',
+  spamd: 'SpamAssassin',
+  spamassassin: 'SpamAssassin',
+  'spamass-milter': 'SpamAssassin milter',
+  'rynxcp-antivirus': 'Análisis programado',
+};
+
+function filterServiceLabel(unit) {
+  return T(FILTER_SERVICE_LABELS[unit] || unit);
+}
+
+function filterSeverityBadge(severity) {
+  if (severity === 'alert') return badge('detección', 'bad');
+  if (severity === 'error') return badge('error', 'bad');
+  if (severity === 'warn') return badge('aviso', 'warn');
+  return badge('información', 'info');
+}
+
+function filterComponentTable(programs, emptyText) {
+  const rows = programs.map((program) => [
+    td(`<div class="cell-title">${esc(program.name)}</div><div class="cell-sub">${esc(program.detail)}</div>`),
+    td(`<span class="mono small">${esc(program.version)}</span>`),
+    td(program.status === 'installed' ? badge('instalado', 'ok') : badge('ausente', 'warn')),
+    td(programServiceBadge(program)),
+    td(programUnit(program) && program.status === 'installed' ? [
+      programButton('program-restart', program.name, 'Reiniciar', '<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>'),
+      programButton('program-stop', program.name, 'Parar', '<rect x="6" y="6" width="12" height="12" rx="1"/>'),
+    ].join(' ') : '', 'actions'),
+  ]);
+  return table(['Componente', 'Versión', 'Paquete', 'Servicio', 'Acciones'], rows, emptyText);
+}
+
+function filterActivityTable(events, emptyText) {
+  const rows = events.map((event) => [
+    td(esc(fmtDate(event.at))),
+    td(`<span class="mono small">${esc(filterServiceLabel(event.service))}</span>`),
+    td(filterSeverityBadge(event.severity)),
+    td(`<span class="small">${esc(event.message)}</span>`),
+  ]);
+  return table(['Fecha', 'Servicio', 'Nivel', 'Mensaje'], rows, emptyText);
+}
+
+async function renderFilters() {
+  const data = await api('/api/v1/mail/filters');
+  const programs = data.programs || [];
+  const events = data.events || [];
+  const byName = new Map(programs.map((program) => [program.name, program]));
+  const antivirus = ['clamav', 'clamav-milter']
+    .map((name) => byName.get(name))
+    .filter(Boolean);
+  const antispam = ['spamassassin', 'spamass-milter']
+    .map((name) => byName.get(name))
+    .filter(Boolean);
+  const running = (list) => list.length > 0 && list.every((program) => program.service_status === 'active');
+  const avEvents = events.filter((event) => event.kind === 'antivirus');
+  const asEvents = events.filter((event) => event.kind === 'antispam');
+  const detections = avEvents.filter((event) => event.severity === 'alert').length;
+  const spamBlocks = asEvents.filter((event) => event.severity === 'warn' || event.severity === 'alert').length;
+  const statusValue = (active) => `<div class="value small-value">${active ? badge('activo', 'ok') : badge('revisar', 'warn')}</div>`;
+
+  $('#view').innerHTML = `
+    <div class="grid cols-4">
+      <div class="card stat"><div class="label">Antivirus</div>${statusValue(running(antivirus))}<div class="hint">ClamAV + milter SMTP</div></div>
+      <div class="card stat"><div class="label">Antispam</div>${statusValue(running(antispam))}<div class="hint">SpamAssassin + milter SMTP</div></div>
+      <div class="card stat"><div class="label">Detecciones</div><div class="value">${detections}</div><div class="hint">en los últimos eventos</div></div>
+      <div class="card stat"><div class="label">Bloqueos de spam</div><div class="value">${spamBlocks}</div><div class="hint">mensajes rechazados o marcados</div></div>
+    </div>
+    <div class="card"><p class="muted small" style="margin:0">
+      Postfix ejecuta los milters en el orden <span class="mono">SpamAssassin → ClamAV</span> y DKIM firma al final.
+      ClamAV actualiza sus firmas con <span class="mono">clamav-freshclam</span> y SpamAssassin con
+      <span class="mono">sa-update</span>. El análisis programado revisa <span class="mono">/home</span> y
+      <span class="mono">/var/vmail</span> cada día.
+    </p></div>
+    ${sectionHead('Filtros de correo', '<button class="btn ghost" data-action="reload">Refrescar</button>')}
+    <div class="grid cols-2">
+      <div class="card">${sectionHead('Antivirus')}${filterComponentTable(antivirus, 'No se detectó ClamAV.')}</div>
+      <div class="card">${sectionHead('Antispam')}${filterComponentTable(antispam, 'No se detectó SpamAssassin.')}</div>
+    </div>
+    ${sectionHead('Actividad de antivirus', '<span class="muted small">eventos recientes del journal</span>')}
+    ${filterActivityTable(avEvents, 'Sin actividad de antivirus.')}
+    ${sectionHead('Actividad de antispam', '<span class="muted small">eventos recientes del journal</span>')}
+    ${filterActivityTable(asEvents, 'Sin actividad de antispam.')}`;
 }
 
 /* ---------------- security ---------------- */

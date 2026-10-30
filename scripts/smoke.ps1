@@ -290,6 +290,9 @@ try {
         RequestJson 'POST' '/api/v1/system/programs/nginx/explode'
     }
     if ((RequestJson 'GET' '/api/v1/system/updates').kind -ne 'updates') { throw 'updates list missing' }
+    $filters = RequestJson 'GET' '/api/v1/mail/filters'
+    if (@($filters.programs).Count -lt 2) { throw 'mail filter programs missing' }
+    if (@($filters.events).Count -lt 1) { throw 'mail filter activity missing' }
     $console = RequestJson 'POST' '/api/v1/console' @{ action = @{ action = 'disk_usage' } }
     if ($console.kind -ne 'console_output' -or -not $console.output) { throw 'console action failed' }
 
@@ -467,7 +470,7 @@ try {
     $null = RequestJson 'DELETE' "/api/v1/backups/$($backup.backup.id)"
 
     Write-Host ''
-    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, files, DNS, DB, FTP, backups, TLS, monitor, console, firewall, impersonation, panel email, audit, reconcile.'
+    Write-Host 'SMOKE OK: auth, RBAC, CSRF, packages, accounts, runtimes, files, DNS, DB, FTP, backups, TLS, monitor, mail filters, console, firewall, impersonation, panel email, audit, reconcile.'
 } finally {
     if ($api -and -not $api.HasExited) { Stop-Process -Id $api.Id -Force }
     if ($daemon -and -not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force }

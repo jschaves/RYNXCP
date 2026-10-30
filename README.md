@@ -381,6 +381,9 @@ The installers provision both filters for the local mail stack:
   `milter_default_action`.
 - The **Programs** view shows ClamAV, SpamAssassin and milter service state and
   exposes the same restart/stop controls as the other services.
+- The **Antivirus and antispam** view aggregates recent ClamAV and SpamAssassin
+  journal events, flags detections and rejected spam, and exposes the same
+  per-component restart/stop controls.
 
 The ClamAV signature database is refreshed by `clamav-freshclam`. SpamAssassin
 rules are updated by the distribution's normal `sa-update` maintenance.

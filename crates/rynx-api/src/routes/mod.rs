@@ -105,6 +105,7 @@ pub fn router(state: ApiState) -> Router {
             get(mail::list_accounts).post(mail::upsert_account),
         )
         .route("/api/v1/mail/accounts/{id}", delete(mail::delete_account))
+        .route("/api/v1/mail/filters", get(mail::filters))
         .route("/api/v1/backups", get(backups::list).post(backups::create))
         .route("/api/v1/backups/{id}", delete(backups::delete))
         .route("/api/v1/backups/{id}/restore", post(backups::restore))
