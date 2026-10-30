@@ -80,6 +80,25 @@ impl RealExecutor {
             .map(|_| ())
     }
 
+    async fn fail2ban_jails(&self) -> ExecResult<Vec<String>> {
+        let output = match run("fail2ban-client", &["status"]).await {
+            Ok(output) => output,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let Some((_, list)) = output
+            .lines()
+            .find_map(|line| line.split_once("Jail list:"))
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(list
+            .split(',')
+            .map(str::trim)
+            .filter(|jail| !jail.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     fn php_binary(&self, version: &str) -> String {
         format!("php-fpm{version}")
     }
@@ -1931,25 +1950,6 @@ impl Executor for RealExecutor {
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
         let path_s = path.display().to_string();
         run(&self.cfg.nft_bin, &["-f", &path_s]).await.map(|_| ())
-    }
-
-    async fn fail2ban_jails(&self) -> ExecResult<Vec<String>> {
-        let output = match run("fail2ban-client", &["status"]).await {
-            Ok(output) => output,
-            Err(_) => return Ok(Vec::new()),
-        };
-        let Some((_, list)) = output
-            .lines()
-            .find_map(|line| line.split_once("Jail list:"))
-        else {
-            return Ok(Vec::new());
-        };
-        Ok(list
-            .split(',')
-            .map(str::trim)
-            .filter(|jail| !jail.is_empty())
-            .map(str::to_string)
-            .collect())
     }
 
     async fn fail2ban_bans(&self) -> ExecResult<Vec<(String, String)>> {
