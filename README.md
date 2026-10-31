@@ -38,6 +38,12 @@ reconciliation engine and UI are original.
   <sub>Monitoring</sub>
 </p>
 
+<p align="center">
+  <img src="docs/images/agent.jpg" alt="RYNXCP AI agent" width="100%" style="max-width:900px;height:auto;" loading="lazy" />
+  <br />
+  <sub>AI agent</sub>
+</p>
+
 ## Features
 
 | Area | What is included |
