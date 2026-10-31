@@ -2010,7 +2010,7 @@ async function renderInstaller() {
     {
       app: 'laravel',
       title: 'Laravel',
-      text: 'Framework PHP instalado con Composer, .env y document root en public/.',
+      text: 'Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.',
     },
   ];
   const cards = apps
@@ -2081,6 +2081,9 @@ function openInstallerModal(app) {
       const lines = [
         `${T('Sitio')}: ${current.url}`,
         current.database ? `${T('Base de datos')}: ${current.database}` : '',
+        current.db_user ? `${T('Usuario')}: ${current.db_user}` : '',
+        current.db_password ? `${T('Contraseña')}: ${current.db_password}` : '',
+        current.db_host ? `${T('Servidor')}: ${current.db_host}` : '',
         current.admin_user ? `${T('Usuario administrador')}: ${current.admin_user}` : '',
         current.admin_password ? `${T('Contraseña administrador')}: ${current.admin_password}` : '',
         '',

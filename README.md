@@ -371,7 +371,10 @@ and installs one of the supported applications:
   requested title, administrator user, email and password.
 - **Laravel**: runs `composer create-project` as the account user, writes `.env`
   with the generated `APP_KEY`, runs `php artisan migrate`, and switches the
-  document root to `public/`.
+  document root to `public/`. Laravel is a framework and does not create an
+  administrator user or panel; install a starter kit (Breeze, Jetstream,
+  Filament) or define your own routes. The installer shows the database user,
+  password and host once the job finishes.
 
 Both installers create the PHP-FPM pool, a MariaDB database and credentials,
 apply the package limits and start a Let's Encrypt job when TLS is selected.

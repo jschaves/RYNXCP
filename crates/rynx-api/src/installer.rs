@@ -61,6 +61,12 @@ pub struct InstallerJobView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub db_user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub db_password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub db_host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin_password: Option<String>,
@@ -236,6 +242,9 @@ pub async fn start(
             domain
         ),
         database: None,
+        db_user: None,
+        db_password: None,
+        db_host: None,
         admin_user: (app == InstallerApp::Wordpress).then(|| prepared.admin_user.clone()),
         admin_password: (app == InstallerApp::Wordpress)
             .then(|| admin_password.clone())
@@ -413,7 +422,12 @@ async fn run_job(state: ApiState, id: String, prepared: Prepared, actor: String)
             None => {
                 job.view.status = "succeeded".into();
                 job.view.message = message;
-                job.view.database = database.map(|db| db.username);
+                if let Some(db) = database {
+                    job.view.database = Some(db.username.clone());
+                    job.view.db_user = Some(db.username);
+                    job.view.db_password = Some(db.password);
+                    job.view.db_host = Some(db.host);
+                }
                 tracing::info!(domain = %job.view.domain, "installer job succeeded");
             }
         }

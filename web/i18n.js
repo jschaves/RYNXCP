@@ -13,6 +13,7 @@
   ];
 
   const EN = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "PHP framework installed with Composer, .env and document root in public/. It does not create an administrator user or panel; define your routes or install a starter kit.",
     "Gestor de archivos del document root del sitio": "Site document root file manager",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Delete the site {id} and everything associated with it (database, mail/webmail, FTP, certificate and DNS)?",
     "Instalador": "Installer",
@@ -809,6 +810,7 @@
   };
 
   const PT = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "Framework PHP instalado com Composer, .env e document root em public/. Não cria utilizador administrador nem painel; define as tuas rotas ou instala um starter kit.",
     "Gestor de archivos del document root del sitio": "Gestor de ficheiros do document root do site",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminar o site {id} e tudo o que está associado (base de dados, correio/webmail, FTP, certificado e DNS)?",
     "Antivirus y antispam": "Antivírus e antispam",
@@ -1534,6 +1536,7 @@
   };
 
   const FR = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "Framework PHP installé avec Composer, .env et racine de documents dans public/. Il ne crée pas d'utilisateur administrateur ni de panneau ; définissez vos routes ou installez un starter kit.",
     "Gestor de archivos del document root del sitio": "Gestionnaire de fichiers de la racine du site",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Supprimer le site {id} et tout ce qui y est associé (base de données, messagerie/webmail, FTP, certificat et DNS) ?",
     "Antivirus y antispam": "Antivirus et antispam",
@@ -2260,6 +2263,7 @@
   };
 
   const AR = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "إطار PHP مثبّت باستخدام Composer وملف .env وجذر المستندات في public/. لا ينشئ مستخدم مسؤول أو لوحة؛ عرّف مساراتك أو ثبّت حزمة بداية.",
     "Gestor de archivos del document root del sitio": "مدير ملفات جذر مستندات الموقع",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "هل تريد حذف الموقع {id} وكل ما يرتبط به (قاعدة البيانات والبريد/الويب ميل وFTP والشهادة وDNS)؟",
     "Antivirus y antispam": "مكافحة الفيروسات ومكافحة البريد المزعج",
@@ -2988,6 +2992,7 @@
   };
 
   const RU = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "PHP-фреймворк, устанавливаемый с Composer, .env и корнем документов в public/. Он не создаёт администратора или панель; определите свои маршруты или установите стартовый набор.",
     "Gestor de archivos del document root del sitio": "Диспетчер файлов корня сайта",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Удалить сайт {id} и всё связанное с ним (базу данных, почту/веб-почту, FTP, сертификат и DNS)?",
     "Antivirus y antispam": "Антивирус и антиспам",
@@ -3715,6 +3720,7 @@
   };
 
   const ZH = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "使用 Composer、.env 和 public/ 文档根目录安装的 PHP 框架。不会创建管理员用户或面板；请定义路由或安装入门套件。",
     "Gestor de archivos del document root del sitio": "站点文档根目录文件管理器",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "删除站点 {id} 及其所有关联内容（数据库、邮件/网页邮件、FTP、证书和 DNS）？",
     "Antivirus y antispam": "杀毒与反垃圾邮件",
@@ -4439,6 +4445,7 @@
   };
 
   const JA = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "Composer、.env、public/ のドキュメントルートでインストールされる PHP フレームワーク。管理者ユーザーや管理画面は作成されません。ルートを定義するかスターターキットをインストールしてください。",
     "Gestor de archivos del document root del sitio": "サイトのドキュメントルートのファイルマネージャー",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "サイト {id} と関連するすべて（データベース、メール/ウェブメール、FTP、証明書、DNS）を削除しますか？",
     "Antivirus y antispam": "ウイルス対策とスパム対策",
@@ -5166,6 +5173,7 @@
   };
 
   const IT = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "Framework PHP installato con Composer, .env e document root in public/. Non crea un utente amministratore né un pannello; definisci le tue rotte o installa uno starter kit.",
     "Gestor de archivos del document root del sitio": "Gestore file della document root del sito",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminare il sito {id} e tutto ciò che è associato (database, posta/webmail, FTP, certificato e DNS)?",
     "Antivirus y antispam": "Antivirus e antispam",
@@ -5887,6 +5895,7 @@
   };
 
   const DE = {
+    "Framework PHP instalado con Composer, .env y document root en public/. No crea usuario administrador ni panel; define tus rutas o instala un starter kit.": "PHP-Framework, installiert mit Composer, .env und Dokumentwurzel in public/. Es erstellt keinen Administratorbenutzer und kein Panel; definieren Sie Ihre Routen oder installieren Sie ein Starter-Kit.",
     "Gestor de archivos del document root del sitio": "Dateimanager für das Dokumentwurzelverzeichnis der Website",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Website {id} und alles zugehörige (Datenbank, E-Mail/Webmail, FTP, Zertifikat und DNS) löschen?",
     "Antivirus y antispam": "Antivirus und Antispam",
