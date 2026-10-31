@@ -73,7 +73,7 @@ Open **Websites → New website**:
 | Account | The same hosting account |
 | Runtime | Python |
 | Application | `hello-python` |
-| Document root | `public_html` |
+| Document root | `<domain>/public_html` |
 | TLS | As needed |
 | Redirect HTTP to HTTPS | Optional |
 

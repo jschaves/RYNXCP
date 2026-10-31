@@ -185,7 +185,7 @@ try {
     if ($job.status -ne 'succeeded') { throw "installer failed: $($job.message)" }
     $laravelConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/laravel.example.com.conf'
     if (-not (Test-Path $laravelConf)) { throw 'installer website was not created' }
-    $laravelRoot = Join-Path $root 'data/daemon/sandbox/home/acme/sites/laravel.example.com'
+    $laravelRoot = Join-Path $root 'data/daemon/sandbox/home/acme/laravel.example.com/public_html'
     if (-not (Test-Path (Join-Path $laravelRoot '.env'))) { throw 'installer .env was not written' }
     if (-not (Test-Path (Join-Path $laravelRoot 'public/index.php'))) { throw 'installer public root missing' }
     $installerDb = RequestJson 'GET' '/api/v1/databases'
@@ -230,33 +230,33 @@ try {
     if (Test-Path $zoneFile) { throw 'DNS zone was not removed' }
 
     Write-Host '==> file manager'
-    $files = RequestJson 'GET' '/api/v1/files?domain=example.com&path='
+    $files = RequestJson 'GET' '/api/v1/files?domain=php.example.com&path='
     if (-not ($files.entries | Where-Object { $_.name -like 'index.*' })) {
         throw 'file manager did not list the site root'
     }
-    $null = RequestJson 'POST' '/api/v1/files/mkdir' @{ domain = 'example.com'; path = ''; name = 'assets' }
+    $null = RequestJson 'POST' '/api/v1/files/mkdir' @{ domain = 'php.example.com'; path = ''; name = 'assets' }
     $hello = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('hello'))
     $null = RequestJson 'POST' '/api/v1/files/upload' @{
-        domain = 'example.com'; path = 'assets'; name = 'hello.txt'; data = $hello
+        domain = 'php.example.com'; path = 'assets'; name = 'hello.txt'; data = $hello
     }
-    $readFile = RequestJson 'GET' '/api/v1/files/read?domain=example.com&path=assets%2Fhello.txt'
+    $readFile = RequestJson 'GET' '/api/v1/files/read?domain=php.example.com&path=assets%2Fhello.txt'
     if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($readFile.data)) -ne 'hello') {
         throw 'file read failed'
     }
     $bye = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('bye'))
     $null = RequestJson 'PUT' '/api/v1/files/write' @{
-        domain = 'example.com'; path = 'assets/hello.txt'; data = $bye
+        domain = 'php.example.com'; path = 'assets/hello.txt'; data = $bye
     }
     $null = RequestJson 'POST' '/api/v1/files/rename' @{
-        domain = 'example.com'; path = 'assets/hello.txt'; new_name = 'bye.txt'
+        domain = 'php.example.com'; path = 'assets/hello.txt'; new_name = 'bye.txt'
     }
-    $renamed = RequestJson 'GET' '/api/v1/files/read?domain=example.com&path=assets%2Fbye.txt'
+    $renamed = RequestJson 'GET' '/api/v1/files/read?domain=php.example.com&path=assets%2Fbye.txt'
     if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($renamed.data)) -ne 'bye') {
         throw 'file rename failed'
     }
-    $null = RequestJson 'DELETE' '/api/v1/files?domain=example.com&path=assets%2Fbye.txt&recursive=false'
-    $null = RequestJson 'DELETE' '/api/v1/files?domain=example.com&path=assets&recursive=true'
-    ExpectStatus 400 { RequestJson 'GET' '/api/v1/files?domain=example.com&path=..%2F..%2Fetc%2Fpasswd' }
+    $null = RequestJson 'DELETE' '/api/v1/files?domain=php.example.com&path=assets%2Fbye.txt&recursive=false'
+    $null = RequestJson 'DELETE' '/api/v1/files?domain=php.example.com&path=assets&recursive=true'
+    ExpectStatus 400 { RequestJson 'GET' '/api/v1/files?domain=php.example.com&path=..%2F..%2Fetc%2Fpasswd' }
     ExpectStatus 404 { RequestJson 'GET' '/api/v1/files?domain=missing.example.com&path=' }
 
     Write-Host '==> account suspension/resume'

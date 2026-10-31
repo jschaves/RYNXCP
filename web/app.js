@@ -121,7 +121,7 @@ const TITLES = {
   overview: ['Resumen', 'Estado del nodo y de los recursos gestionados'],
   accounts: ['Cuentas', 'Usuarios Linux aislados con cuota y home dedicado'],
   websites: ['Sitios web', 'Virtual hosts Nginx con TLS y reverse proxy'],
-  files: ['Archivos', 'Gestor de archivos del home de la cuenta (incluye public_html)'],
+  files: ['Archivos', 'Gestor de archivos del document root del sitio'],
   apps: ['Aplicaciones', 'Procesos gestionados por systemd (Node, Python, Ruby, Java, .NET, Go)'],
   installer: ['Instalador', 'WordPress y Laravel en un sitio nuevo con PHP, base de datos y TLS'],
   php: ['PHP-FPM', 'Pools por cuenta con open_basedir y funciones restringidas'],

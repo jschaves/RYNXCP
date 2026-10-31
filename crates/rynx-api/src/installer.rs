@@ -136,9 +136,8 @@ pub async fn start(
             version: request.php_version.clone(),
         },
         app: None,
-        // Keep installer files outside the shared public_html so other sites
-        // in the same account never expose or overwrite them.
-        docroot: format!("sites/{domain}"),
+        // Every domain/subdomain owns its directory with its own public_html.
+        docroot: format!("{domain}/public_html"),
         tls: if request.tls {
             TlsMode::LetsEncrypt
         } else {
@@ -363,6 +362,8 @@ async fn run_job(state: ApiState, id: String, prepared: Prepared, actor: String)
         if prepared.app == InstallerApp::Laravel {
             let mut updated = prepared.website.clone();
             updated.docroot = format!("{}/public", prepared.website.docroot);
+            // Laravel keeps the project in <domain>/public_html and serves the
+            // public/ subdirectory.
             state
                 .daemon
                 .call(Request::WebsiteUpsert(updated), &actor)

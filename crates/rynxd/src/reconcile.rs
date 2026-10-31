@@ -738,7 +738,11 @@ impl Reconciler {
         })
     }
 
-    async fn website_upsert(&self, spec: WebsiteSpec, actor: &str) -> Result<Response, WireError> {
+    async fn website_upsert(
+        &self,
+        mut spec: WebsiteSpec,
+        actor: &str,
+    ) -> Result<Response, WireError> {
         validate_website_spec(&spec).map_err(invalid)?;
         if let Runtime::Php { version } = &spec.runtime {
             self.ensure_php_version(version).await?;
@@ -771,6 +775,11 @@ impl Reconciler {
             .get_website(&spec.domain)
             .map_err(internal)?
             .is_none();
+        // New domains and subdomains get their own document root. Existing
+        // websites keep their stored path so an edit never moves their files.
+        if is_new && spec.docroot == "public_html" {
+            spec.docroot = format!("{}/public_html", spec.domain);
+        }
         if is_new
             && self
                 .state
@@ -924,11 +933,11 @@ impl Reconciler {
 
     async fn website_delete(&self, domain: &str, actor: &str) -> Result<Response, WireError> {
         validate_domain(domain).map_err(invalid)?;
-        if self.state.get_website(domain).map_err(internal)?.is_none() {
-            return Err(WireError::not_found(format!(
-                "website '{domain}' not found"
-            )));
-        }
+        let website = self
+            .state
+            .get_website(domain)
+            .map_err(internal)?
+            .ok_or_else(|| WireError::not_found(format!("website '{domain}' not found")))?;
         let databases: Vec<_> = self
             .state
             .list_databases()
@@ -964,6 +973,19 @@ impl Reconciler {
         self.exec.remove_site(domain).await.map_err(exec_error)?;
         if self.cfg.dns_enabled {
             self.dns_remove_zone(domain).await;
+        }
+        // New sites own a dedicated <domain>/ directory. Legacy sites that
+        // still point at the shared public_html keep their files untouched.
+        let dedicated = website.spec.docroot == domain
+            || website.spec.docroot.starts_with(&format!("{domain}/"));
+        if dedicated {
+            if let Err(err) = self
+                .exec
+                .remove_website_root(&website.spec.username, domain)
+                .await
+            {
+                tracing::warn!(domain, error = %err, "website directory could not be removed");
+            }
         }
         self.state.delete_website(domain).map_err(internal)?;
         self.log(actor, "website.delete", domain, "removed")?;
@@ -1198,7 +1220,7 @@ impl Reconciler {
         validate_domain(&spec.domain).map_err(invalid)?;
         validate_php_version(&spec.php_version).map_err(invalid)?;
         validate_site_root(&spec.username, &spec.docroot).map_err(invalid)?;
-        if spec.docroot != format!("sites/{}", spec.domain) {
+        if spec.docroot != format!("{}/public_html", spec.domain) {
             return Err(WireError::invalid(
                 "installer document root must be dedicated to the domain",
             ));

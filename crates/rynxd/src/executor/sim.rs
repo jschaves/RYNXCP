@@ -147,6 +147,14 @@ impl Executor for SimExecutor {
         Ok(())
     }
 
+    async fn remove_website_root(&self, username: &str, relative: &str) -> ExecResult<()> {
+        let target = self.home(username).join(relative);
+        if target.exists() {
+            std::fs::remove_dir_all(&target)?;
+        }
+        Ok(())
+    }
+
     async fn ensure_docroot(&self, username: &str, uid: u32, path: &Path) -> ExecResult<()> {
         let home = self.home(username);
         if !path.starts_with(&home) {

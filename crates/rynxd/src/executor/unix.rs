@@ -253,7 +253,7 @@ async fn run_as_user(
 }
 
 /// Removes the installer's dedicated document root so a retry starts clean.
-/// The caller has already verified that the path is `sites/<domain>`.
+/// The caller has already verified that the path is `<domain>/public_html`.
 fn reset_docroot(home: &Path, docroot: &Path, owner: &User) -> ExecResult<()> {
     if !docroot.starts_with(home) {
         return Err(ExecError::InvalidInput(
@@ -720,6 +720,34 @@ impl Executor for RealExecutor {
             }
         }
         Ok(())
+    }
+
+    async fn remove_website_root(&self, username: &str, relative: &str) -> ExecResult<()> {
+        validate_relative_path(relative)?;
+        if relative.contains('/') {
+            return Err(ExecError::InvalidInput(
+                "the website root must be a single directory".into(),
+            ));
+        }
+        let home = self.home(username);
+        let target = home.join(relative);
+        if !target.starts_with(&home) || target == home {
+            return Err(ExecError::InvalidInput(
+                "the website root escapes the account home".into(),
+            ));
+        }
+        let owner = User::from_name(username)
+            .map_err(|err| ExecError::Io(err.to_string()))?
+            .ok_or_else(|| ExecError::MissingAccount(username.to_string()))?;
+        let _identity = switch_fs_identity(owner.uid.as_raw(), owner.gid.as_raw())?;
+        match std::fs::remove_dir_all(&target) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(ExecError::Io(format!(
+                "cannot remove {}: {err}",
+                target.display()
+            ))),
+        }
     }
 
     async fn ensure_docroot(&self, username: &str, uid: u32, path: &Path) -> ExecResult<()> {

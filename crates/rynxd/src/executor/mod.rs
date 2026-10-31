@@ -173,6 +173,7 @@ pub trait Executor: Send + Sync {
 
     async fn ensure_account(&self, spec: &AccountSpec, uid: u32) -> ExecResult<()>;
     async fn remove_account(&self, username: &str, purge: bool) -> ExecResult<()>;
+    async fn remove_website_root(&self, username: &str, relative: &str) -> ExecResult<()>;
     async fn ensure_docroot(&self, username: &str, uid: u32, path: &Path) -> ExecResult<()>;
 
     async fn file_list(

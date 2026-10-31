@@ -45,7 +45,7 @@ exits immediately and Nginx returns **502 Bad Gateway**.
 ## Publish it
 
 Create a website with runtime **Node.js**, select `hello-node` as the
-application, and use `public_html` as the document root. The application and the
+application, and use the default document root (`<domain>/public_html`). The application and the
 website count as two resources toward `web_domains`.
 
 See the [Python guide](python-app.md#troubleshooting) for the common 502 checks.

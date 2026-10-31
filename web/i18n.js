@@ -13,6 +13,7 @@
   ];
 
   const EN = {
+    "Gestor de archivos del document root del sitio": "Site document root file manager",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Delete the site {id} and everything associated with it (database, mail/webmail, FTP, certificate and DNS)?",
     "Instalador": "Installer",
     "WordPress y Laravel en un sitio nuevo con PHP, base de datos y TLS": "WordPress and Laravel on a new site with PHP, database and TLS",
@@ -808,6 +809,7 @@
   };
 
   const PT = {
+    "Gestor de archivos del document root del sitio": "Gestor de ficheiros do document root do site",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminar o site {id} e tudo o que está associado (base de dados, correio/webmail, FTP, certificado e DNS)?",
     "Antivirus y antispam": "Antivírus e antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV e SpamAssassin com o histórico de deteções e bloqueios",
@@ -1532,6 +1534,7 @@
   };
 
   const FR = {
+    "Gestor de archivos del document root del sitio": "Gestionnaire de fichiers de la racine du site",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Supprimer le site {id} et tout ce qui y est associé (base de données, messagerie/webmail, FTP, certificat et DNS) ?",
     "Antivirus y antispam": "Antivirus et antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV et SpamAssassin avec l'historique des détections et des blocages",
@@ -2257,6 +2260,7 @@
   };
 
   const AR = {
+    "Gestor de archivos del document root del sitio": "مدير ملفات جذر مستندات الموقع",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "هل تريد حذف الموقع {id} وكل ما يرتبط به (قاعدة البيانات والبريد/الويب ميل وFTP والشهادة وDNS)؟",
     "Antivirus y antispam": "مكافحة الفيروسات ومكافحة البريد المزعج",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV وSpamAssassin مع سجل الاكتشافات والحظر",
@@ -2984,6 +2988,7 @@
   };
 
   const RU = {
+    "Gestor de archivos del document root del sitio": "Диспетчер файлов корня сайта",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Удалить сайт {id} и всё связанное с ним (базу данных, почту/веб-почту, FTP, сертификат и DNS)?",
     "Antivirus y antispam": "Антивирус и антиспам",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV и SpamAssassin с историей обнаружений и блокировок",
@@ -3710,6 +3715,7 @@
   };
 
   const ZH = {
+    "Gestor de archivos del document root del sitio": "站点文档根目录文件管理器",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "删除站点 {id} 及其所有关联内容（数据库、邮件/网页邮件、FTP、证书和 DNS）？",
     "Antivirus y antispam": "杀毒与反垃圾邮件",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV 与 SpamAssassin，包含检测和拦截历史",
@@ -4433,6 +4439,7 @@
   };
 
   const JA = {
+    "Gestor de archivos del document root del sitio": "サイトのドキュメントルートのファイルマネージャー",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "サイト {id} と関連するすべて（データベース、メール/ウェブメール、FTP、証明書、DNS）を削除しますか？",
     "Antivirus y antispam": "ウイルス対策とスパム対策",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV と SpamAssassin、検出とブロックの履歴付き",
@@ -5159,6 +5166,7 @@
   };
 
   const IT = {
+    "Gestor de archivos del document root del sitio": "Gestore file della document root del sito",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminare il sito {id} e tutto ciò che è associato (database, posta/webmail, FTP, certificato e DNS)?",
     "Antivirus y antispam": "Antivirus e antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV e SpamAssassin con la cronologia di rilevamenti e blocchi",
@@ -5879,6 +5887,7 @@
   };
 
   const DE = {
+    "Gestor de archivos del document root del sitio": "Dateimanager für das Dokumentwurzelverzeichnis der Website",
     "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Website {id} und alles zugehörige (Datenbank, E-Mail/Webmail, FTP, Zertifikat und DNS) löschen?",
     "Antivirus y antispam": "Antivirus und Antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV und SpamAssassin mit Erkennungs- und Sperrverlauf",

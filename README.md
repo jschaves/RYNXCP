@@ -95,10 +95,12 @@ domains automatically (for example `laniñadelasmargaritas.es` becomes
 `xn--laniadelasmargaritas-66b.es`); direct API/CLI calls must use the Punycode
 form.
 
-When a Static or PHP site is first applied, the daemon creates its document root
-and, if there is no `index.html` or `index.php`, a welcome page in the UI
-language of the panel user who created the site. Existing content is never
-overwritten.
+New websites default to `<domain>/public_html` under the account home, so every
+domain and subdomain has its own document root; existing websites keep their
+stored path. When a Static or PHP site is first applied, the daemon creates its
+document root and, if there is no `index.html` or `index.php`, a welcome page in
+the UI language of the panel user who created the site. Existing content is
+never overwritten.
 
 Deleting a website also removes everything associated with that domain: its
 databases, mail domain and mailboxes, webmail vhost, FTP accounts, certificates
@@ -373,9 +375,10 @@ and installs one of the supported applications:
 
 Both installers create the PHP-FPM pool, a MariaDB database and credentials,
 apply the package limits and start a Let's Encrypt job when TLS is selected.
-Installation files live in `sites/<domain>` (Laravel serves from
-`sites/<domain>/public`), outside the account's shared `public_html`, so
-domains and subdomains never mix.
+Every domain and subdomain gets its own document root, for example
+`<domain>/public_html`. Installer files live there too (Laravel serves from
+`<domain>/public_html/public`), so domains and subdomains never share or expose
+each other's files.
 Archives are downloaded over HTTPS into `/var/lib/rynxcp/staging`, checksummed
 and only extracted by the daemon when the path, size and SHA-256 match. Jobs run
 in the background (`GET /api/v1/installer/jobs/{id}`) so long installs do not
@@ -632,7 +635,7 @@ package `databases` limit is enforced when creating a new database.
 
 Pure-FTPd virtual users are named `<account>_<ftpname>` and mapped to the account
 UID (read-write) or to the `rynxftp` user (read-only). They are chrooted to the
-account home, which includes `public_html` and `apps/`. Explicit FTPS is
+account home, which includes each domain's document root and `apps/`. Explicit FTPS is
 supported. A password is generated when not provided. The package
 `ftp_accounts` limit is enforced when creating an account.
 
