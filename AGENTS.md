@@ -27,6 +27,14 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke.ps1
 The smoke test runs the daemon and API in simulation mode, exercises every major
 feature end to end, and cleans up after itself.
 
+## Frontend rules
+
+- Every list or table view must be paginated. Use the shared `table()` helper and
+  `paginateTables()` in `web/app.js` (20 rows per page); do not render unbounded
+  lists.
+- Keep the current page when a view refreshes silently (auto-refresh or polling).
+- New list endpoints should accept a `limit` and cap it server-side.
+
 ## Security rules
 
 - Never introduce a shell (`sh -c`); always use explicit `argv`.
