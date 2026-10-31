@@ -6,6 +6,7 @@ use rynx_panel::PanelDb;
 use crate::cert_jobs::CertJobs;
 use crate::daemon::DaemonClient;
 use crate::email::Mailer;
+use crate::installer::InstallerJobs;
 use crate::ratelimit::LoginLimiter;
 use crate::two_factor::TwoFactor;
 
@@ -17,6 +18,7 @@ pub struct ApiState {
     pub limiter: Arc<LoginLimiter>,
     pub reset_limiter: Arc<LoginLimiter>,
     pub cert_jobs: CertJobs,
+    pub installer_jobs: InstallerJobs,
     pub mailer: Option<Arc<Mailer>>,
     pub two_factor: Arc<TwoFactor>,
     pub agent_lock: Arc<tokio::sync::Mutex<()>>,

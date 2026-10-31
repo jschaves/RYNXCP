@@ -171,6 +171,28 @@ try {
     $poolConf = Join-Path $root 'data/daemon/sandbox/php/8.3/fpm/pool.d/rynx-acme.conf'
     if (-not (Test-Path $poolConf)) { throw 'php pool was not rendered' }
 
+    Write-Host '==> one-click installer'
+    $install = PostJson '/api/v1/installer/install' @{
+        username = 'acme'; domain = 'laravel.example.com'; app = 'laravel'
+        php_version = '8.3'; title = 'Smoke Laravel'; tls = $false
+    }
+    $job = $install
+    for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        if ($job.status -eq 'succeeded' -or $job.status -eq 'failed') { break }
+        Start-Sleep -Milliseconds 250
+        $job = RequestJson 'GET' "/api/v1/installer/jobs/$($job.id)"
+    }
+    if ($job.status -ne 'succeeded') { throw "installer failed: $($job.message)" }
+    $laravelConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/laravel.example.com.conf'
+    if (-not (Test-Path $laravelConf)) { throw 'installer website was not created' }
+    $laravelRoot = Join-Path $root 'data/daemon/sandbox/home/acme/public_html'
+    if (-not (Test-Path (Join-Path $laravelRoot '.env'))) { throw 'installer .env was not written' }
+    if (-not (Test-Path (Join-Path $laravelRoot 'public/index.php'))) { throw 'installer public root missing' }
+    $installerDb = RequestJson 'GET' '/api/v1/databases'
+    if (-not ($installerDb.databases | Where-Object { $_.domain -eq 'laravel.example.com' })) {
+        throw 'installer did not create the database'
+    }
+
     Write-Host '==> file manager'
     $files = RequestJson 'GET' '/api/v1/files?domain=example.com&path='
     if (-not ($files.entries | Where-Object { $_.name -like 'index.*' })) {
@@ -236,7 +258,9 @@ try {
     $database = RequestJson 'POST' '/api/v1/databases' @{ domain = 'example.com'; name = 'smoke' }
     if ($database.kind -ne 'database') { throw 'database creation failed' }
     if ($database.database.username -notlike 'acme_*') { throw 'unexpected database name' }
-    if ((RequestJson 'GET' '/api/v1/databases').databases.Count -ne 1) { throw 'expected one database' }
+    if (-not ((RequestJson 'GET' '/api/v1/databases').databases | Where-Object { $_.id -eq $database.database.id })) {
+        throw 'created database is missing from the list'
+    }
 
     $ftp = RequestJson 'POST' '/api/v1/ftp' @{ domain = 'example.com'; username = 'deploy'; readonly = $false }
     if ($ftp.kind -ne 'ftp') { throw 'ftp account creation failed' }

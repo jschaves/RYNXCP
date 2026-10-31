@@ -5,26 +5,26 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rynx_core::audit::{self, AuditLog};
-use rynx_core::crypto::{now_rfc3339, now_unix, random_hex};
+use rynx_core::crypto::{now_rfc3339, now_unix, random_hex, sha256_hex};
 use rynx_core::templates::{self, NginxContext};
 use rynx_core::validate::{
     self, validate_account_spec, validate_app_spec, validate_ban_ip, validate_cron_spec,
     validate_database_name, validate_dns_record_spec, validate_domain, validate_email,
     validate_firewall_rule_spec, validate_ftp_spec, validate_ip_or_cidr,
     validate_mail_account_spec, validate_mail_domain_spec, validate_php_pool_spec,
-    validate_website_spec,
+    validate_php_version, validate_website_spec,
 };
 use rynx_core::DaemonConfig;
 use rynx_proto::{
     AccountSpec, AccountView, AppSpec, AppView, AuditEntry, BackupView, BlockedIpView, CertView,
     CertificateStatus, ConsoleAction, CronJobView, CronSpec, DatabaseView, DnsRecordSpec,
     DnsRecordView, DnsZoneView, FirewallRuleSpec, FirewallRuleView, FirewallView, FtpSpec, FtpView,
-    MailAccountSpec, MailDomainSpec, MailDomainView, MetricSample, PhpPoolSpec, PhpPoolView,
-    Request, Response, Runtime, ServiceStat, SystemInfo, TlsMode, WebsiteSpec, WebsiteView,
-    WireError,
+    InstallerApp, InstallerApplySpec, MailAccountSpec, MailDomainSpec, MailDomainView,
+    MetricSample, PhpPoolSpec, PhpPoolView, Request, Response, Runtime, ServiceStat, SystemInfo,
+    TlsMode, WebsiteSpec, WebsiteView, WireError,
 };
 
-use crate::executor::{ExecError, Executor, MailAccountConfig};
+use crate::executor::{validate_site_root, ExecError, Executor, MailAccountConfig};
 use crate::state::StateStore;
 
 const WEBMAIL_ROOT: &str = "/usr/share/roundcube";
@@ -37,6 +37,70 @@ fn webmail_root() -> &'static str {
     } else {
         WEBMAIL_ROOT
     }
+}
+
+const MAX_INSTALLER_ARCHIVE: u64 = 128 * 1024 * 1024;
+
+fn validate_wordpress_fields(spec: &InstallerApplySpec) -> Result<(), WireError> {
+    let title = spec.site_title.trim();
+    if title.is_empty() || title.len() > 200 || title.chars().any(|ch| ch.is_control()) {
+        return Err(WireError::invalid("invalid WordPress site title"));
+    }
+    let user = spec.admin_user.trim();
+    if user.is_empty()
+        || user.len() > 60
+        || !user
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '@'))
+    {
+        return Err(WireError::invalid("invalid WordPress administrator user"));
+    }
+    validate_email(&spec.admin_email).map_err(invalid)?;
+    if spec.admin_password.len() < 8
+        || spec.admin_password.len() > 128
+        || spec.admin_password.chars().any(|ch| ch.is_control())
+    {
+        return Err(WireError::invalid(
+            "the WordPress administrator password must be 8-128 printable characters",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_staged_archive(
+    staging: &Path,
+    raw_path: &str,
+    expected_sha256: &str,
+    expected_size: u64,
+) -> Result<PathBuf, WireError> {
+    let staging = staging
+        .canonicalize()
+        .map_err(|err| WireError::invalid(format!("installer staging is unavailable: {err}")))?;
+    let path = Path::new(raw_path);
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|_| WireError::invalid("installer archive not found"))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(WireError::invalid(
+            "installer archive must be a regular file",
+        ));
+    }
+    if meta.len() != expected_size || expected_size == 0 || expected_size > MAX_INSTALLER_ARCHIVE {
+        return Err(WireError::invalid("invalid installer archive size"));
+    }
+    let canonical = path
+        .canonicalize()
+        .map_err(|_| WireError::invalid("installer archive not found"))?;
+    if !canonical.starts_with(&staging) {
+        return Err(WireError::invalid(
+            "installer archive is outside the staging directory",
+        ));
+    }
+    let data = std::fs::read(&canonical)
+        .map_err(|_| WireError::invalid("installer archive could not be read"))?;
+    if sha256_hex(&data) != expected_sha256.to_ascii_lowercase() {
+        return Err(WireError::invalid("installer archive checksum mismatch"));
+    }
+    Ok(canonical)
 }
 
 fn exec_error(err: ExecError) -> WireError {
@@ -150,6 +214,7 @@ impl Reconciler {
                 let apps = self.state.list_apps().map_err(internal)?;
                 Ok(Response::Apps { apps })
             }
+            Request::InstallerApply(spec) => self.installer_apply(spec, actor).await,
 
             Request::CertIssue {
                 domain,
@@ -1127,6 +1192,71 @@ impl Reconciler {
         Ok(Response::Ack {
             message: format!("application '{username}/{name}' deleted"),
         })
+    }
+
+    async fn installer_apply(
+        &self,
+        spec: InstallerApplySpec,
+        actor: &str,
+    ) -> Result<Response, WireError> {
+        validate::validate_username(&spec.username).map_err(invalid)?;
+        validate_domain(&spec.domain).map_err(invalid)?;
+        validate_php_version(&spec.php_version).map_err(invalid)?;
+        validate_site_root(&spec.username, &spec.docroot).map_err(invalid)?;
+        if spec.database.len() > 64
+            || !spec
+                .database
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            || !spec.database.starts_with(&format!("{}_", spec.username))
+        {
+            return Err(WireError::invalid(
+                "invalid installer database for this account",
+            ));
+        }
+        if spec.site_title.trim().is_empty()
+            || spec.site_title.len() > 200
+            || spec.site_title.chars().any(|ch| ch.is_control())
+        {
+            return Err(WireError::invalid("invalid application title"));
+        }
+        let website = self
+            .state
+            .get_website(&spec.domain)
+            .map_err(internal)?
+            .ok_or_else(|| {
+                WireError::not_found("website not found; create it before installing")
+            })?;
+        if website.spec.username != spec.username || website.spec.docroot != spec.docroot {
+            return Err(WireError::invalid(
+                "the website does not match the installer target",
+            ));
+        }
+        if spec.app == InstallerApp::Wordpress {
+            validate_wordpress_fields(&spec)?;
+        }
+        let archive = match (spec.archive_path.as_deref(), spec.archive_sha256.as_deref()) {
+            (Some(path), Some(sha)) => Some(validate_staged_archive(
+                &self.cfg.installer_staging,
+                path,
+                sha,
+                spec.archive_size,
+            )?),
+            (None, None) if spec.app == InstallerApp::Laravel => None,
+            _ => return Err(WireError::invalid("invalid installer archive metadata")),
+        };
+        let message = self
+            .exec
+            .installer_apply(&spec, archive.as_deref())
+            .await
+            .map_err(exec_error)?;
+        self.log(
+            actor,
+            "installer.install",
+            &spec.domain,
+            &format!("app={}", spec.app.as_str()),
+        )?;
+        Ok(Response::InstallerResult { message })
     }
 
     async fn cert_issue(

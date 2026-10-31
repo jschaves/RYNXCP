@@ -67,6 +67,7 @@ chmod 0640 /etc/rynxcp/daemon.token
 chown root:rynx /etc/rynxcp/rynxd.toml /etc/rynxcp/api.toml
 chown -R rynx:rynx /var/lib/rynxcp/panel
 chown -R rynx:rynx /var/lib/rynxcp/apps
+install -d -m 0750 -o rynx -g rynx /var/lib/rynxcp/staging
 
 echo "==> optional services layout"
 install -d -m 0755 /etc/bind/zones /etc/opendkim/keys /etc/pure-ftpd /var/backups/rynxcp

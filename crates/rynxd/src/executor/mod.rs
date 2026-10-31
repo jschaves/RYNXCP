@@ -16,8 +16,8 @@ use async_trait::async_trait;
 
 use rynx_core::{CoreError, DaemonConfig};
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, FileEntry, MailDomainSpec, PackageUpdate, ProgramInfo,
-    SystemInfo,
+    AccountSpec, AppSpec, CertView, FileEntry, InstallerApplySpec, MailDomainSpec, PackageUpdate,
+    ProgramInfo, SystemInfo,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -229,6 +229,13 @@ pub trait Executor: Send + Sync {
     async fn remove_php_pool(&self, username: &str, version: &str) -> ExecResult<()>;
 
     async fn ensure_app_dir(&self, username: &str, uid: u32, dir: &Path) -> ExecResult<()>;
+    #[allow(clippy::too_many_arguments)]
+    async fn installer_apply(
+        &self,
+        spec: &InstallerApplySpec,
+        archive: Option<&Path>,
+    ) -> ExecResult<String>;
+
     #[allow(clippy::too_many_arguments)]
     async fn apply_app(
         &self,

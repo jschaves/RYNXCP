@@ -88,6 +88,7 @@ async fn main() -> Result<()> {
             cfg.login_lockout_secs.max(900),
         )),
         cert_jobs: rynx_api::cert_jobs::new_store(),
+        installer_jobs: rynx_api::installer::new_store(),
         mailer,
         two_factor: Arc::new(Default::default()),
         agent_lock: Arc::new(tokio::sync::Mutex::new(())),

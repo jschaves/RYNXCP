@@ -36,6 +36,7 @@ login_ip_max_attempts = 30
 login_window_secs = 300
 login_lockout_secs = 900
 auth_log = "/var/log/rynxcp/auth.log"
+installer_staging = "/var/lib/rynxcp/staging"
 
 # ---- password policy for panel users ----
 password_min_len = 12

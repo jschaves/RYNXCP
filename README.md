@@ -51,6 +51,7 @@ reconciliation engine and UI are original.
 | Accounts | Isolated Linux users, package-assigned quota/backend, real suspension (Nginx/apps/FTP) and deletion |
 | Web | Nginx virtual hosts, aliases, TLS, optional HTTP-to-HTTPS redirect, PHP-FPM, reverse proxy, security headers |
 | Runtimes | PHP, Node.js, Python, Ruby, Java, .NET, Go and static sites |
+| Installer | One-click WordPress and Laravel with PHP-FPM, database, TLS and generated credentials |
 | DNS | Authoritative BIND zones, A/AAAA/CNAME/MX/TXT/NS/SRV/CAA records |
 | Email | Postfix + Dovecot mailboxes, aliases/forwarding, quotas, DKIM/OpenDKIM, DMARC, SRV, TLS-RPT and Roundcube webmail |
 | Panel email | Localized Postfix notifications for credentials, password resets, 2FA codes, certificate alerts and delivery tests |
@@ -352,6 +353,27 @@ versions are installed separately.
 Minimal application examples: [Node.js](docs/node-app.md),
 [Python](docs/python-app.md), [Ruby](docs/ruby-app.md), [Java](docs/java-app.md),
 [.NET](docs/dotnet-app.md) and [Go](docs/go-app.md).
+
+## Application installer
+
+The **Instalador** view creates a new website under an existing hosting account
+and installs one of the supported applications:
+
+- **WordPress**: downloads the official archive, extracts it as the account user,
+  writes `wp-config.php` with generated salts and runs `wp core install` with the
+  requested title, administrator user, email and password.
+- **Laravel**: runs `composer create-project` as the account user, writes `.env`
+  with the generated `APP_KEY`, runs `php artisan migrate`, and switches the
+  document root to `public/`.
+
+Both installers create the PHP-FPM pool, a MariaDB database and credentials,
+apply the package limits and start a Let's Encrypt job when TLS is selected.
+Archives are downloaded over HTTPS into `/var/lib/rynxcp/staging`, checksummed
+and only extracted by the daemon when the path, size and SHA-256 match. Jobs run
+in the background (`GET /api/v1/installer/jobs/{id}`) so long installs do not
+block the panel.
+
+The pre-installer installs `composer`, `unzip` and WP-CLI for this feature.
 
 ## DNS and email (SPF / DKIM / DMARC)
 
@@ -889,6 +911,9 @@ GET        /api/v1/agent/findings
 POST       /api/v1/agent/findings/{id}/status
 POST       /api/v1/agent/run
 POST       /api/v1/agent/provider/test
+GET        /api/v1/installer/catalog
+POST       /api/v1/installer/install
+GET        /api/v1/installer/jobs/{id}
 GET        /api/v1/security/auth-events
 GET        /api/v1/security/stats
 GET        /api/v1/firewall

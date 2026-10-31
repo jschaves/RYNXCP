@@ -539,11 +539,26 @@ apt-get install -y --no-install-recommends \
   nginx certbot python3-certbot-nginx \
   php8.5-fpm php8.5-cli php8.5-common php8.5-mysql php8.5-curl php8.5-mbstring \
   php8.5-xml php8.5-zip php8.5-gd php8.5-intl php8.5-bcmath \
-  mariadb-server bind9 bind9-utils bind9-dnsutils \
+  composer unzip mariadb-server bind9 bind9-utils bind9-dnsutils \
   pure-ftpd opendkim opendkim-tools cron \
   clamav clamav-daemon clamav-freshclam clamav-milter \
   spamassassin spamd spamc spamass-milter \
   nodejs npm python3 python3-venv python3-pip ruby-full default-jre-headless golang-go
+
+# WP-CLI powers the WordPress one-click installer. Install the official phar
+# when the distribution does not provide it.
+if ! command -v wp >/dev/null 2>&1; then
+  log "Installing WP-CLI for the WordPress installer"
+  wp_tmp="$(mktemp)"
+  if curl -fsSL --max-time 120 \
+      https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
+      -o "$wp_tmp" && php8.5 "$wp_tmp" --info >/dev/null 2>&1; then
+    install -m 0755 "$wp_tmp" /usr/local/bin/wp
+  else
+    warn "WP-CLI could not be installed; the WordPress installer will not be available"
+  fi
+  rm -f "$wp_tmp"
+fi
 
 # .NET is best-effort: package availability differs between releases.
 # Ubuntu 26.04 ships dotnet-sdk-10.0 in its own feed; the Microsoft feed is

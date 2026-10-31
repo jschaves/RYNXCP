@@ -59,6 +59,8 @@ pub struct DaemonConfig {
     pub backup_dir: PathBuf,
     /// Number of backups kept per account before rotating the oldest.
     pub backup_retention: usize,
+    /// Shared directory where the API stages verified installer archives.
+    pub installer_staging: PathBuf,
     /// Per-account resource limits enforced by the reconciler.
     pub max_websites_per_account: usize,
     pub max_apps_per_account: usize,
@@ -132,6 +134,7 @@ impl Default for DaemonConfig {
                 managed_roots: vec![root.clone()],
                 backup_dir: root.join("backups"),
                 backup_retention: 7,
+                installer_staging: root.join("installer-staging"),
                 max_websites_per_account: 50,
                 max_apps_per_account: 20,
                 dns_enabled: true,
@@ -202,6 +205,7 @@ impl Default for DaemonConfig {
                 ],
                 backup_dir: PathBuf::from("/var/backups/rynxcp"),
                 backup_retention: 7,
+                installer_staging: PathBuf::from("/var/lib/rynxcp/staging"),
                 max_websites_per_account: 50,
                 max_apps_per_account: 20,
                 dns_enabled: false,
@@ -367,6 +371,8 @@ pub struct ApiConfig {
     pub login_ip_max_attempts: u32,
     pub login_lockout_secs: u64,
     pub auth_log: PathBuf,
+    /// Shared directory where installer archives are staged for the daemon.
+    pub installer_staging: PathBuf,
     pub password_min_len: usize,
     pub password_min_classes: u8,
     pub session_idle_secs: i64,
@@ -405,6 +411,7 @@ impl Default for ApiConfig {
                 login_ip_max_attempts: 30,
                 login_lockout_secs: 900,
                 auth_log: root.join("auth.log"),
+                installer_staging: root.join("installer-staging"),
                 password_min_len: 12,
                 password_min_classes: 3,
                 session_idle_secs: 3600,
@@ -435,6 +442,7 @@ impl Default for ApiConfig {
                 login_ip_max_attempts: 30,
                 login_lockout_secs: 900,
                 auth_log: PathBuf::from("/var/log/rynxcp/auth.log"),
+                installer_staging: PathBuf::from("/var/lib/rynxcp/staging"),
                 password_min_len: 12,
                 password_min_classes: 3,
                 session_idle_secs: 3600,

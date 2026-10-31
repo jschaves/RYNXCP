@@ -50,6 +50,7 @@ const NAV_ITEMS = [
   { id: 'websites', label: 'Sitios web', group: 'Operación' },
   { id: 'files', label: 'Archivos', group: 'Operación' },
   { id: 'apps', label: 'Aplicaciones', group: 'Operación' },
+  { id: 'installer', label: 'Instalador', group: 'Operación' },
   { id: 'php', label: 'PHP-FPM', group: 'Operación' },
   { id: 'databases', label: 'Bases de datos', group: 'Operación' },
   { id: 'ftp', label: 'FTP', group: 'Operación' },
@@ -77,6 +78,7 @@ const NAV_ICON_PATHS = {
   websites: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>',
   files: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   apps: '<path d="M12 3 4 7v10l8 4 8-4V7z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/>',
+  installer: '<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
   php: '<path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/><path d="m13 5-2 14"/>',
   databases: '<ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v6c0 1.7 3.1 3 7 3s7-1.3 7-3V5"/><path d="M5 11v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
   ftp: '<path d="M8 4v12"/><path d="m5 7 3-3 3 3"/><path d="M16 20V8"/><path d="m13 17 3 3 3-3"/>',
@@ -121,6 +123,7 @@ const TITLES = {
   websites: ['Sitios web', 'Virtual hosts Nginx con TLS y reverse proxy'],
   files: ['Archivos', 'Gestor de archivos del home de la cuenta (incluye public_html)'],
   apps: ['Aplicaciones', 'Procesos gestionados por systemd (Node, Python, Ruby, Java, .NET, Go)'],
+  installer: ['Instalador', 'WordPress y Laravel en un sitio nuevo con PHP, base de datos y TLS'],
   php: ['PHP-FPM', 'Pools por cuenta con open_basedir y funciones restringidas'],
   mail: ['Correo', 'Dominios, buzones, webmail y seguridad DNS'],
   ssl: ['Certificados', 'Emisión y estado de certificados Let\'s Encrypt'],
@@ -511,6 +514,7 @@ const SCOPED_NAV = new Set([
   'websites',
   'files',
   'apps',
+  'installer',
   'php',
   'databases',
   'ftp',
@@ -576,6 +580,7 @@ const renderers = {
   websites: renderWebsites,
   files: renderFiles,
   apps: renderApps,
+  installer: renderInstaller,
   php: renderPhp,
   ssl: renderSsl,
   users: renderUsers,
@@ -1985,6 +1990,104 @@ async function renderApps() {
     table(['Aplicación', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
 }
 
+async function renderInstaller() {
+  const [, versionsData] = await Promise.all([
+    loadList('accounts'),
+    api('/api/v1/php/versions'),
+  ]);
+  S.phpVersions = versionsData.versions || [];
+  const writable = canWrite();
+  const apps = [
+    {
+      app: 'wordpress',
+      title: 'WordPress',
+      text: 'Blog o CMS con base de datos, wp-config, sales y cuenta de administrador.',
+    },
+    {
+      app: 'laravel',
+      title: 'Laravel',
+      text: 'Framework PHP instalado con Composer, .env y document root en public/.',
+    },
+  ];
+  const cards = apps
+    .map(
+      (item) => `<div class="card">
+        <div class="cell-title">${esc(item.title)}</div>
+        <p class="muted small">${esc(item.text)}</p>
+        <p class="muted small">Crea un sitio nuevo con PHP-FPM, base de datos y certificado TLS.</p>
+        ${writable ? `<button class="btn primary" data-action="installer-new" data-id="${item.app}">Instalar ${esc(item.title)}</button>` : ''}
+      </div>`,
+    )
+    .join('');
+  $('#view').innerHTML =
+    sectionHead('Instalador de aplicaciones') +
+    `<div class="grid cols-2">${cards}</div>` +
+    `<div class="card"><p class="muted small" style="margin:0">El instalador crea el sitio, el pool PHP, la base de datos
+    y los archivos de la aplicación. No sobrescribe sitios existentes y requiere una cuenta de hosting.</p></div>`;
+}
+
+function openInstallerModal(app) {
+  if (!S.data.accounts.length) {
+    toast('Primero crea una cuenta de hosting', 'error');
+    return;
+  }
+  const wordpress = app === 'wordpress';
+  const versions = (S.phpVersions && S.phpVersions.length ? S.phpVersions : ['8.5']).map((version) => ({
+    value: version,
+    label: version,
+  }));
+  openModal({
+    title: wordpress ? 'Instalar WordPress' : 'Instalar Laravel',
+    submitLabel: 'Instalar',
+    html: `<div class="form-grid">
+      ${fSelect('username', 'Cuenta', accountOptions(false), { required: true })}
+      ${fInput('domain', 'Dominio', { required: true, placeholder: 'blog.example.com' })}
+      ${fSelect('php_version', 'PHP-FPM', versions, { value: versions[0]?.value })}
+      ${fInput('title', wordpress ? 'Título del sitio' : 'Nombre de la aplicación', { value: '' })}
+      ${wordpress ? fInput('admin_user', 'Usuario administrador', { value: 'admin' }) : ''}
+      ${wordpress ? fInput('admin_email', 'Email administrador', { type: 'email', value: S.user.email || '' }) : ''}
+      ${wordpress ? fInput('admin_password', 'Contraseña administrador', { type: 'password', help: 'déjala vacía para generar una segura' }) : ''}
+      <div class="full">${fCheck('tls', 'Solicitar certificado Let\'s Encrypt', true)}</div>
+    </div>`,
+    onSubmit: async (form) => {
+      const body = {
+        username: form.elements.username.value,
+        domain: form.elements.domain.value,
+        app,
+        php_version: form.elements.php_version.value,
+        title: form.elements.title.value,
+        admin_user: wordpress ? form.elements.admin_user.value : '',
+        admin_email: wordpress ? form.elements.admin_email.value : '',
+        admin_password: wordpress ? form.elements.admin_password.value : '',
+        tls: form.elements.tls.checked,
+      };
+      const job = await api('/api/v1/installer/install', { method: 'POST', body });
+      const status = document.createElement('p');
+      status.className = 'muted small';
+      form.querySelector('.modal-actions').before(status);
+      let current = job;
+      while (current && current.status !== 'succeeded' && current.status !== 'failed') {
+        status.textContent = `${current.status}: ${current.message}`;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        current = await api(`/api/v1/installer/jobs/${encodeURIComponent(current.id)}`);
+      }
+      if (!current || current.status !== 'succeeded') {
+        throw new Error(current ? current.message : 'La instalación falló');
+      }
+      const lines = [
+        `${T('Sitio')}: ${current.url}`,
+        current.database ? `${T('Base de datos')}: ${current.database}` : '',
+        current.admin_user ? `${T('Usuario administrador')}: ${current.admin_user}` : '',
+        current.admin_password ? `${T('Contraseña administrador')}: ${current.admin_password}` : '',
+        '',
+        T('Guarda estas credenciales ahora.'),
+      ].filter(Boolean);
+      showOutput(T('Aplicación instalada'), lines.join('\n'));
+      await refresh();
+    },
+  });
+}
+
 function openAppModal() {
   if (!S.data.accounts.length) {
     toast('Primero crea una cuenta de hosting', 'error');
@@ -2813,6 +2916,8 @@ async function handleAction(action, id) {
     }
     case 'app-new':
       return openAppModal();
+    case 'installer-new':
+      return openInstallerModal(id);
     case 'app-delete': {
       if (!confirm(TF('¿Eliminar la aplicación {id}?', { id }))) return;
       const [user, name] = id.split('/');

@@ -7,17 +7,19 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use async_trait::async_trait;
+use base64::Engine as _;
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, MetadataExt, OpenOptions as CapOpenOptions};
 use nix::unistd::{chown, Gid, Uid, User};
 use time::{format_description::well_known::Rfc3339, macros::format_description, OffsetDateTime};
 use tokio::io::AsyncWriteExt;
 
+use rynx_core::crypto::random_hex;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, MailDomainSpec, PackageUpdate,
-    ProgramInfo, SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, InstallerApp, InstallerApplySpec,
+    MailDomainSpec, PackageUpdate, ProgramInfo, SystemInfo,
 };
 
 use super::{
@@ -194,6 +196,151 @@ async fn run_combined(program: &str, args: &[String]) -> ExecResult<String> {
         });
     }
     Ok(combined)
+}
+
+/// Runs an installer command as the hosting account instead of root. The
+/// program and every argument are explicit; no shell is involved.
+async fn run_as_user(
+    username: &str,
+    home: &Path,
+    cwd: &Path,
+    program: &str,
+    args: &[String],
+) -> ExecResult<String> {
+    let runuser = if Path::new("/usr/sbin/runuser").exists() {
+        "/usr/sbin/runuser"
+    } else {
+        "/sbin/runuser"
+    };
+    let mut argv = vec![
+        "-u".to_string(),
+        username.to_string(),
+        "--".to_string(),
+        "/usr/bin/env".to_string(),
+        format!("HOME={}", home.display()),
+        format!("PATH={SAFE_PATH}"),
+        "LC_ALL=C".to_string(),
+        format!("COMPOSER_HOME={}", home.join(".composer").display()),
+        "COMPOSER_NO_INTERACTION=1".to_string(),
+        "COMPOSER_ALLOW_SUPERUSER=0".to_string(),
+        program.to_string(),
+    ];
+    argv.extend(args.iter().cloned());
+    let output = tokio::process::Command::new(runuser)
+        .args(&argv)
+        .current_dir(cwd)
+        .env_clear()
+        .env("PATH", SAFE_PATH)
+        .env("LC_ALL", "C")
+        .output()
+        .await
+        .map_err(|e| ExecError::Command {
+            program: program.to_string(),
+            args: args.join(" "),
+            status: -1,
+            stderr: e.to_string(),
+        })?;
+    if !output.status.success() {
+        return Err(ExecError::Command {
+            program: program.to_string(),
+            args: args.join(" "),
+            status: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn clear_docroot(site: &SiteRoot) -> ExecResult<()> {
+    let mut entries = Vec::new();
+    for entry in site.dir.entries()? {
+        entries.push(entry?);
+    }
+    for entry in entries {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if matches!(name.as_ref(), "index.html" | "index.php") && entry.file_type()?.is_file() {
+            let _ = site.dir.remove_file(name.as_ref());
+            continue;
+        }
+        return Err(ExecError::InvalidInput(
+            "the document root must be empty before installing an application".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn php_single(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn env_value(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn wordpress_config(spec: &InstallerApplySpec) -> String {
+    format!(
+        "<?php\n\
+define('DB_NAME', '{db}');\n\
+define('DB_USER', '{user}');\n\
+define('DB_PASSWORD', '{password}');\n\
+define('DB_HOST', '{host}');\n\
+define('DB_CHARSET', 'utf8mb4');\n\
+define('DB_COLLATE', '');\n\
+define('AUTH_KEY', '{auth}');\n\
+define('SECURE_AUTH_KEY', '{secure_auth}');\n\
+define('LOGGED_IN_KEY', '{logged_in}');\n\
+define('NONCE_KEY', '{nonce}');\n\
+define('AUTH_SALT', '{auth_salt}');\n\
+define('SECURE_AUTH_SALT', '{secure_auth_salt}');\n\
+define('LOGGED_IN_SALT', '{logged_in_salt}');\n\
+define('NONCE_SALT', '{nonce_salt}');\n\
+$table_prefix = 'wp_';\n\
+define('WP_DEBUG', false);\n\
+if (!defined('ABSPATH')) {{\n    define('ABSPATH', __DIR__ . '/');\n}}\n\
+require_once ABSPATH . 'wp-settings.php';\n",
+        db = php_single(&spec.database),
+        user = php_single(&spec.db_user),
+        password = php_single(&spec.db_password),
+        host = php_single(&spec.db_host),
+        auth = random_hex(64),
+        secure_auth = random_hex(64),
+        logged_in = random_hex(64),
+        nonce = random_hex(64),
+        auth_salt = random_hex(64),
+        secure_auth_salt = random_hex(64),
+        logged_in_salt = random_hex(64),
+        nonce_salt = random_hex(64),
+    )
+}
+
+fn laravel_env(spec: &InstallerApplySpec) -> String {
+    let raw = hex::decode(random_hex(32)).unwrap_or_default();
+    let key = base64::engine::general_purpose::STANDARD.encode(raw);
+    let scheme = if spec.tls { "https" } else { "http" };
+    format!(
+        "APP_NAME={name}\n\
+APP_ENV=production\n\
+APP_KEY=base64:{key}\n\
+APP_DEBUG=false\n\
+APP_URL={scheme}://{domain}\n\
+DB_CONNECTION=mysql\n\
+DB_HOST={db_host}\n\
+DB_PORT=3306\n\
+DB_DATABASE={db}\n\
+DB_USERNAME={db_user}\n\
+DB_PASSWORD={db_password}\n\
+SESSION_DRIVER=file\n\
+CACHE_STORE=file\n\
+QUEUE_CONNECTION=sync\n",
+        name = env_value(&spec.site_title),
+        key = key,
+        domain = spec.domain,
+        db_host = spec.db_host,
+        db = env_value(&spec.database),
+        db_user = env_value(&spec.db_user),
+        db_password = env_value(&spec.db_password),
+    )
 }
 
 /// Dovecot 2.4 split `mail_location` into `mail_driver`/`mail_path`, renamed
@@ -960,6 +1107,85 @@ impl Executor for RealExecutor {
             let _ = std::fs::remove_dir_all(working_dir);
         }
         Ok(())
+    }
+
+    async fn installer_apply(
+        &self,
+        spec: &InstallerApplySpec,
+        archive: Option<&Path>,
+    ) -> ExecResult<String> {
+        let home = self.home(&spec.username);
+        let docroot = home.join(&spec.docroot);
+        let site = open_site_root(&self.cfg, &spec.username, &spec.docroot)?;
+        clear_docroot(&site)?;
+        let php = format!("php{}", spec.php_version);
+
+        match spec.app {
+            InstallerApp::Wordpress => {
+                let archive = archive.ok_or_else(|| {
+                    ExecError::InvalidInput("the WordPress archive is missing".into())
+                })?;
+                let args = vec![
+                    "-xzf".to_string(),
+                    archive.display().to_string(),
+                    "-C".to_string(),
+                    docroot.display().to_string(),
+                    "--strip-components=1".to_string(),
+                    "--no-same-owner".to_string(),
+                    "--no-same-permissions".to_string(),
+                ];
+                run_as_user(&spec.username, &home, &docroot, "tar", &args).await?;
+                let config = wordpress_config(spec);
+                let path = format!("{}/wp-config.php", spec.docroot.trim_end_matches('/'));
+                self.file_write(&spec.username, &spec.docroot, &path, config.as_bytes())
+                    .await?;
+                let args = vec![
+                    "/usr/local/bin/wp".to_string(),
+                    "core".to_string(),
+                    "install".to_string(),
+                    format!("--path={}", docroot.display()),
+                    format!(
+                        "--url={}://{}",
+                        if spec.tls { "https" } else { "http" },
+                        spec.domain
+                    ),
+                    format!("--title={}", spec.site_title),
+                    format!("--admin_user={}", spec.admin_user),
+                    format!("--admin_password={}", spec.admin_password),
+                    format!("--admin_email={}", spec.admin_email),
+                    "--skip-email".to_string(),
+                ];
+                run_as_user(&spec.username, &home, &docroot, &php, &args).await?;
+            }
+            InstallerApp::Laravel => {
+                let composer = if Path::new("/usr/bin/composer").exists() {
+                    "/usr/bin/composer"
+                } else {
+                    "/usr/local/bin/composer"
+                };
+                let args = vec![
+                    composer.to_string(),
+                    "create-project".to_string(),
+                    "laravel/laravel".to_string(),
+                    docroot.display().to_string(),
+                    "--no-interaction".to_string(),
+                    "--prefer-dist".to_string(),
+                    "--no-progress".to_string(),
+                ];
+                run_as_user(&spec.username, &home, &home, &php, &args).await?;
+                let env = laravel_env(spec);
+                let path = format!("{}/.env", spec.docroot.trim_end_matches('/'));
+                self.file_write(&spec.username, &spec.docroot, &path, env.as_bytes())
+                    .await?;
+                let args = vec![
+                    "artisan".to_string(),
+                    "migrate".to_string(),
+                    "--force".to_string(),
+                ];
+                run_as_user(&spec.username, &home, &docroot, &php, &args).await?;
+            }
+        }
+        Ok(format!("{} installed", spec.app.as_str()))
     }
 
     async fn issue_cert(

@@ -114,6 +114,7 @@ pub enum Request {
         name: String,
     },
     AppList,
+    InstallerApply(InstallerApplySpec),
 
     CertIssue {
         domain: String,
@@ -274,6 +275,9 @@ pub enum Response {
     },
     Apps {
         apps: Vec<AppView>,
+    },
+    InstallerResult {
+        message: String,
     },
     Cert {
         cert: CertView,
@@ -647,6 +651,58 @@ pub struct AppView {
     pub working_dir: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// One-click web application installers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallerApp {
+    Wordpress,
+    Laravel,
+}
+
+impl InstallerApp {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InstallerApp::Wordpress => "wordpress",
+            InstallerApp::Laravel => "laravel",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "wordpress" => Some(InstallerApp::Wordpress),
+            "laravel" => Some(InstallerApp::Laravel),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InstallerApplySpec {
+    pub username: String,
+    pub domain: String,
+    pub app: InstallerApp,
+    /// Document root relative to the account home, e.g. `public_html`.
+    pub docroot: String,
+    pub php_version: String,
+    pub tls: bool,
+    pub database: String,
+    pub db_user: String,
+    pub db_password: String,
+    pub db_host: String,
+    #[serde(default)]
+    pub site_title: String,
+    #[serde(default)]
+    pub admin_user: String,
+    #[serde(default)]
+    pub admin_email: String,
+    #[serde(default)]
+    pub admin_password: String,
+    pub archive_path: Option<String>,
+    pub archive_sha256: Option<String>,
+    #[serde(default)]
+    pub archive_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

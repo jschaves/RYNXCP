@@ -37,6 +37,7 @@ systemd_dir = "/etc/systemd/system"
 # ---- backups ----
 backup_dir = "/var/backups/rynxcp"
 backup_retention = 7
+installer_staging = "/var/lib/rynxcp/staging"
 
 # ---- user rules / limits ----
 max_websites_per_account = 50

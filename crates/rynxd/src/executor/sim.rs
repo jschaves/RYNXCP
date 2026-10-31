@@ -10,8 +10,8 @@ use rynx_core::crypto::random_hex;
 use rynx_core::paths::{remove_managed, write_managed};
 use rynx_core::DaemonConfig;
 use rynx_proto::{
-    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, MailDomainSpec, PackageUpdate,
-    ProgramInfo, SystemInfo,
+    AccountSpec, AppSpec, CertView, CertificateStatus, FileEntry, InstallerApp, InstallerApplySpec,
+    MailDomainSpec, PackageUpdate, ProgramInfo, SystemInfo,
 };
 
 use super::{
@@ -454,6 +454,59 @@ impl Executor for SimExecutor {
             let _ = std::fs::remove_dir_all(working_dir);
         }
         Ok(())
+    }
+
+    async fn installer_apply(
+        &self,
+        spec: &InstallerApplySpec,
+        _archive: Option<&Path>,
+    ) -> ExecResult<String> {
+        let docroot = self.home(&spec.username).join(&spec.docroot);
+        std::fs::create_dir_all(&docroot)?;
+        let _ = std::fs::remove_file(docroot.join("index.html"));
+        match spec.app {
+            InstallerApp::Wordpress => {
+                write_managed(
+                    &docroot,
+                    &docroot.join("index.php"),
+                    "<?php // wordpress\n",
+                    0o640,
+                    None,
+                )?;
+                write_managed(
+                    &docroot,
+                    &docroot.join("wp-config.php"),
+                    "<?php // wp-config\n",
+                    0o640,
+                    None,
+                )?;
+            }
+            InstallerApp::Laravel => {
+                std::fs::create_dir_all(docroot.join("public"))?;
+                write_managed(
+                    &docroot,
+                    &docroot.join("artisan"),
+                    "#!/usr/bin/env php\n",
+                    0o640,
+                    None,
+                )?;
+                write_managed(
+                    &docroot,
+                    &docroot.join(".env"),
+                    "APP_ENV=production\n",
+                    0o640,
+                    None,
+                )?;
+                write_managed(
+                    &docroot,
+                    &docroot.join("public/index.php"),
+                    "<?php // laravel\n",
+                    0o640,
+                    None,
+                )?;
+            }
+        }
+        Ok(format!("{} installed", spec.app.as_str()))
     }
 
     async fn issue_cert(
