@@ -1134,7 +1134,8 @@ impl Executor for RealExecutor {
                 let staged = home.join(format!(".rynxcp-installer-{}.tar.gz", random_hex(8)));
                 std::fs::copy(archive, &staged)?;
                 std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
-                chown(&staged, Some(owner.uid), Some(owner.gid))?;
+                chown(&staged, Some(owner.uid), Some(owner.gid))
+                    .map_err(|err| ExecError::Io(format!("chown {}: {err}", staged.display())))?;
                 let args = vec![
                     "-xzf".to_string(),
                     staged.display().to_string(),
