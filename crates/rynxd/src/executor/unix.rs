@@ -3,6 +3,7 @@
 
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -1125,16 +1126,27 @@ impl Executor for RealExecutor {
                 let archive = archive.ok_or_else(|| {
                     ExecError::InvalidInput("the WordPress archive is missing".into())
                 })?;
+                // The staging file belongs to the API user. Copy it into the
+                // account home so tar can run as the account and never as root.
+                let owner = User::from_name(&spec.username)
+                    .map_err(|err| ExecError::Io(err.to_string()))?
+                    .ok_or_else(|| ExecError::MissingAccount(spec.username.clone()))?;
+                let staged = home.join(format!(".rynxcp-installer-{}.tar.gz", random_hex(8)));
+                std::fs::copy(archive, &staged)?;
+                std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
+                chown(&staged, Some(owner.uid), Some(owner.gid))?;
                 let args = vec![
                     "-xzf".to_string(),
-                    archive.display().to_string(),
+                    staged.display().to_string(),
                     "-C".to_string(),
                     docroot.display().to_string(),
                     "--strip-components=1".to_string(),
                     "--no-same-owner".to_string(),
                     "--no-same-permissions".to_string(),
                 ];
-                run_as_user(&spec.username, &home, &docroot, "tar", &args).await?;
+                let extracted = run_as_user(&spec.username, &home, &docroot, "tar", &args).await;
+                let _ = std::fs::remove_file(&staged);
+                extracted?;
                 let config = wordpress_config(spec);
                 let path = format!("{}/wp-config.php", spec.docroot.trim_end_matches('/'));
                 self.file_write(&spec.username, &spec.docroot, &path, config.as_bytes())
