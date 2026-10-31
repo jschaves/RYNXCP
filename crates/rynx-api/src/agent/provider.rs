@@ -34,7 +34,10 @@ Devuelve SOLO JSON válido con este esquema: \
 \"category\":\"security|reliability|maintenance\",\"title\":\"...\",\"summary\":\"...\",\
 \"recommendation\":\"...\"}]}. \
 No repitas los hallazgos deterministas. Devuelve como máximo 5 hallazgos nuevos; \
-si no hay nada nuevo, usa una lista vacía. Omite avisos informativos o triviales: \
+si no hay nada nuevo, usa una lista vacía. Cada hallazgo debe describir un problema \
+real y accionable: no informes estados saludables ni la ausencia de problemas. Si la \
+recomendación sería \"no action required\", no lo incluyas. Reserva critical para \
+riesgos de seguridad graves o caídas totales. Omite avisos informativos o triviales: \
 no se muestran hallazgos de severidad info o low.";
 
 #[derive(Default)]
@@ -706,6 +709,9 @@ fn normalize_findings(
         if title.trim().is_empty() || summary.trim().is_empty() {
             continue;
         }
+        if has_no_action(&recommendation) || states_healthy(&title) {
+            continue;
+        }
         if !known.insert(normalize_title(&title)) {
             continue;
         }
@@ -721,6 +727,53 @@ fn normalize_findings(
         });
     }
     out
+}
+
+/// Rejects LLM findings whose recommendation says nothing must be done. A
+/// finding without an action is not actionable and must not reach the view or
+/// the alert email.
+fn has_no_action(recommendation: &str) -> bool {
+    const PHRASES: [&str; 21] = [
+        "no action is required",
+        "no action required",
+        "no action needed",
+        "no further action",
+        "nothing to do",
+        "nothing needs to be done",
+        "no se requiere accion",
+        "no se requiere acción",
+        "no requiere accion",
+        "no requiere acción",
+        "ninguna accion",
+        "ninguna acción",
+        "no hay nada que hacer",
+        "nenhuma acao",
+        "não é necessária",
+        "aucune action",
+        "nessuna azione",
+        "keine aktion",
+        "действий не требуется",
+        "无需操作",
+        "対応は不要",
+    ];
+    let lower = recommendation.to_lowercase();
+    PHRASES.iter().any(|phrase| lower.contains(phrase))
+}
+
+/// Rejects titles that assert the absence of a problem. Small models sometimes
+/// return healthy states as findings; they must never be treated as incidents.
+fn states_healthy(title: &str) -> bool {
+    const PHRASES: [&str; 7] = [
+        "not running any failed services",
+        "no failed services",
+        "no services failed",
+        "no failed units",
+        "not blocked by any rules",
+        "no rules or mail filters",
+        "is running normally",
+    ];
+    let lower = title.to_lowercase();
+    PHRASES.iter().any(|phrase| lower.contains(phrase))
 }
 
 fn normalize_title(title: &str) -> String {
@@ -874,6 +927,55 @@ mod tests {
         );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].title, "Riesgo moderado");
+    }
+
+    #[test]
+    fn drops_healthy_state_findings() {
+        let findings = normalize_findings(
+            vec![
+                LlmFinding {
+                    severity: Some("critical".into()),
+                    category: Some("security".into()),
+                    title: Some("System is not blocked by any rules or mail filters".into()),
+                    summary: Some(
+                        "The system is not blocked by any rules or mail filters.".into(),
+                    ),
+                    recommendation: Some(
+                        "No action is required as the system is not blocked by any rules or mail filters."
+                            .into(),
+                    ),
+                },
+                LlmFinding {
+                    severity: Some("critical".into()),
+                    category: Some("security".into()),
+                    title: Some("System is not running any failed services".into()),
+                    summary: Some("The system is not running any failed services.".into()),
+                    recommendation: Some(
+                        "No action is required as the system is not running any failed services."
+                            .into(),
+                    ),
+                },
+                LlmFinding {
+                    severity: Some("critical".into()),
+                    category: Some("security".into()),
+                    title: Some("System is not running any services".into()),
+                    summary: Some("The system is not running any services.".into()),
+                    recommendation: Some(
+                        "No action is required as the system is not running any services.".into(),
+                    ),
+                },
+                LlmFinding {
+                    severity: Some("high".into()),
+                    category: Some("reliability".into()),
+                    title: Some("MariaDB no responde".into()),
+                    summary: Some("La unidad mariadb está inactiva.".into()),
+                    recommendation: Some("Reinicia MariaDB desde Programas.".into()),
+                },
+            ],
+            &[],
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].title, "MariaDB no responde");
     }
 
     #[tokio::test]
