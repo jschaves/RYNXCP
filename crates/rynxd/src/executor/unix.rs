@@ -252,22 +252,64 @@ async fn run_as_user(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn clear_docroot(site: &SiteRoot) -> ExecResult<()> {
-    let mut entries = Vec::new();
-    for entry in site.dir.entries()? {
-        entries.push(entry?);
+fn clear_docroot(home: &Path, docroot: &Path) -> ExecResult<()> {
+    if !docroot.starts_with(home) {
+        return Err(ExecError::InvalidInput(
+            "the document root escapes the account home".into(),
+        ));
     }
+    let entries = std::fs::read_dir(docroot).map_err(|err| {
+        ExecError::Io(format!(
+            "cannot read the document root {}: {err}",
+            docroot.display()
+        ))
+    })?;
     for entry in entries {
+        let entry = entry.map_err(|err| {
+            ExecError::Io(format!(
+                "cannot read the document root {}: {err}",
+                docroot.display()
+            ))
+        })?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if matches!(name.as_ref(), "index.html" | "index.php") && entry.file_type()?.is_file() {
-            let _ = site.dir.remove_file(name.as_ref());
+        let file_type = entry.file_type().map_err(|err| {
+            ExecError::Io(format!(
+                "cannot inspect {}/{}: {err}",
+                docroot.display(),
+                name
+            ))
+        })?;
+        if matches!(name.as_ref(), "index.html" | "index.php") && file_type.is_file() {
+            std::fs::remove_file(entry.path()).map_err(|err| {
+                ExecError::Io(format!(
+                    "cannot remove {}/{}: {err}",
+                    docroot.display(),
+                    name
+                ))
+            })?;
             continue;
         }
         return Err(ExecError::InvalidInput(
             "the document root must be empty before installing an application".into(),
         ));
     }
+    Ok(())
+}
+
+fn write_owned_file(path: &Path, data: &[u8], uid: Uid, gid: Gid) -> ExecResult<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|err| ExecError::Io(format!("cannot write {}: {err}", path.display())))?;
+    file.write_all(data)
+        .map_err(|err| ExecError::Io(format!("cannot write {}: {err}", path.display())))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o640))
+        .map_err(|err| ExecError::Io(format!("cannot chmod {}: {err}", path.display())))?;
+    chown(path, Some(uid), Some(gid))
+        .map_err(|err| ExecError::Io(format!("cannot chown {}: {err}", path.display())))?;
     Ok(())
 }
 
@@ -1117,25 +1159,37 @@ impl Executor for RealExecutor {
     ) -> ExecResult<String> {
         let home = self.home(&spec.username);
         let docroot = home.join(&spec.docroot);
-        let site = open_site_root(&self.cfg, &spec.username, &spec.docroot)?;
-        clear_docroot(&site)?;
+        clear_docroot(&home, &docroot)?;
         let php = format!("php{}", spec.php_version);
+        let owner = User::from_name(&spec.username)
+            .map_err(|err| ExecError::Io(err.to_string()))?
+            .ok_or_else(|| ExecError::MissingAccount(spec.username.clone()))?;
 
         match spec.app {
             InstallerApp::Wordpress => {
                 let archive = archive.ok_or_else(|| {
                     ExecError::InvalidInput("the WordPress archive is missing".into())
                 })?;
-                // The staging file belongs to the API user. Copy it into the
-                // account home so tar can run as the account and never as root.
-                let owner = User::from_name(&spec.username)
-                    .map_err(|err| ExecError::Io(err.to_string()))?
-                    .ok_or_else(|| ExecError::MissingAccount(spec.username.clone()))?;
+                // Read the staged archive as root, then write it into the
+                // account home with the account's filesystem identity. This
+                // works with restricted homes and NFS root-squash.
+                let data = std::fs::read(archive).map_err(|err| {
+                    ExecError::Io(format!("cannot read {}: {err}", archive.display()))
+                })?;
                 let staged = home.join(format!(".rynxcp-installer-{}.tar.gz", random_hex(8)));
-                std::fs::copy(archive, &staged)?;
-                std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
-                chown(&staged, Some(owner.uid), Some(owner.gid))
-                    .map_err(|err| ExecError::Io(format!("chown {}: {err}", staged.display())))?;
+                {
+                    let _identity = switch_fs_identity(owner.uid.as_raw(), owner.gid.as_raw())?;
+                    std::fs::write(&staged, &data).map_err(|err| {
+                        ExecError::Io(format!(
+                            "cannot copy the installer archive to {}: {err}",
+                            staged.display()
+                        ))
+                    })?;
+                    std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))
+                        .map_err(|err| {
+                            ExecError::Io(format!("cannot chmod {}: {err}", staged.display()))
+                        })?;
+                }
                 let args = vec![
                     "-xzf".to_string(),
                     staged.display().to_string(),
@@ -1146,12 +1200,17 @@ impl Executor for RealExecutor {
                     "--no-same-permissions".to_string(),
                 ];
                 let extracted = run_as_user(&spec.username, &home, &docroot, "tar", &args).await;
-                let _ = std::fs::remove_file(&staged);
+                if let Ok(_identity) = switch_fs_identity(owner.uid.as_raw(), owner.gid.as_raw()) {
+                    let _ = std::fs::remove_file(&staged);
+                }
                 extracted?;
                 let config = wordpress_config(spec);
-                let path = format!("{}/wp-config.php", spec.docroot.trim_end_matches('/'));
-                self.file_write(&spec.username, &spec.docroot, &path, config.as_bytes())
-                    .await?;
+                write_owned_file(
+                    &docroot.join("wp-config.php"),
+                    config.as_bytes(),
+                    owner.uid,
+                    owner.gid,
+                )?;
                 let args = vec![
                     "/usr/local/bin/wp".to_string(),
                     "core".to_string(),
@@ -1187,9 +1246,7 @@ impl Executor for RealExecutor {
                 ];
                 run_as_user(&spec.username, &home, &home, &php, &args).await?;
                 let env = laravel_env(spec);
-                let path = format!("{}/.env", spec.docroot.trim_end_matches('/'));
-                self.file_write(&spec.username, &spec.docroot, &path, env.as_bytes())
-                    .await?;
+                write_owned_file(&docroot.join(".env"), env.as_bytes(), owner.uid, owner.gid)?;
                 let args = vec![
                     "artisan".to_string(),
                     "migrate".to_string(),
