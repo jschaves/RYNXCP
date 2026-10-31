@@ -271,6 +271,46 @@ fn reset_docroot(home: &Path, docroot: &Path, owner: &User) -> ExecResult<()> {
     }
 }
 
+/// Grants Nginx (www-data) read/traverse access to a web root without
+/// following symlinks. Installer files are created with the daemon umask and
+/// the account group, so without this the web server returns 403.
+fn grant_web_read(path: &Path, gid: Gid) -> ExecResult<()> {
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|err| ExecError::Io(format!("cannot inspect {}: {err}", path.display())))?;
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    if meta.is_file() {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if matches!(name, "wp-config.php" | ".env") {
+            return Ok(());
+        }
+    }
+    chown(path, None, Some(gid))
+        .map_err(|err| ExecError::Io(format!("cannot chgrp {}: {err}", path.display())))?;
+    let mut mode = meta.permissions().mode();
+    if meta.is_dir() {
+        mode |= 0o050;
+    } else {
+        mode |= 0o040;
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|err| ExecError::Io(format!("cannot chmod {}: {err}", path.display())))?;
+    if meta.is_dir() {
+        let entries = std::fs::read_dir(path)
+            .map_err(|err| ExecError::Io(format!("cannot read {}: {err}", path.display())))?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|err| ExecError::Io(format!("cannot read {}: {err}", path.display())))?;
+            grant_web_read(&entry.path(), gid)?;
+        }
+    }
+    Ok(())
+}
+
 fn write_owned_file(path: &Path, data: &[u8], uid: Uid, gid: Gid) -> ExecResult<()> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -1174,6 +1214,10 @@ impl Executor for RealExecutor {
         self.ensure_docroot(&spec.username, owner.uid.as_raw(), &docroot)
             .await?;
         let php = format!("php{}", spec.php_version);
+        let web_gid = User::from_name("www-data")
+            .ok()
+            .flatten()
+            .map(|user| user.gid);
 
         match spec.app {
             InstallerApp::Wordpress => {
@@ -1238,6 +1282,9 @@ impl Executor for RealExecutor {
                     "--skip-email".to_string(),
                 ];
                 run_as_user(&spec.username, &home, &docroot, &php, &args).await?;
+                if let Some(gid) = web_gid {
+                    grant_web_read(&docroot, gid)?;
+                }
             }
             InstallerApp::Laravel => {
                 let composer = if Path::new("/usr/bin/composer").exists() {
@@ -1263,6 +1310,9 @@ impl Executor for RealExecutor {
                     "--force".to_string(),
                 ];
                 run_as_user(&spec.username, &home, &docroot, &php, &args).await?;
+                if let Some(gid) = web_gid {
+                    grant_web_read(&docroot.join("public"), gid)?;
+                }
             }
         }
         Ok(format!("{} installed", spec.app.as_str()))

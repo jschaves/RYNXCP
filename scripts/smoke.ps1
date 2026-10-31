@@ -185,6 +185,9 @@ try {
     if ($job.status -ne 'succeeded') { throw "installer failed: $($job.message)" }
     $laravelConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/laravel.example.com.conf'
     if (-not (Test-Path $laravelConf)) { throw 'installer website was not created' }
+    if (-not (Select-String -Path $laravelConf -Pattern 'root .*laravel\.example\.com/public_html/public;' -Quiet)) {
+        throw 'Laravel document root was not updated to public/'
+    }
     $laravelRoot = Join-Path $root 'data/daemon/sandbox/home/acme/laravel.example.com/public_html'
     if (-not (Test-Path (Join-Path $laravelRoot '.env'))) { throw 'installer .env was not written' }
     if (-not (Test-Path (Join-Path $laravelRoot 'public/index.php'))) { throw 'installer public root missing' }
