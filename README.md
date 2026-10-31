@@ -932,6 +932,8 @@ changes that affect deployed state must work through `deploy/preinstall.sh`,
 the mail/antivirus helpers or `rynxd` reconcile, never through manual
 post-install steps.
 
+**Donate.** MagicRita is free software (no charge to run it). Support development on [Ko-fi](https://ko-fi.com/magicrita). For other questions, write to [magicrita.beta@gmail.com](mailto:magicrita.beta@gmail.com).
+
 ## License
 
 RYNXCP is free software: you can redistribute it and/or modify it under the terms
