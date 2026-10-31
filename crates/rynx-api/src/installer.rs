@@ -424,7 +424,12 @@ async fn set_step(state: &ApiState, id: &str, status: &str, message: &str) {
 
 async fn download_wordpress(state: &ApiState) -> Result<(String, u64, String), String> {
     let dir = &state.cfg.installer_staging;
-    std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|err| {
+        format!(
+            "cannot create the installer staging directory {}: {err}",
+            dir.display()
+        )
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -479,7 +484,12 @@ async fn download_wordpress(state: &ApiState) -> Result<(String, u64, String), S
         return Err("the WordPress archive checksum did not match".into());
     }
     let path = dir.join(format!("wordpress-{}.tar.gz", random_hex(12)));
-    std::fs::write(&path, &bytes).map_err(|err| err.to_string())?;
+    std::fs::write(&path, &bytes).map_err(|err| {
+        format!(
+            "cannot write the installer archive to {}: {err}",
+            path.display()
+        )
+    })?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
