@@ -2919,7 +2919,7 @@ async function handleAction(action, id) {
     case 'file-new-folder':
       return openNewFolderModal();
     case 'website-delete': {
-      if (!confirm(TF('¿Eliminar el sitio {id}?', { id }))) return;
+      if (!confirm(TF('¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?', { id }))) return;
       await api(`/api/v1/websites/${encodeURIComponent(id)}`, { method: 'DELETE' });
       toast('Sitio eliminado');
       return refresh();

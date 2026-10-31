@@ -290,6 +290,7 @@ pub trait Executor: Send + Sync {
     async fn remove_zone(&self, domain: &str) -> ExecResult<()>;
     async fn write_dns_conf(&self, content: &str) -> ExecResult<()>;
     async fn generate_dkim_key(&self, domain: &str, selector: &str) -> ExecResult<String>;
+    async fn remove_dkim_key(&self, domain: &str) -> ExecResult<()>;
     async fn write_dkim_tables(&self, keytable: &str, signingtable: &str) -> ExecResult<()>;
 
     async fn hash_mail_password(&self, password: &str) -> ExecResult<String>;

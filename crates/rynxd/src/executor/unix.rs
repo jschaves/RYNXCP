@@ -1700,6 +1700,13 @@ impl Executor for RealExecutor {
         Ok(pem)
     }
 
+    async fn remove_dkim_key(&self, domain: &str) -> ExecResult<()> {
+        rynx_core::validate_domain(domain)
+            .map_err(|err| ExecError::InvalidInput(err.to_string()))?;
+        remove_managed(&self.cfg.dkim_key_dir, &self.cfg.dkim_key_dir.join(domain))
+            .map_err(|err| ExecError::Io(err.to_string()))
+    }
+
     async fn hash_mail_password(&self, password: &str) -> ExecResult<String> {
         let input = format!("{password}\n{password}\n");
         let hash = run_with_stdin("doveadm", &["pw", "-s", "SHA512-CRYPT"], &input).await?;

@@ -13,6 +13,7 @@
   ];
 
   const EN = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Delete the site {id} and everything associated with it (database, mail/webmail, FTP, certificate and DNS)?",
     "Instalador": "Installer",
     "WordPress y Laravel en un sitio nuevo con PHP, base de datos y TLS": "WordPress and Laravel on a new site with PHP, database and TLS",
     "Instalador de aplicaciones": "Application installer",
@@ -807,6 +808,7 @@
   };
 
   const PT = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminar o site {id} e tudo o que está associado (base de dados, correio/webmail, FTP, certificado e DNS)?",
     "Antivirus y antispam": "Antivírus e antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV e SpamAssassin com o histórico de deteções e bloqueios",
     "Antivirus": "Antivírus",
@@ -1530,6 +1532,7 @@
   };
 
   const FR = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Supprimer le site {id} et tout ce qui y est associé (base de données, messagerie/webmail, FTP, certificat et DNS) ?",
     "Antivirus y antispam": "Antivirus et antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV et SpamAssassin avec l'historique des détections et des blocages",
     "Antivirus": "Antivirus",
@@ -2254,6 +2257,7 @@
   };
 
   const AR = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "هل تريد حذف الموقع {id} وكل ما يرتبط به (قاعدة البيانات والبريد/الويب ميل وFTP والشهادة وDNS)؟",
     "Antivirus y antispam": "مكافحة الفيروسات ومكافحة البريد المزعج",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV وSpamAssassin مع سجل الاكتشافات والحظر",
     "Antivirus": "مكافحة الفيروسات",
@@ -2980,6 +2984,7 @@
   };
 
   const RU = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Удалить сайт {id} и всё связанное с ним (базу данных, почту/веб-почту, FTP, сертификат и DNS)?",
     "Antivirus y antispam": "Антивирус и антиспам",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV и SpamAssassin с историей обнаружений и блокировок",
     "Antivirus": "Антивирус",
@@ -3705,6 +3710,7 @@
   };
 
   const ZH = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "删除站点 {id} 及其所有关联内容（数据库、邮件/网页邮件、FTP、证书和 DNS）？",
     "Antivirus y antispam": "杀毒与反垃圾邮件",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV 与 SpamAssassin，包含检测和拦截历史",
     "Antivirus": "杀毒",
@@ -4427,6 +4433,7 @@
   };
 
   const JA = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "サイト {id} と関連するすべて（データベース、メール/ウェブメール、FTP、証明書、DNS）を削除しますか？",
     "Antivirus y antispam": "ウイルス対策とスパム対策",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV と SpamAssassin、検出とブロックの履歴付き",
     "Antivirus": "ウイルス対策",
@@ -5152,6 +5159,7 @@
   };
 
   const IT = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Eliminare il sito {id} e tutto ciò che è associato (database, posta/webmail, FTP, certificato e DNS)?",
     "Antivirus y antispam": "Antivirus e antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV e SpamAssassin con la cronologia di rilevamenti e blocchi",
     "Antivirus": "Antivirus",
@@ -5871,6 +5879,7 @@
   };
 
   const DE = {
+    "¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?": "Website {id} und alles zugehörige (Datenbank, E-Mail/Webmail, FTP, Zertifikat und DNS) löschen?",
     "Antivirus y antispam": "Antivirus und Antispam",
     "ClamAV y SpamAssassin con el historial de detecciones y bloqueos": "ClamAV und SpamAssassin mit Erkennungs- und Sperrverlauf",
     "Antivirus": "Antivirus",

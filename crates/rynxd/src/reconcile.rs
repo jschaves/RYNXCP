@@ -936,16 +936,15 @@ impl Reconciler {
                 "website '{domain}' not found"
             )));
         }
-        if self
+        let databases: Vec<_> = self
             .state
             .list_databases()
             .map_err(internal)?
-            .iter()
-            .any(|db| db.domain == domain)
-        {
-            return Err(WireError::conflict(
-                "delete the database associated with this domain first",
-            ));
+            .into_iter()
+            .filter(|database| database.domain == domain)
+            .collect();
+        for database in databases {
+            self.database_delete(&database.id, actor).await?;
         }
         if self
             .state
@@ -953,8 +952,11 @@ impl Reconciler {
             .map_err(internal)?
             .is_some()
         {
-            let _ = self.mail_domain_delete(domain, actor).await;
+            self.mail_domain_delete(domain, actor).await?;
         }
+        let webmail = Self::webmail_domain(domain);
+        let _ = self.exec.remove_site(&webmail).await;
+        let _ = self.exec.remove_cert(&webmail).await;
         for ftp in self
             .state
             .list_ftp()
@@ -1573,7 +1575,14 @@ impl Reconciler {
         let _ = self.exec.remove_site(&webmail).await;
         let _ = self.exec.remove_cert(&webmail).await;
         let _ = self.exec.remove_mail_domain(domain).await;
+        if let Ok(Some((serial, _, selector))) = self.state.get_dns_zone_meta(domain) {
+            let _ = self
+                .state
+                .upsert_dns_zone_meta(domain, serial, false, &selector);
+        }
+        let _ = self.exec.remove_dkim_key(domain).await;
         self.remove_mail_dns(domain).await;
+        let _ = self.dns_sync_dkim_tables().await;
         self.sync_mail_config().await?;
         self.log(actor, "mail.domain.delete", domain, "")?;
         Ok(Response::Ack {

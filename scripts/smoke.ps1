@@ -193,6 +193,42 @@ try {
         throw 'installer did not create the database'
     }
 
+    Write-Host '==> website delete cascade'
+    $null = PostJson '/api/v1/mail/domains' @{
+        domain = 'laravel.example.com'; username = 'acme'; enabled = $true; catch_all = $null
+    }
+    $null = PostJson '/api/v1/mail/accounts' @{
+        domain = 'laravel.example.com'; local_part = 'info'; password = 'Mail-Pass-1234'
+        quota_mb = 100; enabled = $true
+    }
+    $null = PostJson '/api/v1/ftp' @{
+        domain = 'laravel.example.com'; username = 'larainstall'; readonly = $false
+    }
+    $null = RequestJson 'POST' '/api/v1/databases' @{ domain = 'laravel.example.com'; name = 'cleanup' }
+    $null = RequestJson 'DELETE' '/api/v1/websites/laravel.example.com'
+    if ((RequestJson 'GET' '/api/v1/websites').websites | Where-Object { $_.spec.domain -eq 'laravel.example.com' }) {
+        throw 'website was not deleted'
+    }
+    if ((RequestJson 'GET' '/api/v1/databases').databases | Where-Object { $_.domain -eq 'laravel.example.com' }) {
+        throw 'website databases were not deleted'
+    }
+    if ((RequestJson 'GET' '/api/v1/mail/domains').domains | Where-Object { $_.domain -eq 'laravel.example.com' }) {
+        throw 'mail domain was not deleted'
+    }
+    if ((RequestJson 'GET' '/api/v1/mail/accounts').accounts | Where-Object { $_.domain -eq 'laravel.example.com' }) {
+        throw 'mailboxes were not deleted'
+    }
+    if ((RequestJson 'GET' '/api/v1/ftp').accounts | Where-Object { $_.domain -eq 'laravel.example.com' }) {
+        throw 'FTP accounts were not deleted'
+    }
+    if (Test-Path $laravelConf) { throw 'website vhost was not removed' }
+    $webmailConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/webmail.laravel.example.com.conf'
+    if (Test-Path $webmailConf) { throw 'webmail vhost was not removed' }
+    $dkimDir = Join-Path $root 'data/daemon/sandbox/opendkim/keys/laravel.example.com'
+    if (Test-Path $dkimDir) { throw 'DKIM keys were not removed' }
+    $zoneFile = Join-Path $root 'data/daemon/sandbox/bind/zones/laravel.example.com.db'
+    if (Test-Path $zoneFile) { throw 'DNS zone was not removed' }
+
     Write-Host '==> file manager'
     $files = RequestJson 'GET' '/api/v1/files?domain=example.com&path='
     if (-not ($files.entries | Where-Object { $_.name -like 'index.*' })) {

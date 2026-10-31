@@ -714,6 +714,14 @@ impl Executor for SimExecutor {
         Ok(public.to_string())
     }
 
+    async fn remove_dkim_key(&self, domain: &str) -> ExecResult<()> {
+        let dir = self.cfg.dkim_key_dir.join(domain);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        Ok(())
+    }
+
     async fn hash_mail_password(&self, _password: &str) -> ExecResult<String> {
         Ok(format!("{{SHA512-CRYPT}}sim-{}", random_hex(12)))
     }

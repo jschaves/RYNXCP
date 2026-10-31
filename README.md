@@ -100,6 +100,11 @@ and, if there is no `index.html` or `index.php`, a welcome page in the UI
 language of the panel user who created the site. Existing content is never
 overwritten.
 
+Deleting a website also removes everything associated with that domain: its
+databases, mail domain and mailboxes, webmail vhost, FTP accounts, certificates
+and DNS zone. Shared account resources (home files, PHP pool, cron jobs and
+backups) are kept.
+
 Mail is enabled per website from the **Correo** view. RYNXCP provisions
 `mail.<domain>` for SMTP/IMAP/POP3, `webmail.<domain>` for Roundcube and the
 complete DNS security set: MX, SPF, DKIM (`mail._domainkey`), `_domainkey`,
