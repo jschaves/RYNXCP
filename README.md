@@ -395,8 +395,9 @@ rules are updated by the distribution's normal `sa-update` maintenance.
 The **AI agent** view runs a deterministic analyzer over the node state: failed
 services, security updates, disk/memory/load pressure, expiring certificates,
 firewall activity, authentication failures and the ClamAV/SpamAssassin journal.
-It stores deduplicated findings in `panel.db` and emails new or escalating
-high/critical findings to `smtp_alert_to` when `smtp_enabled` is configured.
+It stores deduplicated findings in `panel.db` and emails new, escalating or
+reopened high/critical findings to `smtp_alert_to` when `smtp_enabled` is
+configured.
 
 The agent is read-only: it never executes remediation or sends shell commands.
 Its settings live under `[agent]` in `api.toml`:
@@ -524,8 +525,8 @@ checks every installed PHP-FPM version, even when no site has a pool yet. While
 the view is open it refreshes every 30 seconds, so new findings appear without a
 manual reload. The view includes a **Test provider** action with the endpoint,
 model and latency, and findings that stop appearing are marked as resolved
-automatically. An existing finding that increases its severity sends a new alert
-email.
+automatically. An existing finding that increases its severity or reappears
+after being resolved sends a new alert email.
 
 ### Agent localization
 

@@ -84,11 +84,12 @@ pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
     let mut alerts: Vec<AgentFinding> = Vec::new();
     for finding in &findings {
         match state.db.upsert_agent_finding(finding) {
-            Ok((stored, is_new, escalated)) => {
+            Ok((stored, is_new, escalated, reopened)) => {
                 if is_new {
                     new_findings += 1;
                 }
-                if (is_new || escalated) && matches!(stored.severity.as_str(), "critical" | "high")
+                if (is_new || escalated || reopened)
+                    && matches!(stored.severity.as_str(), "critical" | "high")
                 {
                     alerts.push(stored);
                 }
@@ -155,13 +156,28 @@ pub fn spawn(state: ApiState) {
 }
 
 async fn notify(state: &ApiState, findings: &[AgentFinding], locale: &str) -> usize {
-    if !state.cfg.agent.email_alerts || findings.is_empty() {
+    if findings.is_empty() {
+        return 0;
+    }
+    if !state.cfg.agent.email_alerts {
+        tracing::info!(
+            findings = findings.len(),
+            "agent alert skipped: email_alerts is disabled"
+        );
         return 0;
     }
     let Some(to) = state.cfg.smtp_alert_to.as_deref() else {
+        tracing::warn!(
+            findings = findings.len(),
+            "agent alert skipped: smtp_alert_to is not configured"
+        );
         return 0;
     };
     let Some(mailer) = state.mailer.as_ref() else {
+        tracing::warn!(
+            findings = findings.len(),
+            "agent alert skipped: SMTP is not configured"
+        );
         return 0;
     };
     let (recommendation_label, severity_label) = messages::email_labels(locale);

@@ -1361,13 +1361,12 @@ impl PanelDb {
     }
 
     /// Inserts a new finding or refreshes the existing one with the same
-    /// fingerprint. Returns the stored finding and whether it is new.
-    /// Returns the stored finding, whether it is new and whether its severity
-    /// increased since the previous run.
+    /// fingerprint. Returns the stored finding, whether it is new, whether its
+    /// severity increased and whether it was reopened from `resolved`.
     pub fn upsert_agent_finding(
         &self,
         input: &AgentFindingInput,
-    ) -> Result<(AgentFinding, bool, bool), PanelError> {
+    ) -> Result<(AgentFinding, bool, bool, bool), PanelError> {
         let conn = self.conn()?;
         let now = now_rfc3339();
         let now_unix = now_unix();
@@ -1383,7 +1382,8 @@ impl PanelDb {
             .optional()?;
         if let Some((id, occurrences, old_severity, old_status)) = existing {
             let escalated = severity_rank(&input.severity) > severity_rank(&old_severity);
-            let status = if old_status == "resolved" {
+            let reopened = old_status == "resolved";
+            let status = if reopened {
                 "open"
             } else {
                 old_status.as_str()
@@ -1411,7 +1411,7 @@ impl PanelDb {
             let finding = self
                 .get_agent_finding(&id)?
                 .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
-            return Ok((finding, false, escalated));
+            return Ok((finding, false, escalated, reopened));
         }
         let id = uuid::Uuid::new_v4().to_string();
         conn.execute(
@@ -1437,7 +1437,7 @@ impl PanelDb {
         let finding = self
             .get_agent_finding(&id)?
             .ok_or_else(|| PanelError::NotFound(format!("finding '{id}' not found")))?;
-        Ok((finding, true, false))
+        Ok((finding, true, false, false))
     }
 
     /// Marks findings that were not observed again as resolved. Acknowledged
@@ -2001,18 +2001,20 @@ mod tests {
             recommendation: "do something".into(),
             source: "rules".into(),
         };
-        let (first, is_new, escalated) = db.upsert_agent_finding(&input).unwrap();
+        let (first, is_new, escalated, reopened) = db.upsert_agent_finding(&input).unwrap();
         assert!(is_new);
         assert!(!escalated);
+        assert!(!reopened);
         assert_eq!(first.occurrences, 1);
         assert_eq!(first.status, "open");
 
         let mut updated = input.clone();
         updated.summary = "second summary".into();
         updated.severity = "critical".into();
-        let (second, is_new, escalated) = db.upsert_agent_finding(&updated).unwrap();
+        let (second, is_new, escalated, reopened) = db.upsert_agent_finding(&updated).unwrap();
         assert!(!is_new);
         assert!(escalated);
+        assert!(!reopened);
         assert_eq!(second.id, first.id);
         assert_eq!(second.occurrences, 2);
         assert_eq!(second.summary, "second summary");
@@ -2021,7 +2023,7 @@ mod tests {
 
         db.set_agent_finding_status(&first.id, "acknowledged")
             .unwrap();
-        let (third, _, _) = db.upsert_agent_finding(&input).unwrap();
+        let (third, _, _, _) = db.upsert_agent_finding(&input).unwrap();
         assert_eq!(third.status, "acknowledged");
 
         let resolved = db
@@ -2033,9 +2035,10 @@ mod tests {
         assert_eq!(stats.resolved, 1);
         assert_eq!(stats.open, 0);
 
-        let (reopened, is_new, escalated) = db.upsert_agent_finding(&input).unwrap();
+        let (reopened, is_new, escalated, was_reopened) = db.upsert_agent_finding(&input).unwrap();
         assert!(!is_new);
         assert!(!escalated);
+        assert!(was_reopened);
         assert_eq!(reopened.status, "open");
         assert!(matches!(
             db.set_agent_finding_status(&first.id, "unknown"),
