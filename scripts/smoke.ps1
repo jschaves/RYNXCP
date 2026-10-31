@@ -183,6 +183,7 @@ try {
         $job = RequestJson 'GET' "/api/v1/installer/jobs/$($job.id)"
     }
     if ($job.status -ne 'succeeded') { throw "installer failed: $($job.message)" }
+    if (-not $job.db_password) { throw 'installer did not return the database password' }
     $laravelConf = Join-Path $root 'data/daemon/sandbox/nginx/sites-available/laravel.example.com.conf'
     if (-not (Test-Path $laravelConf)) { throw 'installer website was not created' }
     if (-not (Select-String -Path $laravelConf -Pattern 'root .*laravel\.example\.com/public_html/public;' -Quiet)) {
