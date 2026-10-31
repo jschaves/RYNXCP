@@ -299,9 +299,6 @@ async fn run_job(state: ApiState, id: String, prepared: Prepared, actor: String)
             .await
             .map_err(|err| err.to_string())?;
         created_website = true;
-        if prepared.tls {
-            crate::cert_jobs::start(&state, &domain, &prepared.owner_email, false, &actor).await;
-        }
 
         set_step(&state, &id, "creating database", "creating the database").await;
         crate::limits::check_database(&state, &actor, &domain)
@@ -371,6 +368,12 @@ async fn run_job(state: ApiState, id: String, prepared: Prepared, actor: String)
                 .call(Request::WebsiteUpsert(updated), &actor)
                 .await
                 .map_err(|err| err.to_string())?;
+        }
+        // Request TLS only after the installer has finished writing the app.
+        // Running the certificate job concurrently re-renders the website and
+        // can recreate a welcome page inside the document root.
+        if prepared.tls {
+            crate::cert_jobs::start(&state, &domain, &prepared.owner_email, false, &actor).await;
         }
         Ok::<(), String>(())
     }
