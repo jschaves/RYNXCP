@@ -77,7 +77,9 @@ pub async fn run(
 ) -> Result<Json<Value>, ApiError> {
     auth.require_admin()?;
     auth.require_global()?;
-    let summary = agent::run_once(&state).await.map_err(ApiError::internal)?;
+    let summary = agent::run_once(&state, auth.user.locale.clone())
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(json!({
         "run": summary.run,
         "new_findings": summary.new_findings,

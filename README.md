@@ -536,12 +536,14 @@ after being resolved sends a new alert email.
 
 ### Agent localization
 
-The agent renders deterministic findings and alert emails in the panel owner's
-locale (falling back to the first administrator). All ten panel languages are
-available in `crates/rynx-api/src/agent/messages.rs` (es, en, pt, fr, it, de,
-ar, ru, zh, ja); unknown locales fall back to English. LLM output follows the
-`locale` embedded in the redacted digest (local language for the supported
-locales, English otherwise).
+The agent renders deterministic findings and alert emails in the locale of the
+most recently active owner/administrator. A manual **Analizar ahora** run uses
+the locale of the administrator who triggered it, falling back to the owner or
+first administrator and then Spanish. All ten panel languages are available in
+`crates/rynx-api/src/agent/messages.rs` (es, en, pt, fr, it, de, ar, ru, zh, ja);
+unknown locales fall back to English. LLM output follows the `locale` embedded
+in the redacted digest (local language for the supported locales, English
+otherwise).
 
 ### Recommended server sizing
 

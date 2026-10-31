@@ -616,6 +616,23 @@ impl PanelDb {
         Ok(count)
     }
 
+    /// Locale of the most recently active owner or administrator. The
+    /// background agent uses it so its findings and emails match the language
+    /// the administrator is actually using in the panel.
+    pub fn latest_admin_locale(&self) -> Result<Option<String>, PanelError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT u.locale FROM sessions s JOIN panel_users u ON u.id = s.user_id \
+                 WHERE u.active = 1 AND u.role IN ('owner', 'admin') \
+                   AND u.locale IS NOT NULL AND u.locale <> '' AND s.expires_at > ?1 \
+                 ORDER BY s.last_seen DESC, s.rowid DESC LIMIT 1",
+                params![now_unix()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?)
+    }
+
     pub fn list_users(&self) -> Result<Vec<UserView>, PanelError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -1742,6 +1759,35 @@ mod tests {
         );
         db.set_user_locale("admin", None).unwrap();
         assert_eq!(db.find_user("admin").unwrap().unwrap().locale, None);
+    }
+
+    #[test]
+    fn latest_admin_locale_follows_most_recent_session() {
+        let (_dir, db) = temp_db();
+        let owner = db
+            .create_user(
+                "owner",
+                "owner@example.com",
+                "Very-Strong-Pass1",
+                Role::Owner,
+            )
+            .unwrap();
+        db.set_user_locale("owner", Some("en")).unwrap();
+        let admin = db
+            .create_user(
+                "admin",
+                "admin@example.com",
+                "Very-Strong-Pass1",
+                Role::Admin,
+            )
+            .unwrap();
+        db.set_user_locale("admin", Some("es")).unwrap();
+
+        db.create_session(&owner.id, 3600, "", "", None).unwrap();
+        assert_eq!(db.latest_admin_locale().unwrap().as_deref(), Some("en"));
+
+        db.create_session(&admin.id, 3600, "", "", None).unwrap();
+        assert_eq!(db.latest_admin_locale().unwrap().as_deref(), Some("es"));
     }
 
     #[test]

@@ -18,9 +18,15 @@ use rynx_panel::{AgentFinding, AgentRun, Role};
 
 use crate::state::ApiState;
 
-/// Locale used for deterministic findings and alert emails. The owner wins,
-/// then the first administrator; Spanish is the default.
+/// Locale used for deterministic findings and alert emails. It follows the
+/// most recently active owner/administrator, then the owner or first
+/// administrator, and finally Spanish.
 pub(crate) fn agent_locale(state: &ApiState) -> String {
+    if let Ok(Some(locale)) = state.db.latest_admin_locale() {
+        if !locale.is_empty() {
+            return locale;
+        }
+    }
     let Ok(users) = state.db.list_users() else {
         return "es".to_string();
     };
@@ -39,11 +45,15 @@ pub struct RunSummary {
     pub notified: usize,
 }
 
-/// Runs one analysis under the shared agent lock.
-pub async fn run_once(state: &ApiState) -> Result<RunSummary, String> {
+/// Runs one analysis under the shared agent lock. `locale` overrides the
+/// detected administrator language, so a manual run answers in the language of
+/// the administrator who triggered it.
+pub async fn run_once(state: &ApiState, locale: Option<String>) -> Result<RunSummary, String> {
     let _guard = state.agent_lock.lock().await;
     let started_at = now_rfc3339();
-    let locale = agent_locale(state);
+    let locale = locale
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| agent_locale(state));
     let snapshot = collect::collect(state, state.cfg.agent.max_events).await;
     if snapshot.system.is_none() && snapshot.services.is_empty() && snapshot.programs.is_empty() {
         let run = AgentRun {
@@ -140,7 +150,7 @@ pub fn spawn(state: ApiState) {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(20)).await;
         loop {
-            match run_once(&state).await {
+            match run_once(&state, None).await {
                 Ok(summary) => tracing::info!(
                     findings = summary.total_findings,
                     new = summary.new_findings,
