@@ -252,49 +252,23 @@ async fn run_as_user(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn clear_docroot(home: &Path, docroot: &Path) -> ExecResult<()> {
+/// Removes the installer's dedicated document root so a retry starts clean.
+/// The caller has already verified that the path is `public_html/<domain>`.
+fn reset_docroot(home: &Path, docroot: &Path, owner: &User) -> ExecResult<()> {
     if !docroot.starts_with(home) {
         return Err(ExecError::InvalidInput(
             "the document root escapes the account home".into(),
         ));
     }
-    let entries = std::fs::read_dir(docroot).map_err(|err| {
-        ExecError::Io(format!(
-            "cannot read the document root {}: {err}",
+    let _identity = switch_fs_identity(owner.uid.as_raw(), owner.gid.as_raw())?;
+    match std::fs::remove_dir_all(docroot) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(ExecError::Io(format!(
+            "cannot reset the document root {}: {err}",
             docroot.display()
-        ))
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|err| {
-            ExecError::Io(format!(
-                "cannot read the document root {}: {err}",
-                docroot.display()
-            ))
-        })?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let file_type = entry.file_type().map_err(|err| {
-            ExecError::Io(format!(
-                "cannot inspect {}/{}: {err}",
-                docroot.display(),
-                name
-            ))
-        })?;
-        if matches!(name.as_ref(), "index.html" | "index.php") && file_type.is_file() {
-            std::fs::remove_file(entry.path()).map_err(|err| {
-                ExecError::Io(format!(
-                    "cannot remove {}/{}: {err}",
-                    docroot.display(),
-                    name
-                ))
-            })?;
-            continue;
-        }
-        return Err(ExecError::InvalidInput(
-            "the document root must be empty before installing an application".into(),
-        ));
+        ))),
     }
-    Ok(())
 }
 
 fn write_owned_file(path: &Path, data: &[u8], uid: Uid, gid: Gid) -> ExecResult<()> {
@@ -1159,11 +1133,13 @@ impl Executor for RealExecutor {
     ) -> ExecResult<String> {
         let home = self.home(&spec.username);
         let docroot = home.join(&spec.docroot);
-        clear_docroot(&home, &docroot)?;
-        let php = format!("php{}", spec.php_version);
         let owner = User::from_name(&spec.username)
             .map_err(|err| ExecError::Io(err.to_string()))?
             .ok_or_else(|| ExecError::MissingAccount(spec.username.clone()))?;
+        reset_docroot(&home, &docroot, &owner)?;
+        self.ensure_docroot(&spec.username, owner.uid.as_raw(), &docroot)
+            .await?;
+        let php = format!("php{}", spec.php_version);
 
         match spec.app {
             InstallerApp::Wordpress => {

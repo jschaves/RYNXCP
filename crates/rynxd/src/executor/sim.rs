@@ -462,8 +462,10 @@ impl Executor for SimExecutor {
         _archive: Option<&Path>,
     ) -> ExecResult<String> {
         let docroot = self.home(&spec.username).join(&spec.docroot);
+        if docroot.exists() {
+            std::fs::remove_dir_all(&docroot)?;
+        }
         std::fs::create_dir_all(&docroot)?;
-        let _ = std::fs::remove_file(docroot.join("index.html"));
         match spec.app {
             InstallerApp::Wordpress => {
                 write_managed(

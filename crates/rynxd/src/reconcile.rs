@@ -879,14 +879,7 @@ impl Reconciler {
             }
         };
 
-        let content = {
-            let mut render_spec = spec.clone();
-            let ftp_host = format!("ftp.{}", spec.domain);
-            if !render_spec.aliases.iter().any(|alias| alias == &ftp_host) {
-                render_spec.aliases.push(ftp_host);
-            }
-            self.nginx_content(&render_spec, &docroot, app_port, php_socket.as_deref())
-        };
+        let content = self.nginx_content(spec, &docroot, app_port, php_socket.as_deref());
         self.exec
             .apply_site(&spec.domain, &content, spec.enabled)
             .await
@@ -1205,6 +1198,11 @@ impl Reconciler {
         validate_domain(&spec.domain).map_err(invalid)?;
         validate_php_version(&spec.php_version).map_err(invalid)?;
         validate_site_root(&spec.username, &spec.docroot).map_err(invalid)?;
+        if spec.docroot != format!("public_html/{}", spec.domain) {
+            return Err(WireError::invalid(
+                "installer document root must be dedicated to the domain",
+            ));
+        }
         if spec.database.len() > 64
             || !spec
                 .database
@@ -1282,10 +1280,6 @@ impl Reconciler {
         }
         let webroot = self.exec.acme_root();
         let mut domains = vec![domain.to_string()];
-        let ftp_host = format!("ftp.{domain}");
-        if !domains.contains(&ftp_host) {
-            domains.push(ftp_host);
-        }
         for alias in &website.spec.aliases {
             if !domains.contains(alias) {
                 domains.push(alias.clone());
@@ -1295,6 +1289,10 @@ impl Reconciler {
             self.dns_ensure_zone(domain, self.cfg.mail_enabled).await?;
             self.dns_render(domain).await?;
         }
+        // `ftp.<domain>` is intentionally not added automatically: when the
+        // domain uses external DNS the extra SAN fails the HTTP-01 challenge
+        // and rejects the whole certificate. Add it as an explicit alias when
+        // the record exists and is reachable.
         // Ensure the vhost serves the ACME challenge for ftp.<domain> too.
         self.apply_website(&website.spec).await?;
         self.exec

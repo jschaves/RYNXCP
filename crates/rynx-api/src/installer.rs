@@ -136,7 +136,9 @@ pub async fn start(
             version: request.php_version.clone(),
         },
         app: None,
-        docroot: "public_html".into(),
+        // Dedicated directory so retries never touch other sites that share
+        // the account's public_html.
+        docroot: format!("public_html/{domain}"),
         tls: if request.tls {
             TlsMode::LetsEncrypt
         } else {
@@ -363,7 +365,7 @@ async fn run_job(state: ApiState, id: String, prepared: Prepared, actor: String)
 
         if prepared.app == InstallerApp::Laravel {
             let mut updated = prepared.website.clone();
-            updated.docroot = "public_html/public".into();
+            updated.docroot = format!("{}/public", prepared.website.docroot);
             state
                 .daemon
                 .call(Request::WebsiteUpsert(updated), &actor)
