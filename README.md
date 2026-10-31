@@ -493,7 +493,8 @@ enabled. In local mode the file does not exist, and that is normal.
 
 Then open **Administración > Agente IA**, press **Probar proveedor** and
 **Analizar ahora**. The agent monitors `nginx`, `rynxd`, MariaDB, BIND, Postfix,
-Dovecot, OpenDKIM, Pure-FTPd, fail2ban, existing PHP-FPM pools and managed apps.
+Dovecot, OpenDKIM, Pure-FTPd, fail2ban, every installed PHP-FPM version and
+managed apps.
 A service that is `failed` or `inactive` creates a high finding.
 
 To update an existing host, re-run the same autoinstaller; it is idempotent:

@@ -103,7 +103,7 @@ Ollama must listen only on `127.0.0.1:11434`. Re-run the same installer command
 afterwards to confirm idempotency.
 
 The agent monitors `nginx`, `rynxd`, MariaDB, BIND, Postfix, Dovecot, OpenDKIM,
-Pure-FTPd, fail2ban, existing PHP-FPM pools and managed apps. A service in
+Pure-FTPd, fail2ban, every installed PHP-FPM version and managed apps. A service in
 `failed` or `inactive` state creates a high finding.
 
 To update an existing host, re-run the same autoinstaller; it clones `main`,
