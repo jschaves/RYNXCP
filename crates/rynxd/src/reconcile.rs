@@ -1198,7 +1198,7 @@ impl Reconciler {
         validate_domain(&spec.domain).map_err(invalid)?;
         validate_php_version(&spec.php_version).map_err(invalid)?;
         validate_site_root(&spec.username, &spec.docroot).map_err(invalid)?;
-        if spec.docroot != format!("public_html/{}", spec.domain) {
+        if spec.docroot != format!("sites/{}", spec.domain) {
             return Err(WireError::invalid(
                 "installer document root must be dedicated to the domain",
             ));

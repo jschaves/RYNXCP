@@ -253,7 +253,7 @@ async fn run_as_user(
 }
 
 /// Removes the installer's dedicated document root so a retry starts clean.
-/// The caller has already verified that the path is `public_html/<domain>`.
+/// The caller has already verified that the path is `sites/<domain>`.
 fn reset_docroot(home: &Path, docroot: &Path, owner: &User) -> ExecResult<()> {
     if !docroot.starts_with(home) {
         return Err(ExecError::InvalidInput(

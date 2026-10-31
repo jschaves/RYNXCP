@@ -136,9 +136,9 @@ pub async fn start(
             version: request.php_version.clone(),
         },
         app: None,
-        // Dedicated directory so retries never touch other sites that share
-        // the account's public_html.
-        docroot: format!("public_html/{domain}"),
+        // Keep installer files outside the shared public_html so other sites
+        // in the same account never expose or overwrite them.
+        docroot: format!("sites/{domain}"),
         tls: if request.tls {
             TlsMode::LetsEncrypt
         } else {

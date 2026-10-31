@@ -373,6 +373,9 @@ and installs one of the supported applications:
 
 Both installers create the PHP-FPM pool, a MariaDB database and credentials,
 apply the package limits and start a Let's Encrypt job when TLS is selected.
+Installation files live in `sites/<domain>` (Laravel serves from
+`sites/<domain>/public`), outside the account's shared `public_html`, so
+domains and subdomains never mix.
 Archives are downloaded over HTTPS into `/var/lib/rynxcp/staging`, checksummed
 and only extracted by the daemon when the path, size and SHA-256 match. Jobs run
 in the background (`GET /api/v1/installer/jobs/{id}`) so long installs do not
