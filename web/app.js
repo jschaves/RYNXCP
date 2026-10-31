@@ -597,9 +597,14 @@ async function navigate(id, silent = false) {
   $('#view-title').textContent = title;
   $('#view-subtitle').textContent = subtitle;
   if (!silent) $('#view').innerHTML = `<div class="loading">${T('Cargando…')}</div>`;
+  const previousPage = silent ? $('#view .table-wrap')?.dataset.page : null;
   try {
     await renderers[id]();
     translateUi(document.body);
+    if (previousPage) {
+      const wrap = $('#view .table-wrap');
+      if (wrap) wrap.dataset.page = previousPage;
+    }
     paginateTables();
     updateCertAlert();
   } catch (err) {
