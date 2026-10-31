@@ -53,13 +53,14 @@ reconciliation engine and UI are original.
 | phpMyAdmin | MariaDB web UI protected by the panel login gate |
 | FTP | Pure-FTPd virtual users, chrooted to the account home, read-only or read-write |
 | Backups | Home + managed configuration, retention, restore and daily timer |
+| Cron | Per-account scheduled tasks with enable/disable and delete controls |
 | Certificates | Let's Encrypt with SANs, bulk renewal and daily timer |
 | Monitoring | Per-service state/CPU/RAM/uptime and 7-day historical series |
 | Firewall | nftables rules, manual/brute-force/fail2ban banned IPs, allowlists and automatic brute-force bans |
 | Security | Argon2id, account+IP lockout, fail2ban auth log, RBAC and email two-factor authentication |
 | Antivirus | ClamAV scanning for SMTP messages and daily filesystem scans |
 | Antispam | SpamAssassin with Postfix milter integration and spam tagging |
-| AI agent | Deterministic system analysis with optional local LLM enrichment, threat/error findings and admin-only alerting |
+| AI agent | Deterministic system analysis (services, updates, resources, certificates, firewall, auth and mail filters) with optional local, external or hybrid LLM enrichment and admin-only email alerts for high/critical findings |
 | Console | Closed-list privileged actions with output and audit trail |
 | Programs | Installed software, live service state, restart/stop controls, pending updates and upgrade button |
 | Users | owner/admin/operator/viewer roles, audited impersonation and revocation |
@@ -394,8 +395,8 @@ rules are updated by the distribution's normal `sa-update` maintenance.
 The **AI agent** view runs a deterministic analyzer over the node state: failed
 services, security updates, disk/memory/load pressure, expiring certificates,
 firewall activity, authentication failures and the ClamAV/SpamAssassin journal.
-It stores deduplicated findings in `panel.db` and emails new high/critical
-findings to `smtp_alert_to` when `smtp_enabled` is configured.
+It stores deduplicated findings in `panel.db` and emails new or escalating
+high/critical findings to `smtp_alert_to` when `smtp_enabled` is configured.
 
 The agent is read-only: it never executes remediation or sends shell commands.
 Its settings live under `[agent]` in `api.toml`:
@@ -403,12 +404,12 @@ Its settings live under `[agent]` in `api.toml`:
 ```toml
 [agent]
 enabled = true
-interval_secs = 900
+interval_secs = 300
 max_events = 200
 email_alerts = true
 mode = "rules"              # rules | local | api | hybrid
 local_base_url = "http://127.0.0.1:11434/v1"
-local_model = "qwen3:8b"
+local_model = "qwen3:8b"    # the installer writes the model it selected
 local_timeout_secs = 120
 external_enabled = false    # requires an explicit administrator opt-in
 external_base_url = ""
@@ -420,11 +421,14 @@ external_max_tokens = 1200
 
 With `mode = "local"` or `"hybrid"`, the agent sends a redacted digest to an
 OpenAI-compatible endpoint (Ollama, llama.cpp). The URL must resolve to
-`localhost` or a private IP address. With `mode = "api"`, only the external
-provider is used; `mode = "hybrid"` tries the local model first and falls back
-to the external one when `external_enabled = true`. The model returns a JSON
-summary and up to five extra findings; invalid JSON, timeouts or an unreachable
-endpoint fall back to the deterministic rules.
+`localhost` or a private IP address. With `mode = "api"`, only the external LLM
+is used (deterministic rules always run); `mode = "hybrid"` tries the local
+model first and falls back to the external one when `external_enabled = true`.
+The model returns a JSON
+summary and up to five extra findings. Only `critical`, `high` and `medium`
+findings are kept; `info` and `low` are discarded so they do not clutter the
+agent view. Invalid JSON, timeouts or an unreachable endpoint fall back to the
+deterministic rules.
 
 External providers require `external_enabled = true`, an HTTPS endpoint, a
 public resolved address (private, loopback, link-local and metadata addresses
@@ -436,12 +440,13 @@ No manual setup is required: the autoinstallers accept `--agent-llm local`
 (or `RYNX_AGENT_LLM=local`) and provision Ollama, a loopback-only systemd
 service, the model and the `api.toml` settings. `--agent-model` overrides the
 model; otherwise the installer picks one based on RAM. If provisioning fails,
-the installer keeps `mode = "rules"` so the panel remains healthy. The default
+the installer falls back to `rules` (or keeps the external provider in
+`hybrid`) so the panel remains healthy. The default
 is `rules`; choose `local`, `api` or `hybrid` to enable inference.
 
 For the external provider, pass `--agent-llm api` (or `hybrid`) with
 `--agent-api-url`, `--agent-api-model` and `--agent-api-key-file`. The installer
-copies the key to `/etc/rynxcp/agent.env` (`0600`, group `rynx`); the API loads
+copies the key to `/etc/rynxcp/agent.env` (`0640`, group `rynx`); the API loads
 it through `EnvironmentFile`. External endpoints must use HTTPS and resolve to a
 public address.
 
@@ -477,19 +482,49 @@ Verify from the server (read-only diagnostics):
 systemctl status ollama
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
 ss -lntp | grep 11434
-grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
+sed -n '/^\[agent\]/,$p' /etc/rynxcp/api.toml
 systemctl show rynx-api -p EnvironmentFiles
 stat -c '%a %U %G' /etc/rynxcp/agent.env
 journalctl -u rynx-api -n 80 --no-pager
 ```
 
-Then open **Administración > Agente IA**, press **Probar proveedor** and
-**Analizar ahora**. Re-running the same autoinstaller is safe and must not
-duplicate services or configuration.
+`agent.env` is expected to be `640 root rynx` when the external provider is
+enabled. In local mode the file does not exist, and that is normal.
 
-The view includes a **Test provider** action with the endpoint, model and
-latency, and findings that stop appearing are marked as resolved automatically.
-An existing finding that increases its severity sends a new alert email.
+Then open **Administración > Agente IA**, press **Probar proveedor** and
+**Analizar ahora**. The agent monitors `nginx`, `rynxd`, MariaDB, BIND, Postfix,
+Dovecot, OpenDKIM, Pure-FTPd, fail2ban, existing PHP-FPM pools and managed apps.
+A service that is `failed` or `inactive` creates a high finding.
+
+To update an existing host, re-run the same autoinstaller; it is idempotent:
+
+```bash
+sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
+  bash /root/autoinstall.sh \
+  --host panel.example.com --email admin@example.com \
+  --agent-llm local --agent-model qwen2.5:1.5b --yes
+```
+
+To validate email delivery, stop a monitored service, run **Analizar ahora**,
+check `smtp_alert_to` and `journalctl`, then restore it:
+
+```bash
+systemctl stop mariadb
+# press Analizar ahora in the panel
+journalctl -u rynx-api -n 40 --no-pager
+systemctl start mariadb
+# press Analizar ahora again so the finding becomes resolved
+```
+
+`notified=1` in the journal confirms that the alert email was queued.
+
+The background analyzer runs every `interval_secs` (300 seconds by default) and
+checks every installed PHP-FPM version, even when no site has a pool yet. While
+the view is open it refreshes every 30 seconds, so new findings appear without a
+manual reload. The view includes a **Test provider** action with the endpoint,
+model and latency, and findings that stop appearing are marked as resolved
+automatically. An existing finding that increases its severity sends a new alert
+email.
 
 ### Agent localization
 
@@ -528,9 +563,9 @@ Guidance:
   8B ≈ 6-8 GB, plus the system, panel and mail stack. Do not size RAM only for
   the model.
 - **CPU matters.** On CPU-only hosts, prefer `qwen2.5:3b` or `1.5b`; an 8B model
-  can take much longer to load and answer. The installer auto-selects 8B only
-  above 24 GB RAM, 3B above 8 GB, otherwise 1.5B. Force a smaller model with
-  `--agent-model` if latency matters.
+  can take much longer to load and answer. The installer auto-selects 8B at
+  24 GB RAM or more, 3B at 8 GB or more, otherwise 1.5B. Force a smaller model
+  with `--agent-model` if latency matters.
 - **GPU is optional.** An NVIDIA GPU with 8 GB+ VRAM helps 8B models; 6 GB+ helps
   3B. The panel and agent do not require GPU drivers.
 - **External API is the lightest option for a busy host.** It needs only
@@ -823,8 +858,11 @@ POST       /api/v1/certs/jobs        GET    /api/v1/certs/jobs/{id}
 GET|POST   /api/v1/mail/domains       DELETE /api/v1/mail/domains/{domain}
 POST       /api/v1/mail/domains/{domain}/tls
 GET|POST   /api/v1/mail/accounts      DELETE /api/v1/mail/accounts/{id}
+GET        /api/v1/mail/filters
 GET|POST   /api/v1/backups           DELETE /api/v1/backups/{id}
 POST       /api/v1/backups/{id}/restore
+GET        /api/v1/backups/{id}/download
+GET|POST   /api/v1/cron              DELETE /api/v1/cron/{id}
 GET        /api/v1/dns               GET    /api/v1/dns/{domain}
 POST       /api/v1/dns/{domain}/records
 DELETE     /api/v1/dns/{domain}/records/{id}
@@ -837,20 +875,27 @@ POST       /api/v1/files/rename
 GET|POST   /api/v1/ftp               DELETE /api/v1/ftp/{id}
 GET        /api/v1/monitor/services
 GET        /api/v1/monitor/history?minutes=1440
+GET        /api/v1/agent/findings
+POST       /api/v1/agent/findings/{id}/status
+POST       /api/v1/agent/run
+POST       /api/v1/agent/provider/test
 GET        /api/v1/security/auth-events
 GET        /api/v1/security/stats
 GET        /api/v1/firewall
 POST       /api/v1/firewall/rules    DELETE /api/v1/firewall/rules/{id}
 POST       /api/v1/firewall/block    DELETE /api/v1/firewall/block/{ip}
 POST       /api/v1/firewall/whitelist DELETE /api/v1/firewall/whitelist/{ip}
+GET        /api/v1/system
 GET        /api/v1/system/programs
 POST       /api/v1/system/programs/{program}/{action}
 GET        /api/v1/system/updates    POST   /api/v1/system/updates/apply
 GET        /api/v1/system/email      POST   /api/v1/system/email/test
 POST       /api/v1/console
+GET        /api/v1/audit
 GET|POST   /api/v1/users             PATCH|DELETE /api/v1/users/{username}
 GET|POST   /api/v1/packages          PATCH|DELETE /api/v1/packages/{id}
 GET        /api/v1/packages/assignments
+GET        /api/v1/packages/me
 PATCH      /api/v1/packages/assignments/{account}
 POST       /api/v1/reconcile
 ```

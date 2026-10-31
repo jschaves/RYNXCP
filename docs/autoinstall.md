@@ -59,7 +59,7 @@ sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
 | `--agent-model <name>` | Ollama model for local/hybrid; defaults to a model sized for host RAM. |
 | `--agent-api-url <url>` | External HTTPS OpenAI-compatible endpoint for `api`/`hybrid`. |
 | `--agent-api-model <name>` | External model name for `api`/`hybrid`. |
-| `--agent-api-key-file <path>` | File containing the external API key; copied to `/etc/rynxcp/agent.env` (`0600`, group `rynx`). |
+| `--agent-api-key-file <path>` | File containing the external API key; copied to `/etc/rynxcp/agent.env` (`0640`, group `rynx`). |
 | `--no-tls` | Do not request a Let's Encrypt certificate. |
 | `--repo <url>` | RYNXCP Git repository. |
 | `--ref <ref>` | Branch/tag to install (default `main`). |
@@ -95,12 +95,29 @@ Read-only checks:
 systemctl status ollama
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
 ss -lntp | grep 11434
-grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
+sed -n '/^\[agent\]/,$p' /etc/rynxcp/api.toml
 journalctl -u rynx-api -n 80 --no-pager
 ```
 
 Ollama must listen only on `127.0.0.1:11434`. Re-run the same installer command
 afterwards to confirm idempotency.
+
+The agent monitors `nginx`, `rynxd`, MariaDB, BIND, Postfix, Dovecot, OpenDKIM,
+Pure-FTPd, fail2ban, existing PHP-FPM pools and managed apps. A service in
+`failed` or `inactive` state creates a high finding.
+
+To update an existing host, re-run the same autoinstaller; it clones `main`,
+rebuilds and reapplies the configuration:
+
+```bash
+sudo RYNX_ADMIN_PASSWORD='Strong-Pass1' \
+  bash /root/autoinstall.sh \
+  --host panel.tudominio.com \
+  --email admin@tudominio.com \
+  --agent-llm local \
+  --agent-model qwen2.5:1.5b \
+  --yes
+```
 
 External providers are opt-in through the same installer. Put the key in a
 temporary file first:
@@ -114,7 +131,7 @@ sudo bash /root/autoinstall.sh --agent-llm api \
   --agent-api-key-file /root/provider.key
 ```
 
-The key file is copied to `/etc/rynxcp/agent.env` with mode `0600` and group
+The key file is copied to `/etc/rynxcp/agent.env` with mode `0640` and group
 `rynx`; `rynx-api.service` loads it through `EnvironmentFile`. The installer
 requires HTTPS, and the daemon runtime rejects private, loopback, link-local and
 metadata addresses while pinning the resolved public IP. `--agent-llm hybrid`
@@ -196,19 +213,22 @@ provisioned. These commands are diagnostics only:
 systemctl status ollama
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
 ss -lntp | grep 11434
-grep -A14 '^\[agent\]' /etc/rynxcp/api.toml
+sed -n '/^\[agent\]/,$p' /etc/rynxcp/api.toml
 journalctl -u rynx-api -n 80 --no-pager
 ```
 
 Open **Administración > Agente IA**, press **Probar proveedor** and then
 **Analizar ahora**. For `--agent-llm api`, verify that
-`/etc/rynxcp/agent.env` exists with mode `0600` and that `rynx-api.service`
+`/etc/rynxcp/agent.env` exists with mode `0640` and that `rynx-api.service`
 loads it:
 
 ```bash
 systemctl show rynx-api -p EnvironmentFiles
 stat -c '%a %U %G' /etc/rynxcp/agent.env
 ```
+
+Expected: `640 root rynx`. In local mode the file does not exist, which is
+normal.
 
 The provider test shows the endpoint, model and latency. No manual model
 download, service or configuration edit is required.
@@ -219,11 +239,15 @@ run **Analizar ahora** and check `smtp_alert_to`; then restore it:
 ```bash
 systemctl stop mariadb
 # press Analizar ahora in the panel
+journalctl -u rynx-api -n 40 --no-pager
 systemctl start mariadb
 # press Analizar ahora again so the finding becomes resolved
 ```
 
-Re-run the same installer command to confirm the provisioning is idempotent.
+`notified=1` in the journal confirms that the alert email was queued. If
+delivery fails, check `journalctl -u postfix -n 60 --no-pager` and `mailq`
+(outbound port 25 is blocked on some VPS providers).
+
 Keys must never appear in logs; `agent.env` stays `0640 root:rynx`.
 
 ## Security notes

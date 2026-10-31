@@ -333,7 +333,7 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_secs: 900,
+            interval_secs: 300,
             max_events: 200,
             email_alerts: true,
             mode: "rules".into(),

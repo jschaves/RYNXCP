@@ -2594,6 +2594,11 @@ impl Reconciler {
             .into_iter()
             .map(|pool| pool.spec.version)
             .collect();
+        // Monitor every installed PHP-FPM version, even when no site has a
+        // pool for it yet (for example the version used by the panel webmail).
+        if let Ok(installed) = self.exec.php_versions().await {
+            versions.extend(installed);
+        }
         versions.sort();
         versions.dedup();
         for version in versions {

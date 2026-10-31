@@ -17,6 +17,9 @@ const S = {
   files: { domain: '', path: '', entries: [] },
 };
 
+let agentPollTimer = null;
+const AGENT_POLL_MS = 30000;
+
 const RUNTIMES = {
   static: { label: 'Sitio estático', short: 'Static', versions: [], commands: [] },
   php: { label: 'PHP (FPM)', short: 'PHP', versions: ['8.5', '8.4', '8.3', '8.2', '8.1'], commands: [] },
@@ -581,15 +584,19 @@ const renderers = {
   system: renderSystem,
 };
 
-async function navigate(id) {
+async function navigate(id, silent = false) {
   if (!renderers[id]) id = 'overview';
+  if (agentPollTimer) {
+    clearTimeout(agentPollTimer);
+    agentPollTimer = null;
+  }
   S.current = id;
   const token = ++S.navToken;
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === id));
   const [title, subtitle] = TITLES[id];
   $('#view-title').textContent = title;
   $('#view-subtitle').textContent = subtitle;
-  $('#view').innerHTML = `<div class="loading">${T('Cargando…')}</div>`;
+  if (!silent) $('#view').innerHTML = `<div class="loading">${T('Cargando…')}</div>`;
   try {
     await renderers[id]();
     translateUi(document.body);
@@ -599,7 +606,22 @@ async function navigate(id) {
     if (token !== S.navToken) return;
     $('#view').innerHTML = `<div class="card empty"><strong>No se pudo cargar la vista</strong><span>${esc(err.message)}</span></div>`;
     translateUi(document.body);
+  } finally {
+    if (id === 'agent' && token === S.navToken) scheduleAgentPoll();
   }
+}
+
+function scheduleAgentPoll() {
+  if (agentPollTimer) clearTimeout(agentPollTimer);
+  agentPollTimer = setTimeout(() => {
+    agentPollTimer = null;
+    if (S.current !== 'agent') return;
+    if (document.hidden) {
+      scheduleAgentPoll();
+      return;
+    }
+    navigate('agent', true);
+  }, AGENT_POLL_MS);
 }
 
 async function refresh() {

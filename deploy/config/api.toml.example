@@ -50,7 +50,7 @@ session_idle_secs = 3600
 # remain disabled unless wired in a later release.
 [agent]
 enabled = true
-interval_secs = 900
+interval_secs = 300
 max_events = 200
 email_alerts = true
 mode = "rules"

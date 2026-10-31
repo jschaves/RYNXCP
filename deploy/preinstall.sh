@@ -374,7 +374,7 @@ configure_agent() {
   local mode="$1" model="$2" mem_kb
   ensure_toml_section "$API_CONF" "agent"
   set_toml "$API_CONF" "enabled" "true"
-  set_toml "$API_CONF" "interval_secs" "900"
+  set_toml "$API_CONF" "interval_secs" "300"
   set_toml "$API_CONF" "max_events" "200"
   set_toml "$API_CONF" "email_alerts" "true"
   set_toml "$API_CONF" "mode" "\"$mode\""
