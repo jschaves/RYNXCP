@@ -1990,6 +1990,16 @@ async function renderApps() {
     table(['Aplicación', 'Runtime', 'Escucha', 'Comando', 'Estado', ''], rows, 'Node, Python, Ruby, Java, .NET y Go se ejecutan bajo systemd.');
 }
 
+const INSTALLER_STATUS_LABELS = {
+  running: 'En cola',
+  'creating website': 'Creando el sitio',
+  'creating database': 'Creando la base de datos',
+  downloading: 'Descargando WordPress',
+  installing: 'Instalando la aplicación',
+  succeeded: 'Completado',
+  failed: 'Error',
+};
+
 async function renderInstaller() {
   const [, versionsData] = await Promise.all([
     loadList('accounts'),
@@ -2015,7 +2025,7 @@ async function renderInstaller() {
         <div class="cell-title">${esc(item.title)}</div>
         <p class="muted small">${esc(item.text)}</p>
         <p class="muted small">Crea un sitio nuevo con PHP-FPM, base de datos y certificado TLS.</p>
-        ${writable ? `<button class="btn primary" data-action="installer-new" data-id="${item.app}">Instalar ${esc(item.title)}</button>` : ''}
+        ${writable ? `<button class="btn primary" data-action="installer-new" data-id="${item.app}">${esc(TF('Instalar {app}', { app: item.title }))}</button>` : ''}
       </div>`,
     )
     .join('');
@@ -2037,7 +2047,7 @@ function openInstallerModal(app) {
     label: version,
   }));
   openModal({
-    title: wordpress ? 'Instalar WordPress' : 'Instalar Laravel',
+    title: wordpress ? T('Instalar WordPress') : T('Instalar Laravel'),
     submitLabel: 'Instalar',
     html: `<div class="form-grid">
       ${fSelect('username', 'Cuenta', accountOptions(false), { required: true })}
@@ -2067,12 +2077,12 @@ function openInstallerModal(app) {
       form.querySelector('.modal-actions').before(status);
       let current = job;
       while (current && current.status !== 'succeeded' && current.status !== 'failed') {
-        status.textContent = `${current.status}: ${current.message}`;
+        status.textContent = T(INSTALLER_STATUS_LABELS[current.status] || current.status);
         await new Promise((resolve) => setTimeout(resolve, 2000));
         current = await api(`/api/v1/installer/jobs/${encodeURIComponent(current.id)}`);
       }
       if (!current || current.status !== 'succeeded') {
-        throw new Error(current ? current.message : 'La instalación falló');
+        throw new Error(current ? current.message : T('La instalación falló'));
       }
       const lines = [
         `${T('Sitio')}: ${current.url}`,

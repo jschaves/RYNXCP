@@ -29,6 +29,12 @@ feature end to end, and cleans up after itself.
 
 ## Frontend rules
 
+- Every new UI string must be translated into all ten languages in
+  `web/i18n.js`: Spanish is the source key and `en`, `pt`, `fr`, `ar`, `ru`,
+  `zh`, `ja`, `it` and `de` must all contain the entry. Never ship a
+  Spanish-only label, button, modal title, toast or status message.
+- Backend agent findings and emails must follow the same rule through
+  `crates/rynx-api/src/agent/messages.rs`.
 - Every list or table view must be paginated. Use the shared `table()` helper and
   `paginateTables()` in `web/app.js` (20 rows per page); do not render unbounded
   lists.
