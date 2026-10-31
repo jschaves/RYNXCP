@@ -107,12 +107,19 @@ impl Executor for SimExecutor {
         let home = self.home(&spec.username);
         for dir in [
             home.clone(),
-            home.join("public_html"),
             home.join("logs"),
             home.join("apps"),
             home.join("tmp"),
         ] {
             std::fs::create_dir_all(&dir)?;
+        }
+        let legacy_public = home.join("public_html");
+        if legacy_public.is_dir()
+            && std::fs::read_dir(&legacy_public)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false)
+        {
+            let _ = std::fs::remove_dir(&legacy_public);
         }
         std::fs::create_dir_all(self.users_dir())?;
         write_text(

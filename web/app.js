@@ -1159,7 +1159,11 @@ async function renderWebsites() {
       td(spec.tls === 'disabled' ? badge('sin tls', 'warn') : badge(spec.tls === 'lets_encrypt' ? 'let\'s encrypt' : 'manual', 'info')),
       td(spec.enabled ? badge('activo', 'ok') : badge('deshabilitado', 'warn')),
       td(`<span class="mono small">${esc(spec.docroot)}</span>`),
-      td(writable ? [btn('Editar', 'website-edit', spec.domain), btn('Eliminar', 'website-delete', spec.domain, 'tiny danger')].join(' ') : '', 'actions'),
+      td([
+        btn('Archivos', 'website-files', spec.domain),
+        writable ? btn('Editar', 'website-edit', spec.domain) : '',
+        writable ? btn('Eliminar', 'website-delete', spec.domain, 'tiny danger') : '',
+      ].filter(Boolean).join(' '), 'actions'),
     ];
   });
 
@@ -1524,9 +1528,7 @@ async function renderFiles() {
   S.files.path = data.path || '';
 
   const write = canWrite();
-  const siteSelect = sites.length > 1
-    ? `<select id="file-site" class="file-site">${sites.map((site) => `<option value="${esc(site.spec.domain)}"${site.spec.domain === S.files.domain ? ' selected' : ''}>${esc(site.spec.domain)}</option>`).join('')}</select>`
-    : `<span class="chip">${esc(S.files.domain)}</span>`;
+  const siteLabel = `<span class="chip">${esc(S.files.domain)}</span>`;
   const actions = [
     write ? `<button class="btn primary" data-action="file-new-folder">${esc(T('Nueva carpeta'))}</button>` : '',
     write ? `<label class="btn ghost">${esc(T('Subir archivo'))}<input type="file" id="file-upload" hidden multiple></label>` : '',
@@ -1560,19 +1562,11 @@ async function renderFiles() {
     : '';
   $('#view').innerHTML =
     sectionHead('Archivos', actions) +
-    `<div class="file-toolbar">${siteSelect}${fileBreadcrumb(S.files.path)}</div>` +
+    `<div class="file-toolbar">${siteLabel}${fileBreadcrumb(S.files.path)}</div>` +
     `<div class="file-drop" id="file-drop">${dropHint}<div class="file-upload-status" id="file-upload-status" hidden></div>` +
     table(['Nombre', 'Tipo', 'Tamaño', 'Modificado', ''], rows, 'Esta carpeta está vacía.') +
     '</div>';
 
-  const siteSelectEl = $('#file-site');
-  if (siteSelectEl) {
-    siteSelectEl.addEventListener('change', () => {
-      S.files.domain = siteSelectEl.value;
-      S.files.path = '';
-      navigate('files');
-    });
-  }
   const upload = $('#file-upload');
   if (upload) {
     upload.addEventListener('change', async () => {
@@ -2918,6 +2912,10 @@ async function handleAction(action, id) {
       return deleteFile(id);
     case 'file-new-folder':
       return openNewFolderModal();
+    case 'website-files':
+      S.files.domain = id;
+      S.files.path = '';
+      return navigate('files');
     case 'website-delete': {
       if (!confirm(TF('¿Eliminar el sitio {id} y todo lo asociado (base de datos, correo/webmail, FTP, certificado y DNS)?', { id }))) return;
       await api(`/api/v1/websites/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -3394,7 +3392,7 @@ function openCronModal() {
     html: `<div class="form-grid">
       ${fSelect('username', 'Cuenta', accounts, { required: true })}
       ${fInput('schedule', 'Programación', { required: true, value: '*/5 * * * *', placeholder: '*/5 * * * *', help: 'Cinco campos: minuto hora día mes día-semana.' })}
-      <div class="full">${field('command', 'Comando', '<textarea name="command" rows="3" required placeholder="php /home/cuenta/public_html/artisan schedule:run"></textarea>', 'Se ejecuta con el shell y el usuario de la cuenta; no puede contener % ni saltos de línea.', true)}</div>
+      <div class="full">${field('command', 'Comando', '<textarea name="command" rows="3" required placeholder="php /home/cuenta/example.com/public_html/artisan schedule:run"></textarea>', 'Se ejecuta con el shell y el usuario de la cuenta; no puede contener % ni saltos de línea.', true)}</div>
       <div class="full">${fCheck('enabled', 'Activa', true)}</div>
     </div>`,
     onSubmit: async (form) => {

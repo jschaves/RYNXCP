@@ -662,17 +662,23 @@ impl Executor for RealExecutor {
             .map(|user| user.gid.as_raw());
         let (home_gid, home_mode) = web_gid.map_or((gid, 0o711), |web| (web, 0o710));
         set_owner_mode(account_home.as_raw_fd(), account_uid, home_gid, home_mode)?;
-        for (relative, mode) in [
-            ("public_html", 0o755),
-            ("logs", 0o750),
-            ("apps", 0o750),
-            ("tmp", 0o700),
-        ] {
+        for (relative, mode) in [("logs", 0o750), ("apps", 0o750), ("tmp", 0o700)] {
             ensure_dir_components(&account_home, Path::new(relative), mode, account_uid, gid)?;
         }
-        if let Some(web_gid) = web_gid {
-            let public = account_home.open_dir("public_html")?;
-            set_owner_mode(public.as_raw_fd(), account_uid, web_gid, 0o2750)?;
+        // Legacy accounts may still have a shared public_html. Keep it when it
+        // contains files; remove it when it is an empty leftover.
+        let legacy_public = home.join("public_html");
+        if legacy_public.is_dir() {
+            let empty = std::fs::read_dir(&legacy_public)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false);
+            if empty {
+                let _ = std::fs::remove_dir(&legacy_public);
+            } else if let Some(web_gid) = web_gid {
+                if let Ok(public) = account_home.open_dir("public_html") {
+                    set_owner_mode(public.as_raw_fd(), account_uid, web_gid, 0o2750)?;
+                }
+            }
         }
 
         // PHP sessions are system-managed. Keep them outside the account home
